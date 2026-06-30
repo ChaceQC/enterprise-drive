@@ -46,6 +46,7 @@ uv run pytest
 - outbox dispatcher，支持成功发送、失败重试和 dead 状态。
 - `spaces`、`nodes`、`file_blobs`、`file_versions` 基础表和迁移。
 - 空间创建时同步创建空间根目录节点。
+- `space_members` 基础表和迁移，空间创建时同步写入创建者的 `owner` 角色成员关系。
 - 文件夹创建、目录子节点列表和签名 cursor pagination。
 - 文件树节点重命名、移动、删除到回收站、恢复和彻底删除。
 - 空间创建、文件夹创建、重命名、移动、删除、恢复和彻底删除审计事件。
@@ -90,7 +91,7 @@ uv run pytest
 - `DELETE /api/v1/files/{node_id}/purge`
 - `POST /api/v1/files/{node_id}/restore`
 
-当前空间和文件树接口使用临时访问边界：只允许当前租户下的空间拥有者访问。空间成员、目录 ACL、继承权限和拒绝优先策略将在 Sprint 4 权限系统中接入。
+当前空间和文件树接口使用临时访问边界：只允许当前租户下的空间拥有者访问。`space_members` 已作为 Sprint 4 的成员事实表落地，创建空间时会写入 owner 成员；空间成员访问检查、目录 ACL、继承权限和拒绝优先策略将在后续步骤接入。
 
 文件夹名称会进行 Unicode NFC 归一化并去除首尾空白，禁止 `/`、`\`、NUL、控制字符和路径穿越片段。同一目录下未删除节点的名称由数据库唯一索引兜底，根目录由 `tenant_id + space_id` 唯一索引兜底。
 

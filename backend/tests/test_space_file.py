@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings
 from app.modules.audit.models import AuditLog, OutboxEvent
 from app.modules.file.models import Node
+from app.modules.permission.models import SpaceMember
 from app.modules.quota.models import QuotaAccount
 from app.modules.space.models import Space
 from tests.helpers import (
@@ -53,6 +54,7 @@ async def test_create_space_creates_root_node_and_audit(
     async with session_factory() as session:
         space = (await session.execute(select(Space))).scalar_one()
         root_node = (await session.execute(select(Node))).scalar_one()
+        space_member = (await session.execute(select(SpaceMember))).scalar_one()
         quota_account = (await session.execute(select(QuotaAccount))).scalar_one()
         audit_logs = (
             (await session.execute(select(AuditLog).order_by(AuditLog.created_at, AuditLog.action)))
@@ -65,6 +67,11 @@ async def test_create_space_creates_root_node_and_audit(
     assert root_node.parent_id is None
     assert root_node.node_type == "folder"
     assert root_node.name == "root"
+    assert space_member.tenant_id == space.tenant_id
+    assert space_member.space_id == space.id
+    assert space_member.user_id == space.owner_id
+    assert space_member.role == "owner"
+    assert space_member.created_by == space.owner_id
     assert quota_account.tenant_id == space.tenant_id
     assert quota_account.owner_type == "space"
     assert quota_account.owner_id == space.id

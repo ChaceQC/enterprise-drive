@@ -61,7 +61,7 @@
 
 ### Sprint 4：权限系统
 
-- 空间成员和角色。
+- 空间成员和角色。（已完成 `space_members` 用户成员基础表，创建空间时写入 owner 成员）
 - 目录 ACL、权限继承、拒绝优先。
 - 权限缓存和失效事件。
 - 高危操作二次查库。
@@ -82,4 +82,4 @@
 
 ## 5. 当前下一步
 
-2026-07-01 代码审计发现的实现边界问题已完成首轮整改：浏览器认证改为 BFF + HttpOnly Cookie Session，移除 JWT/refresh token 兼容路径；对象存储默认实现已移除 `boto3/botocore` 并改用 MinIO Python SDK；Redis 固定窗口限流已改为 Lua 原子脚本。容量校准草稿已从 `stash@{0}: paused quota reconciliation draft` 恢复并整理为 `quota.reconcile_space_usage` 维护任务；blob/object 垃圾回收已整理为 `file.cleanup_unreferenced_blobs` 维护任务。下一步进入 Sprint 4 权限系统，优先补空间成员、空间角色、目录 ACL、继承和拒绝优先策略。
+2026-07-01 代码审计发现的实现边界问题已完成首轮整改：浏览器认证改为 BFF + HttpOnly Cookie Session，移除 JWT/refresh token 兼容路径；对象存储默认实现已移除 `boto3/botocore` 并改用 MinIO Python SDK；Redis 固定窗口限流已改为 Lua 原子脚本。容量校准草稿已从 `stash@{0}: paused quota reconciliation draft` 恢复并整理为 `quota.reconcile_space_usage` 维护任务；blob/object 垃圾回收已整理为 `file.cleanup_unreferenced_blobs` 维护任务。Sprint 4 权限系统已开始，`space_members` 用户成员基础表和创建空间时的 owner 成员写入已落地。下一步补空间成员管理 API 与 PermissionService，将空间列表、文件树、上传和下载的临时 owner 边界逐步替换为空间成员与角色检查。

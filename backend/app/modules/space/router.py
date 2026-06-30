@@ -12,6 +12,7 @@ from app.modules.audit.repository import AuditRepository
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
 from app.modules.file.repository import FileRepository
+from app.modules.permission.repository import PermissionRepository
 from app.modules.quota.repository import QuotaRepository
 from app.modules.quota.service import QuotaService
 from app.modules.space.repository import SpaceRepository
@@ -28,6 +29,7 @@ def get_space_service(
     return SpaceService(
         repository=SpaceRepository(session),
         file_repository=FileRepository(session),
+        permission_repository=PermissionRepository(session),
         quota_service=QuotaService(
             repository=QuotaRepository(session),
             default_space_limit_bytes=settings.default_space_quota_bytes,
