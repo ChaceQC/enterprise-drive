@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from uuid import UUID
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -16,8 +18,11 @@ from app.db.session import get_db_session
 from app.infrastructure.rate_limit.testing import InMemoryFixedWindowRateLimiter
 from app.infrastructure.storage.testing import InMemoryStorageAdapter
 from app.main import create_app
+from app.modules.auth.models import User
 from app.modules.auth.repository import AuthRepository
 from app.modules.auth.service import AuthService
+from app.modules.permission.constants import SPACE_ROLE_VIEWER
+from app.modules.permission.models import SpaceMember
 
 
 @pytest.fixture
@@ -120,6 +125,35 @@ async def create_second_user(
             password_hash=hash_password(password),
         )
         await repository.commit()
+
+
+async def add_space_member(
+    session_factory: async_sessionmaker[AsyncSession],
+    *,
+    tenant_id: str,
+    space_id: str,
+    username: str = "member",
+    role: str = SPACE_ROLE_VIEWER,
+) -> None:
+    async with session_factory() as session:
+        user = (
+            await session.execute(
+                select(User).where(
+                    User.tenant_id == UUID(tenant_id),
+                    User.username == username,
+                )
+            )
+        ).scalar_one()
+        session.add(
+            SpaceMember(
+                tenant_id=user.tenant_id,
+                space_id=UUID(space_id),
+                user_id=user.id,
+                role=role,
+                created_by=None,
+            )
+        )
+        await session.commit()
 
 
 async def create_space(

@@ -91,7 +91,7 @@ uv run pytest
 - `DELETE /api/v1/files/{node_id}/purge`
 - `POST /api/v1/files/{node_id}/restore`
 
-当前空间和文件树接口使用临时访问边界：只允许当前租户下的空间拥有者访问。`space_members` 已作为 Sprint 4 的成员事实表落地，创建空间时会写入 owner 成员；空间成员访问检查、目录 ACL、继承权限和拒绝优先策略将在后续步骤接入。
+当前空间和文件树接口已开始使用 `PermissionService` 的空间级成员角色检查：空间列表按 `space_members` 成员关系返回；文件列表需要 `list`，创建文件夹需要 `upload`，重命名和移动需要 `update`，删除和彻底删除需要 `delete`，恢复需要 `restore`。目录 ACL、继承权限和拒绝优先策略将在后续步骤接入。
 
 文件夹名称会进行 Unicode NFC 归一化并去除首尾空白，禁止 `/`、`\`、NUL、控制字符和路径穿越片段。同一目录下未删除节点的名称由数据库唯一索引兜底，根目录由 `tenant_id + space_id` 唯一索引兜底。
 
@@ -135,7 +135,7 @@ uv run pytest
 - `DRIVE_DOWNLOAD_PRESIGN_RATE_LIMIT_COUNT`
 - `DRIVE_DOWNLOAD_PRESIGN_RATE_LIMIT_WINDOW_SECONDS`
 
-当前上传接口沿用临时空间拥有者访问边界。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除到回收站不释放容量；彻底删除回收站节点时通过原子 update 扣减 `quota_accounts.used_bytes`，并写入 `reason=file_purged`、`ref_type=node` 的负向容量流水。容量校准任务 `quota.reconcile_space_usage` 使用 PostgreSQL 中的文件版本记录作为事实来源，默认只报告空间容量快照和账本漂移，传入 `repair=true` 时会修复缺失的空间容量账户、校准 `quota_accounts.used_bytes`，并用 `reason=quota_reconciled` 写入账本差额和 `quota.reconciled` 系统审计。彻底删除接口不在用户请求事务中同步删除最终对象；`file.cleanup_unreferenced_blobs` 会扫描 active、`ref_count=0` 且无 `file_versions` 引用的 blob，先标记为 `deleting`，再删除对象存储内容和 DB 元数据。对象存储删除失败会恢复为 `active` 并计入 `storage_errors`；对象存储中没有 DB 元数据的孤儿对象扫描仍需后续治理任务补齐。用户/租户维度配额将在后续步骤补齐。
+当前上传接口已通过 `PermissionService` 校验空间级 `upload` 权限。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除到回收站不释放容量；彻底删除回收站节点时通过原子 update 扣减 `quota_accounts.used_bytes`，并写入 `reason=file_purged`、`ref_type=node` 的负向容量流水。容量校准任务 `quota.reconcile_space_usage` 使用 PostgreSQL 中的文件版本记录作为事实来源，默认只报告空间容量快照和账本漂移，传入 `repair=true` 时会修复缺失的空间容量账户、校准 `quota_accounts.used_bytes`，并用 `reason=quota_reconciled` 写入账本差额和 `quota.reconciled` 系统审计。彻底删除接口不在用户请求事务中同步删除最终对象；`file.cleanup_unreferenced_blobs` 会扫描 active、`ref_count=0` 且无 `file_versions` 引用的 blob，先标记为 `deleting`，再删除对象存储内容和 DB 元数据。对象存储删除失败会恢复为 `active` 并计入 `storage_errors`；对象存储中没有 DB 元数据的孤儿对象扫描仍需后续治理任务补齐。用户/租户维度配额将在后续步骤补齐。
 
 维护任务可通过 Celery 任务调用：
 
@@ -150,4 +150,4 @@ uv run pytest
 
 下载预签名已接入基础限流，按 `tenant + user + node + IP` 维度计数。触发限流时返回 HTTP 429，错误码为 `RATE_LIMITED`。
 
-当前下载接口沿用临时空间拥有者访问边界：非空间拥有者返回统一的 `NODE_NOT_FOUND`，目录节点返回 `NODE_NOT_FILE`，缺失当前版本返回 `FILE_VERSION_NOT_FOUND`。下载成功与拒绝都会写入 `file.downloaded` 审计事件；后续 Sprint 4 接入空间成员、目录 ACL、继承权限和拒绝优先策略后，将由权限模块替换该临时边界。
+当前下载接口已通过 `PermissionService` 校验空间级 `download` 权限：非空间成员或无下载权限返回统一的 `NODE_NOT_FOUND`，目录节点返回 `NODE_NOT_FILE`，缺失当前版本返回 `FILE_VERSION_NOT_FOUND`。下载成功与拒绝都会写入 `file.downloaded` 审计事件；后续 Sprint 4 接入目录 ACL、继承权限和拒绝优先策略后，会在空间角色基础上继续收紧节点级判断。

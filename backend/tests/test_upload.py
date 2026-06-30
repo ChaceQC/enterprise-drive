@@ -15,13 +15,15 @@ from app.modules.file.models import FileBlob, FileVersion, Node
 from app.modules.quota.models import QuotaAccount, QuotaLedger
 from app.modules.upload.models import UploadPart, UploadSession
 from tests.helpers import (
-    client as client,
-)
-from tests.helpers import (
+    add_space_member,
     create_folder,
+    create_second_user,
     create_space,
     login,
     seed_admin,
+)
+from tests.helpers import (
+    client as client,
 )
 from tests.helpers import (
     session_factory as session_factory,
@@ -565,6 +567,46 @@ async def test_init_upload_rejects_when_space_quota_exceeded(
     assert quota_account.limit_bytes == 512
     assert quota_account.used_bytes == 0
     assert ledgers == []
+    assert sessions == []
+
+
+@pytest.mark.asyncio
+async def test_init_upload_rejects_space_viewer_without_upload_permission(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    admin_token = await login(client)
+    space = await create_space(client, admin_token, slug="viewer-upload-denied-space")
+    await create_second_user(session_factory)
+    await add_space_member(
+        session_factory,
+        tenant_id=str(space["tenant_id"]),
+        space_id=str(space["id"]),
+        role="viewer",
+    )
+    member_token = await login(client, username="member", password="member-password")
+
+    response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"X-CSRF-Token": member_token},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "file_name": "viewer-denied.bin",
+            "size_bytes": 1024,
+            "content_hash": "8" * 64,
+            "hash_algo": "sha256",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.json()["code"] == "SPACE_NOT_FOUND"
+
+    async with session_factory() as session:
+        sessions = (await session.execute(select(UploadSession))).scalars().all()
+
     assert sessions == []
 
 

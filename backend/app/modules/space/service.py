@@ -107,9 +107,9 @@ class SpaceService:
         page_size: int,
     ) -> SpaceListResponse:
         decoded_cursor = decode_page_cursor(self.settings, cursor)
-        spaces = await self.repository.list_owned_active_spaces(
+        spaces = await self.repository.list_member_active_spaces(
             tenant_id=current_user.tenant_id,
-            owner_id=current_user.id,
+            user_id=current_user.id,
             limit=page_size + 1,
             cursor=decoded_cursor,
         )

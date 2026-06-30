@@ -12,6 +12,8 @@ from app.modules.file.audit import record_node_event
 from app.modules.file.models import Node
 from app.modules.file.repository import FileRepository
 from app.modules.file.schemas import FileDownloadUrlResponse
+from app.modules.permission.actions import ACTION_DOWNLOAD
+from app.modules.permission.service import PermissionService
 from app.modules.space.repository import SpaceRepository
 
 
@@ -21,12 +23,14 @@ class FileDownloadService:
         *,
         repository: FileRepository,
         space_repository: SpaceRepository,
+        permission_service: PermissionService,
         storage: StorageAdapter,
         settings: Settings,
         audit_service: AuditService | None = None,
     ) -> None:
         self.repository = repository
         self.space_repository = space_repository
+        self.permission_service = permission_service
         self.storage = storage
         self.settings = settings
         self.audit_service = audit_service
@@ -121,7 +125,7 @@ class FileDownloadService:
                 audit_context=audit_context,
             )
             raise ApiError("NODE_NOT_FOUND", "节点不存在或无权访问", status_code=404)
-        await self._ensure_owned_space(
+        await self._ensure_space_download_allowed(
             current_user=current_user,
             node=node,
             audit_context=audit_context,
@@ -137,23 +141,27 @@ class FileDownloadService:
             raise ApiError("NODE_NOT_FILE", "节点不是文件", status_code=400)
         return node
 
-    async def _ensure_owned_space(
+    async def _ensure_space_download_allowed(
         self,
         *,
         current_user: User,
         node: Node,
         audit_context: AuditContext | None,
     ) -> None:
-        space = await self.space_repository.get_owned_active_space(
+        space = await self.space_repository.get_active_space(
             tenant_id=current_user.tenant_id,
-            owner_id=current_user.id,
             space_id=node.space_id,
         )
-        if space is None:
+        if space is None or not await self.permission_service.can_access_space(
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+            space_id=node.space_id,
+            action=ACTION_DOWNLOAD,
+        ):
             await self._record_denied_download(
                 current_user=current_user,
                 resource_id=node.id,
-                reason="space_owner_required",
+                reason="permission_denied",
                 audit_context=audit_context,
                 metadata={"space_id": str(node.space_id)},
             )

@@ -12,12 +12,13 @@ from app.modules.permission.models import SpaceMember
 from app.modules.quota.models import QuotaAccount
 from app.modules.space.models import Space
 from tests.helpers import (
-    client as client,
-)
-from tests.helpers import (
+    add_space_member,
     create_second_user,
     login,
     seed_admin,
+)
+from tests.helpers import (
+    client as client,
 )
 from tests.helpers import (
     session_factory as session_factory,
@@ -241,7 +242,7 @@ async def test_invalid_folder_name_is_rejected(
 
 
 @pytest.mark.asyncio
-async def test_file_list_uses_owner_boundary_until_permission_module(
+async def test_space_member_can_list_space_and_files_but_viewer_cannot_write(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
@@ -264,3 +265,38 @@ async def test_file_list_uses_owner_boundary_until_permission_module(
 
     assert response.status_code == 404
     assert response.json()["code"] == "SPACE_NOT_FOUND"
+
+    await add_space_member(
+        session_factory,
+        tenant_id=space_response.json()["tenant_id"],
+        space_id=space_response.json()["id"],
+        role="viewer",
+    )
+
+    list_spaces_response = await client.get(
+        "/api/v1/spaces",
+        headers={"X-CSRF-Token": member_token},
+    )
+    list_files_response = await client.get(
+        "/api/v1/files",
+        headers={"X-CSRF-Token": member_token},
+        params={"space_id": space_response.json()["id"]},
+    )
+    create_folder_response = await client.post(
+        "/api/v1/files/folders",
+        headers={"X-CSRF-Token": member_token},
+        json={
+            "space_id": space_response.json()["id"],
+            "parent_id": space_response.json()["root_node_id"],
+            "name": "viewer-write-denied",
+        },
+    )
+
+    assert list_spaces_response.status_code == 200
+    assert [item["id"] for item in list_spaces_response.json()["items"]] == [
+        space_response.json()["id"]
+    ]
+    assert list_files_response.status_code == 200
+    assert list_files_response.json()["items"] == []
+    assert create_folder_response.status_code == 404
+    assert create_folder_response.json()["code"] == "SPACE_NOT_FOUND"

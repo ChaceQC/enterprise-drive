@@ -28,6 +28,14 @@ from app.modules.file.tree import (
     touch_node,
 )
 from app.modules.file.validators import node_name_conflict_error, normalize_node_name
+from app.modules.permission.actions import (
+    ACTION_DELETE,
+    ACTION_LIST,
+    ACTION_RESTORE,
+    ACTION_UPDATE,
+    ACTION_UPLOAD,
+)
+from app.modules.permission.service import PermissionService
 from app.modules.quota.service import QuotaService
 from app.modules.space.models import Space
 from app.modules.space.repository import SpaceRepository
@@ -39,12 +47,14 @@ class FileService:
         *,
         repository: FileRepository,
         space_repository: SpaceRepository,
+        permission_service: PermissionService,
         quota_service: QuotaService,
         settings: Settings,
         audit_service: AuditService | None = None,
     ) -> None:
         self.repository = repository
         self.space_repository = space_repository
+        self.permission_service = permission_service
         self.quota_service = quota_service
         self.settings = settings
         self.audit_service = audit_service
@@ -58,7 +68,11 @@ class FileService:
         name: str,
         audit_context: AuditContext | None = None,
     ) -> FileNodeResponse:
-        space = await self._get_owned_space(current_user=current_user, space_id=space_id)
+        space = await self._get_accessible_space(
+            current_user=current_user,
+            space_id=space_id,
+            action=ACTION_UPLOAD,
+        )
         parent_node = await self._get_parent_node(
             current_user=current_user,
             space=space,
@@ -107,7 +121,11 @@ class FileService:
         cursor: str | None,
         page_size: int,
     ) -> FileListResponse:
-        space = await self._get_owned_space(current_user=current_user, space_id=space_id)
+        space = await self._get_accessible_space(
+            current_user=current_user,
+            space_id=space_id,
+            action=ACTION_LIST,
+        )
         parent_node = await self._get_parent_node(
             current_user=current_user,
             space=space,
@@ -145,7 +163,11 @@ class FileService:
         name: str,
         audit_context: AuditContext | None = None,
     ) -> FileNodeResponse:
-        node = await self._get_owned_node(current_user=current_user, node_id=node_id)
+        node = await self._get_accessible_node(
+            current_user=current_user,
+            node_id=node_id,
+            action=ACTION_UPDATE,
+        )
         ensure_mutable_node(node)
         normalized_name = normalize_node_name(name)
         await self._ensure_name_available(
@@ -186,7 +208,11 @@ class FileService:
         new_name: str | None,
         audit_context: AuditContext | None = None,
     ) -> FileNodeResponse:
-        node = await self._get_owned_node(current_user=current_user, node_id=node_id)
+        node = await self._get_accessible_node(
+            current_user=current_user,
+            node_id=node_id,
+            action=ACTION_UPDATE,
+        )
         ensure_mutable_node(node)
         target_parent = await self._get_active_folder(
             current_user=current_user,
@@ -244,7 +270,11 @@ class FileService:
         node_id: UUID,
         audit_context: AuditContext | None = None,
     ) -> DeleteNodeResponse:
-        node = await self._get_owned_node(current_user=current_user, node_id=node_id)
+        node = await self._get_accessible_node(
+            current_user=current_user,
+            node_id=node_id,
+            action=ACTION_DELETE,
+        )
         ensure_mutable_node(node)
         subtree_nodes = await self._collect_active_subtree(node=node)
         now = utc_now()
@@ -274,9 +304,10 @@ class FileService:
         node_id: UUID,
         audit_context: AuditContext | None = None,
     ) -> PurgeNodeResponse:
-        node = await self._get_owned_node(
+        node = await self._get_accessible_node(
             current_user=current_user,
             node_id=node_id,
+            action=ACTION_DELETE,
             include_deleted=True,
         )
         ensure_mutable_node(node)
@@ -345,9 +376,10 @@ class FileService:
         new_name: str | None,
         audit_context: AuditContext | None = None,
     ) -> FileNodeResponse:
-        node = await self._get_owned_node(
+        node = await self._get_accessible_node(
             current_user=current_user,
             node_id=node_id,
+            action=ACTION_RESTORE,
             include_deleted=True,
         )
         ensure_mutable_node(node)
@@ -399,13 +431,23 @@ class FileService:
 
         return FileNodeResponse.model_validate(node)
 
-    async def _get_owned_space(self, *, current_user: User, space_id: UUID) -> Space:
-        space = await self.space_repository.get_owned_active_space(
+    async def _get_accessible_space(
+        self,
+        *,
+        current_user: User,
+        space_id: UUID,
+        action: str,
+    ) -> Space:
+        space = await self.space_repository.get_active_space(
             tenant_id=current_user.tenant_id,
-            owner_id=current_user.id,
             space_id=space_id,
         )
-        if space is None:
+        if space is None or not await self.permission_service.can_access_space(
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+            space_id=space_id,
+            action=action,
+        ):
             raise ApiError("SPACE_NOT_FOUND", "空间不存在或无权访问", status_code=404)
         return space
 
@@ -434,11 +476,12 @@ class FileService:
             raise ApiError("PARENT_NOT_FOLDER", "父节点不是文件夹", status_code=400)
         return node
 
-    async def _get_owned_node(
+    async def _get_accessible_node(
         self,
         *,
         current_user: User,
         node_id: UUID,
+        action: str,
         include_deleted: bool = False,
     ) -> Node:
         node = await self.repository.get_node_by_id(
@@ -448,7 +491,11 @@ class FileService:
         )
         if node is None:
             raise ApiError("NODE_NOT_FOUND", "节点不存在或无权访问", status_code=404)
-        await self._get_owned_space(current_user=current_user, space_id=node.space_id)
+        await self._get_accessible_space(
+            current_user=current_user,
+            space_id=node.space_id,
+            action=action,
+        )
         return node
 
     async def _get_active_folder(
@@ -460,7 +507,11 @@ class FileService:
     ) -> Node:
         return await self._get_parent_node(
             current_user=current_user,
-            space=await self._get_owned_space(current_user=current_user, space_id=space_id),
+            space=await self._get_accessible_space(
+                current_user=current_user,
+                space_id=space_id,
+                action=ACTION_UPDATE,
+            ),
             parent_id=node_id,
         )
 

@@ -51,16 +51,19 @@
 - 新增权限模块基础表 `space_members`，记录用户在空间内的 `owner`、`admin`、`editor`、`viewer` 角色，带租户、空间、用户唯一约束和角色 CHECK 约束。
 - 创建空间时会在同一事务内写入创建者的 `owner` 空间成员关系，为后续 PermissionService 替换临时 owner 边界提供事实表。
 - 补充空间创建测试，确认创建空间会同步创建根目录、容量账户、owner 成员、审计日志和 outbox event。
+- 新增 `PermissionService` 空间级角色检查，使用固定动作集合和角色白名单，不引入复杂权限表达式引擎。
+- 空间列表已改为按 `space_members` 成员关系返回；文件树、上传初始化、multipart complete 和下载已接入空间级动作检查，非成员或角色权限不足仍返回统一的 `SPACE_NOT_FOUND` / `NODE_NOT_FOUND`。
+- 补充权限接入测试，覆盖非成员不可见、viewer 可列空间和文件、viewer 不能创建文件夹或初始化上传、viewer 可下载已有文件。
 
 ### 进行中
 
-- Sprint 4 权限系统已开始；空间成员事实表和 owner 成员自动写入已完成，下一步补空间成员管理 API 与 PermissionService。
+- Sprint 4 权限系统已开始；空间成员事实表、owner 成员自动写入和空间级成员角色检查已完成，下一步补空间成员管理 API 与目录 ACL。
 
 ### 阻塞与风险
 
 - MinIO Python SDK 的 multipart create/complete/abort 在当前适配中需要调用客户端私有方法，已限定在 `infrastructure` 适配层；若后续出现兼容性、升级稳定性或批量吞吐问题，应评估更完整的开源 S3 兼容客户端或标准 HTTP/SigV4 实现。
 - 当前 Redis 限流仍是固定窗口策略，适用于上传初始化、分片签名和下载预签名的基础保护；若后续需要滑动窗口、令牌桶、多层级动态规则或管理端配置，应切换成熟限流库。
-- 当前空间、文件树、上传和下载接口仍暂以“当前租户 + 空间拥有者”作为访问边界；`space_members` 已落地但尚未接入 PermissionService，高危动作仍需后续由空间成员、目录 ACL、继承权限和拒绝优先策略替换该临时边界。
+- 当前空间、文件树、上传和下载接口已接入空间级成员角色检查；目录 ACL、继承权限、拒绝优先、权限缓存和权限变更失效事件仍未接入。
 - 过期上传清理已覆盖数据库会话终态、multipart abort 和 `uploads/...` 临时对象删除；对象复制成功但数据库最终化失败后的 `objects/...` 孤儿对象扫描仍需后续生命周期任务兜底。
 - 当前容量实现已覆盖空间维度的文件版本创建、彻底删除释放、空间容量校准和 DB 驱动的 blob/object 清理；用户/租户维度配额、定时调度配置和监控告警仍需后续补齐。
 - `file.cleanup_unreferenced_blobs` 只清理仍有 DB blob 元数据且已无版本引用的最终对象；对象存储里没有 DB 元数据的孤儿对象扫描仍需后续治理任务兜底。
@@ -69,7 +72,7 @@
 
 ### 下一步
 
-- 完成本轮空间成员基础表的全量验证、提交和推送后，补空间成员管理 API 与 PermissionService：先让空间列表、文件树、上传和下载从 owner 边界切换为空间成员角色检查，再接目录 ACL、继承和拒绝优先策略。
+- 完成本轮空间级 PermissionService 接入的全量验证、提交和推送后，补空间成员管理 API：支持 owner/admin 添加、调整和移除成员，并写入授权审计；随后接目录 ACL、继承和拒绝优先策略。
 
 ### 涉及文件
 
@@ -103,8 +106,10 @@
 - `backend/app/modules/quota/service.py`
 - `backend/app/modules/quota/reconciliation.py`
 - `backend/app/modules/permission/constants.py`
+- `backend/app/modules/permission/actions.py`
 - `backend/app/modules/permission/models.py`
 - `backend/app/modules/permission/repository.py`
+- `backend/app/modules/permission/service.py`
 - `backend/app/db/models.py`
 - `backend/app/workers/quota_tasks.py`
 - `backend/app/workers/file_tasks.py`
@@ -200,6 +205,15 @@
 - 已运行 `uv run alembic upgrade head --sql`，确认 `space_members` 表、唯一索引和角色 CHECK 约束可生成 PostgreSQL SQL。
 - 已运行 `git diff --check`，未发现空白错误。
 - 本轮空间成员基础表实现未启动 API、Worker 或 Docker Compose 服务。
+- 已运行 `uv run ruff format .`，结果为 107 files left unchanged。
+- 已运行 `uv run pytest tests/test_space_file.py tests/test_download.py tests/test_upload.py`，结果为 21 passed。
+- 已运行 `uv run ruff format --check .`，结果为 107 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 86 source files。
+- 已运行 `uv run pytest`，结果为 59 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认当前权限迁移链仍可生成 PostgreSQL SQL。
+- 已运行 `git diff --check`，未发现空白错误。
+- 本轮空间级 PermissionService 接入未启动 API、Worker 或 Docker Compose 服务。
 - 已运行 `uv run ruff format --check .`，结果为 100 files already formatted。
 - 已运行 `uv run ruff check .`，结果为 All checks passed。
 - 已运行 `uv run mypy app`，结果为 no issues found in 80 source files。

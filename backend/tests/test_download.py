@@ -12,14 +12,15 @@ from app.core.config import Settings
 from app.infrastructure.storage.testing import InMemoryStorageAdapter
 from app.modules.audit.models import AuditLog, OutboxEvent
 from tests.helpers import (
-    client as client,
-)
-from tests.helpers import (
+    add_space_member,
     create_folder,
     create_second_user,
     create_space,
     login,
     seed_admin,
+)
+from tests.helpers import (
+    client as client,
 )
 from tests.helpers import (
     session_factory as session_factory,
@@ -155,7 +156,7 @@ async def test_download_rejects_folder(
 
 
 @pytest.mark.asyncio
-async def test_download_uses_owner_boundary_until_permission_module(
+async def test_space_viewer_can_download_but_non_member_is_hidden(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
@@ -181,11 +182,33 @@ async def test_download_uses_owner_boundary_until_permission_module(
     assert response.status_code == 404
     assert response.json()["code"] == "NODE_NOT_FOUND"
 
-    async with session_factory() as session:
-        audit = (
-            await session.execute(select(AuditLog).where(AuditLog.action == "file.downloaded"))
-        ).scalar_one()
+    await add_space_member(
+        session_factory,
+        tenant_id=str(space["tenant_id"]),
+        space_id=str(space["id"]),
+        role="viewer",
+    )
+    allowed_response = await client.get(
+        f"/api/v1/files/{completed['node_id']}/download",
+        headers={"X-CSRF-Token": member_token},
+    )
 
-    assert audit.result == "denied"
-    assert audit.resource_id == UUID(completed["node_id"])
-    assert audit.metadata_json["reason"] == "space_owner_required"
+    assert allowed_response.status_code == 200
+    assert allowed_response.json()["node_id"] == completed["node_id"]
+
+    async with session_factory() as session:
+        audits = (
+            (
+                await session.execute(
+                    select(AuditLog)
+                    .where(AuditLog.action == "file.downloaded")
+                    .order_by(AuditLog.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert [audit.result for audit in audits] == ["denied", "allowed"]
+    assert audits[0].resource_id == UUID(completed["node_id"])
+    assert audits[0].metadata_json["reason"] == "permission_denied"

@@ -6,6 +6,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.pagination import PageCursor
+from app.modules.permission.models import SpaceMember
 from app.modules.space.models import Space
 
 
@@ -39,35 +40,35 @@ class SpaceRepository:
         )
         return result.scalar_one_or_none()
 
-    async def get_owned_active_space(
+    async def get_active_space(
         self,
         *,
         tenant_id: UUID,
-        owner_id: UUID,
         space_id: UUID,
     ) -> Space | None:
         result = await self.session.execute(
             select(Space).where(
                 Space.tenant_id == tenant_id,
-                Space.owner_id == owner_id,
                 Space.id == space_id,
                 Space.is_active.is_(True),
             )
         )
         return result.scalar_one_or_none()
 
-    async def list_owned_active_spaces(
+    async def list_member_active_spaces(
         self,
         *,
         tenant_id: UUID,
-        owner_id: UUID,
+        user_id: UUID,
         limit: int,
         cursor: PageCursor | None,
     ) -> list[Space]:
         conditions = [
             Space.tenant_id == tenant_id,
-            Space.owner_id == owner_id,
             Space.is_active.is_(True),
+            SpaceMember.tenant_id == tenant_id,
+            SpaceMember.user_id == user_id,
+            SpaceMember.space_id == Space.id,
         ]
         if cursor is not None:
             conditions.append(
@@ -79,6 +80,7 @@ class SpaceRepository:
 
         result = await self.session.execute(
             select(Space)
+            .join(SpaceMember, SpaceMember.space_id == Space.id)
             .where(*conditions)
             .order_by(Space.created_at.desc(), Space.id.desc())
             .limit(limit)

@@ -16,6 +16,8 @@ from app.modules.auth.models import User
 from app.modules.file.models import Node
 from app.modules.file.repository import FileRepository
 from app.modules.file.validators import node_name_conflict_error, normalize_node_name
+from app.modules.permission.actions import ACTION_UPLOAD
+from app.modules.permission.service import PermissionService
 from app.modules.quota.service import QuotaService
 from app.modules.space.repository import SpaceRepository
 from app.modules.upload.audit import (
@@ -43,6 +45,7 @@ class UploadService:
         repository: UploadRepository,
         file_repository: FileRepository,
         space_repository: SpaceRepository,
+        permission_service: PermissionService,
         quota_service: QuotaService,
         storage: StorageAdapter,
         settings: Settings,
@@ -51,6 +54,7 @@ class UploadService:
         self.repository = repository
         self.file_repository = file_repository
         self.space_repository = space_repository
+        self.permission_service = permission_service
         self.quota_service = quota_service
         self.storage = storage
         self.settings = settings
@@ -332,12 +336,16 @@ class UploadService:
         space_id: UUID,
         parent_id: UUID,
     ) -> Node:
-        space = await self.space_repository.get_owned_active_space(
+        space = await self.space_repository.get_active_space(
             tenant_id=current_user.tenant_id,
-            owner_id=current_user.id,
             space_id=space_id,
         )
-        if space is None:
+        if space is None or not await self.permission_service.can_access_space(
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+            space_id=space_id,
+            action=ACTION_UPLOAD,
+        ):
             raise ApiError("SPACE_NOT_FOUND", "空间不存在或无权访问", status_code=404)
         parent = await self.file_repository.get_node(
             tenant_id=current_user.tenant_id,

@@ -34,6 +34,8 @@ from app.modules.file.schemas import (
     RestoreNodeRequest,
 )
 from app.modules.file.service import FileService
+from app.modules.permission.repository import PermissionRepository
+from app.modules.permission.service import PermissionService
 from app.modules.quota.repository import QuotaRepository
 from app.modules.quota.service import QuotaService
 from app.modules.space.repository import SpaceRepository
@@ -45,9 +47,11 @@ def get_file_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> FileService:
+    permission_repository = PermissionRepository(session)
     return FileService(
         repository=FileRepository(session),
         space_repository=SpaceRepository(session),
+        permission_service=PermissionService(repository=permission_repository),
         quota_service=QuotaService(
             repository=QuotaRepository(session),
             default_space_limit_bytes=settings.default_space_quota_bytes,
@@ -62,9 +66,11 @@ def get_file_download_service(
     settings: Annotated[Settings, Depends(get_settings)],
     storage: Annotated[StorageAdapter, Depends(get_storage_adapter)],
 ) -> FileDownloadService:
+    permission_repository = PermissionRepository(session)
     return FileDownloadService(
         repository=FileRepository(session),
         space_repository=SpaceRepository(session),
+        permission_service=PermissionService(repository=permission_repository),
         storage=storage,
         settings=settings,
         audit_service=AuditService(repository=AuditRepository(session)),
