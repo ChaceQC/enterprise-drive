@@ -37,6 +37,8 @@ uv run pytest
 - `tenants`、`users`、`refresh_tokens` 基础表和 Alembic 初始迁移。
 - 本地账号登录、JWT access token、refresh token 轮换。
 - 旧 refresh token 复用检测与 token family 吊销。
+- `audit_logs`、`outbox_events` 基础表和迁移。
+- 登录、刷新令牌和 refresh token 复用检测的认证审计事件。
 - 管理员 seed 脚本。
 
 ## 认证接口
@@ -45,4 +47,4 @@ uv run pytest
 - `POST /api/v1/auth/refresh`
 - `GET /api/v1/auth/me`
 
-默认管理员由 `.env` 中的 `DRIVE_ADMIN_*` 配置控制。首次本地启动后运行 `uv run python scripts/seed_admin.py` 创建管理员，并在首次登录后尽快修改默认密码。
+默认管理员由 `.env` 中的 `DRIVE_ADMIN_*` 配置控制。首次本地启动后运行 `uv run python -m scripts.seed_admin` 创建管理员，并在首次登录后尽快修改默认密码。

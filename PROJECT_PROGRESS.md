@@ -18,10 +18,14 @@
 - 实现 `/api/v1/auth/login`、`/api/v1/auth/refresh`、`/api/v1/auth/me`。
 - 补充管理员 seed 脚本 `scripts/seed_admin.py`。
 - 补充认证服务和认证 API 测试。
+- 补充 `audit_logs`、`outbox_events` SQLAlchemy 模型和 Alembic 迁移。
+- 实现审计写入服务，事务内同步写入 audit log 和 outbox event。
+- 在登录成功、登录失败、刷新令牌成功、刷新令牌过期、用户失效和 refresh token 复用检测中写入认证审计事件。
+- 补充认证审计和 outbox 测试。
 
 ### 进行中
 
-- Sprint 1 工程底座的下一阶段：基础审计日志、outbox 和认证审计写入。
+- Sprint 1 工程底座的下一阶段：outbox dispatcher 和 Celery 基础队列。
 
 ### 阻塞与风险
 
@@ -29,7 +33,7 @@
 
 ### 下一步
 
-- 补充 `audit_logs`、`outbox_events` 基础模型和迁移，并在登录、刷新令牌、复用检测等认证动作中写入审计事件。
+- 补充 outbox dispatcher、Celery app 基础配置和 audit 队列投递测试。
 
 ### 验证
 
@@ -40,8 +44,8 @@
 - 已运行 `uv run ruff format --check .`。
 - 已运行 `uv run ruff check .`。
 - 已运行 `uv run mypy app`。
-- 已运行 `uv run pytest`，结果为 8 passed。
-- 已运行 `uv run alembic upgrade head --sql`，确认初始迁移可生成 PostgreSQL SQL。
+- 已运行 `uv run pytest`，结果为 10 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认认证、审计和 outbox 迁移可生成 PostgreSQL SQL。
 - 已启动 Docker Desktop，并运行 `docker compose up -d postgres redis minio opensearch`。
 - 已运行 `uv run alembic upgrade head`，真实 PostgreSQL migration 通过。
 - 已运行 `uv run python -m scripts.seed_admin`，管理员 seed 通过。

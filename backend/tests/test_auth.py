@@ -5,6 +5,7 @@ from collections.abc import AsyncIterator
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
@@ -14,6 +15,10 @@ from app.core.security import hash_token
 from app.db.base import Base
 from app.db.session import get_db_session
 from app.main import create_app
+from app.modules.audit.models import AuditLog, OutboxEvent
+from app.modules.audit.repository import AuditRepository
+from app.modules.audit.schemas import AuditContext
+from app.modules.audit.service import AuditService
 from app.modules.auth.models import RefreshToken
 from app.modules.auth.repository import AuthRepository
 from app.modules.auth.service import AuthService
@@ -58,7 +63,11 @@ async def session(
 
 @pytest_asyncio.fixture
 async def auth_service(session: AsyncSession, auth_settings: Settings) -> AuthService:
-    return AuthService(repository=AuthRepository(session), settings=auth_settings)
+    return AuthService(
+        repository=AuthRepository(session),
+        settings=auth_settings,
+        audit_service=AuditService(repository=AuditRepository(session)),
+    )
 
 
 @pytest_asyncio.fixture
@@ -98,9 +107,13 @@ async def test_login_and_refresh_rotate_token(auth_service: AuthService) -> None
         tenant_slug="default",
         username="admin",
         password="admin-password",
+        audit_context=AuditContext(request_id="req_login"),
     )
 
-    refresh_response = await auth_service.refresh(refresh_token=login_response.refresh_token)
+    refresh_response = await auth_service.refresh(
+        refresh_token=login_response.refresh_token,
+        audit_context=AuditContext(request_id="req_refresh"),
+    )
 
     assert login_response.access_token
     assert refresh_response.access_token
@@ -132,6 +145,65 @@ async def test_reusing_rotated_refresh_token_revokes_family(
 
 
 @pytest.mark.asyncio
+async def test_auth_events_write_audit_log_and_outbox(
+    auth_service: AuthService,
+    session: AsyncSession,
+) -> None:
+    await auth_service.seed_admin()
+    login_response = await auth_service.login(
+        tenant_slug="default",
+        username="admin",
+        password="admin-password",
+        audit_context=AuditContext(request_id="req_audit", ip="127.0.0.1"),
+    )
+    await auth_service.refresh(
+        refresh_token=login_response.refresh_token,
+        audit_context=AuditContext(request_id="req_refresh"),
+    )
+
+    audit_logs = (
+        (await session.execute(select(AuditLog).order_by(AuditLog.created_at, AuditLog.action)))
+        .scalars()
+        .all()
+    )
+    outbox_events = (await session.execute(select(OutboxEvent))).scalars().all()
+
+    assert [log.action for log in audit_logs] == ["auth.login", "auth.refresh"]
+    assert [log.result for log in audit_logs] == ["allowed", "allowed"]
+    assert audit_logs[0].request_id == "req_audit"
+    assert len(outbox_events) == 2
+    assert {event.event_type for event in outbox_events} == {
+        "audit.auth.login",
+        "audit.auth.refresh",
+    }
+
+
+@pytest.mark.asyncio
+async def test_failed_login_writes_denied_audit(
+    auth_service: AuthService,
+    session: AsyncSession,
+) -> None:
+    await auth_service.seed_admin()
+
+    with pytest.raises(ApiError):
+        await auth_service.login(
+            tenant_slug="default",
+            username="admin",
+            password="wrong-password",
+            audit_context=AuditContext(request_id="req_bad_login"),
+        )
+
+    audit_log = (await session.execute(select(AuditLog))).scalar_one()
+    outbox_event = (await session.execute(select(OutboxEvent))).scalar_one()
+
+    assert audit_log.action == "auth.login"
+    assert audit_log.result == "denied"
+    assert audit_log.risk_level == "medium"
+    assert audit_log.request_id == "req_bad_login"
+    assert outbox_event.event_type == "audit.auth.login"
+
+
+@pytest.mark.asyncio
 async def test_auth_api_login_refresh_and_me(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
@@ -141,6 +213,7 @@ async def test_auth_api_login_refresh_and_me(
         service = AuthService(
             repository=AuthRepository(seed_session),
             settings=auth_settings,
+            audit_service=AuditService(repository=AuditRepository(seed_session)),
         )
         await service.seed_admin()
 

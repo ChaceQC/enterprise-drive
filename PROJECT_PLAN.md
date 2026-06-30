@@ -77,4 +77,4 @@
 
 ## 5. 当前下一步
 
-继续推进 Sprint 1：补充基础审计日志、outbox 事件表、认证审计写入和管理员 seed 的部署说明。
+继续推进 Sprint 1：补充 outbox dispatcher、Celery 基础队列配置，以及认证审计事件的后台投递测试。

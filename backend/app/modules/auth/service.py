@@ -15,6 +15,8 @@ from app.core.security import (
     utc_now,
     verify_password,
 )
+from app.modules.audit.schemas import AuditContext, AuditEvent
+from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
 from app.modules.auth.repository import AuthRepository
 from app.modules.auth.schemas import TokenResponse
@@ -29,27 +31,86 @@ class SeedAdminResult:
 
 
 class AuthService:
-    def __init__(self, *, repository: AuthRepository, settings: Settings) -> None:
+    def __init__(
+        self,
+        *,
+        repository: AuthRepository,
+        settings: Settings,
+        audit_service: AuditService | None = None,
+    ) -> None:
         self.repository = repository
         self.settings = settings
+        self.audit_service = audit_service
 
-    async def login(self, *, tenant_slug: str, username: str, password: str) -> TokenResponse:
+    async def login(
+        self,
+        *,
+        tenant_slug: str,
+        username: str,
+        password: str,
+        audit_context: AuditContext | None = None,
+    ) -> TokenResponse:
         tenant = await self.repository.get_tenant_by_slug(tenant_slug)
         if tenant is None:
             raise self._invalid_credentials()
 
         user = await self.repository.get_user_by_login(tenant_id=tenant.id, login=username)
         if user is None or not user.is_active:
+            await self._record_auth_event(
+                AuditEvent(
+                    tenant_id=tenant.id,
+                    actor_id=user.id if user else None,
+                    action="auth.login",
+                    resource_type="user",
+                    resource_id=user.id if user else None,
+                    result="denied",
+                    risk_level="medium",
+                    metadata={"reason": "user_missing_or_inactive", "username": username},
+                ),
+                audit_context=audit_context,
+            )
+            await self.repository.commit()
             raise self._invalid_credentials()
 
         if not verify_password(password, user.password_hash):
+            await self._record_auth_event(
+                AuditEvent(
+                    tenant_id=tenant.id,
+                    actor_id=user.id,
+                    action="auth.login",
+                    resource_type="user",
+                    resource_id=user.id,
+                    result="denied",
+                    risk_level="medium",
+                    metadata={"reason": "bad_password", "username": username},
+                ),
+                audit_context=audit_context,
+            )
+            await self.repository.commit()
             raise self._invalid_credentials()
 
         token_response = await self._issue_token_pair(user=user, family_id=uuid4())
+        await self._record_auth_event(
+            AuditEvent(
+                tenant_id=tenant.id,
+                actor_id=user.id,
+                action="auth.login",
+                resource_type="user",
+                resource_id=user.id,
+                result="allowed",
+                metadata={"username": user.username},
+            ),
+            audit_context=audit_context,
+        )
         await self.repository.commit()
         return token_response
 
-    async def refresh(self, *, refresh_token: str) -> TokenResponse:
+    async def refresh(
+        self,
+        *,
+        refresh_token: str,
+        audit_context: AuditContext | None = None,
+    ) -> TokenResponse:
         token_hash = hash_token(refresh_token)
         stored_token = await self.repository.get_refresh_token_by_hash(token_hash)
         now = utc_now()
@@ -63,6 +124,22 @@ class AuthService:
                 revoked_at=now,
                 reason="reuse_detected",
             )
+            await self._record_auth_event(
+                AuditEvent(
+                    tenant_id=stored_token.tenant_id,
+                    actor_id=stored_token.user_id,
+                    action="auth.refresh.reused",
+                    resource_type="refresh_token",
+                    resource_id=stored_token.id,
+                    result="denied",
+                    risk_level="high",
+                    metadata={
+                        "family_id": str(stored_token.family_id),
+                        "reason": "reuse_detected",
+                    },
+                ),
+                audit_context=audit_context,
+            )
             await self.repository.commit()
             raise ApiError("REFRESH_TOKEN_REUSED", "刷新令牌已失效", status_code=401)
 
@@ -71,6 +148,19 @@ class AuthService:
                 family_id=stored_token.family_id,
                 revoked_at=now,
                 reason="expired",
+            )
+            await self._record_auth_event(
+                AuditEvent(
+                    tenant_id=stored_token.tenant_id,
+                    actor_id=stored_token.user_id,
+                    action="auth.refresh",
+                    resource_type="refresh_token",
+                    resource_id=stored_token.id,
+                    result="denied",
+                    risk_level="medium",
+                    metadata={"family_id": str(stored_token.family_id), "reason": "expired"},
+                ),
+                audit_context=audit_context,
             )
             await self.repository.commit()
             raise ApiError("TOKEN_EXPIRED", "刷新令牌已过期", status_code=401)
@@ -84,6 +174,22 @@ class AuthService:
                 family_id=stored_token.family_id,
                 revoked_at=now,
                 reason="user_inactive",
+            )
+            await self._record_auth_event(
+                AuditEvent(
+                    tenant_id=stored_token.tenant_id,
+                    actor_id=stored_token.user_id,
+                    action="auth.refresh",
+                    resource_type="refresh_token",
+                    resource_id=stored_token.id,
+                    result="denied",
+                    risk_level="medium",
+                    metadata={
+                        "family_id": str(stored_token.family_id),
+                        "reason": "user_missing_or_inactive",
+                    },
+                ),
+                audit_context=audit_context,
             )
             await self.repository.commit()
             raise ApiError("AUTH_REQUIRED", "认证已失效", status_code=401)
@@ -99,6 +205,18 @@ class AuthService:
             old_token_id=stored_token.id,
             new_token_id=new_stored_token.id,
             used_at=now,
+        )
+        await self._record_auth_event(
+            AuditEvent(
+                tenant_id=stored_token.tenant_id,
+                actor_id=stored_token.user_id,
+                action="auth.refresh",
+                resource_type="refresh_token",
+                resource_id=stored_token.id,
+                result="allowed",
+                metadata={"family_id": str(stored_token.family_id)},
+            ),
+            audit_context=audit_context,
         )
         await self.repository.commit()
         return token_response
@@ -164,3 +282,13 @@ class AuthService:
     @staticmethod
     def _invalid_credentials() -> ApiError:
         return ApiError("AUTH_INVALID_CREDENTIALS", "用户名或密码错误", status_code=401)
+
+    async def _record_auth_event(
+        self,
+        event: AuditEvent,
+        *,
+        audit_context: AuditContext | None,
+    ) -> None:
+        if self.audit_service is None:
+            return
+        await self.audit_service.record(event=event, context=audit_context or AuditContext())
