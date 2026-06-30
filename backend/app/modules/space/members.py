@@ -5,12 +5,13 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError
 
 from app.api.errors import ApiError
-from app.modules.audit.schemas import AuditContext, AuditEvent
+from app.modules.audit.schemas import AuditContext
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
 from app.modules.auth.service import AuthService
 from app.modules.permission.actions import ACTION_GRANT, ACTION_MANAGE
 from app.modules.permission.constants import SPACE_ROLE_OWNER
+from app.modules.permission.events import emit_permission_changed
 from app.modules.permission.models import SpaceMember
 from app.modules.permission.repository import PermissionRepository
 from app.modules.permission.schemas import (
@@ -19,6 +20,7 @@ from app.modules.permission.schemas import (
     SpaceMemberResponse,
 )
 from app.modules.permission.service import PermissionService
+from app.modules.space.member_audit import record_member_event
 from app.modules.space.models import Space
 from app.modules.space.repository import SpaceRepository
 
@@ -95,16 +97,28 @@ class SpaceMemberService:
                 role=role,
                 created_by=current_user.id,
             )
-            await self.repository.bump_space_permission_version(
+            permission_version = await self.repository.bump_space_permission_version(
                 tenant_id=current_user.tenant_id,
                 space_id=space_id,
             )
-            await self._record_member_event(
+            await record_member_event(
+                audit_service=self.audit_service,
                 current_user=current_user,
                 space_id=space_id,
                 target_user_id=user_id,
                 action="permission.space_member.added",
                 audit_context=audit_context,
+                metadata={"role": role},
+            )
+            await emit_permission_changed(
+                audit_service=self.audit_service,
+                tenant_id=current_user.tenant_id,
+                actor_id=current_user.id,
+                scope="space",
+                resource_id=space_id,
+                permission_version=permission_version,
+                reason="space_member_added",
+                affected_user_id=user_id,
                 metadata={"role": role},
             )
             await self.repository.commit()
@@ -141,16 +155,28 @@ class SpaceMemberService:
 
         old_role = member.role
         member = await self.repository.update_space_member_role(member=member, role=role)
-        await self.repository.bump_space_permission_version(
+        permission_version = await self.repository.bump_space_permission_version(
             tenant_id=current_user.tenant_id,
             space_id=space_id,
         )
-        await self._record_member_event(
+        await record_member_event(
+            audit_service=self.audit_service,
             current_user=current_user,
             space_id=space_id,
             target_user_id=user_id,
             action="permission.space_member.updated",
             audit_context=audit_context,
+            metadata={"old_role": old_role, "new_role": role},
+        )
+        await emit_permission_changed(
+            audit_service=self.audit_service,
+            tenant_id=current_user.tenant_id,
+            actor_id=current_user.id,
+            scope="space",
+            resource_id=space_id,
+            permission_version=permission_version,
+            reason="space_member_updated",
+            affected_user_id=user_id,
             metadata={"old_role": old_role, "new_role": role},
         )
         await self.repository.commit()
@@ -185,16 +211,28 @@ class SpaceMemberService:
             space_id=space_id,
             user_id=user_id,
         )
-        await self.repository.bump_space_permission_version(
+        permission_version = await self.repository.bump_space_permission_version(
             tenant_id=current_user.tenant_id,
             space_id=space_id,
         )
-        await self._record_member_event(
+        await record_member_event(
+            audit_service=self.audit_service,
             current_user=current_user,
             space_id=space_id,
             target_user_id=user_id,
             action="permission.space_member.removed",
             audit_context=audit_context,
+            metadata={"old_role": member.role},
+        )
+        await emit_permission_changed(
+            audit_service=self.audit_service,
+            tenant_id=current_user.tenant_id,
+            actor_id=current_user.id,
+            scope="space",
+            resource_id=space_id,
+            permission_version=permission_version,
+            reason="space_member_removed",
+            affected_user_id=user_id,
             metadata={"old_role": member.role},
         )
         await self.repository.commit()
@@ -223,7 +261,8 @@ class SpaceMemberService:
         if allowed and space is not None:
             return space
 
-        await self._record_member_event(
+        await record_member_event(
+            audit_service=self.audit_service,
             current_user=current_user,
             space_id=space_id,
             target_user_id=target_user_id,
@@ -277,33 +316,3 @@ class SpaceMemberService:
         )
         if owner_count <= 1:
             raise ApiError("LAST_SPACE_OWNER", "不能移除或降级最后一个空间所有者", status_code=409)
-
-    async def _record_member_event(
-        self,
-        *,
-        current_user: User,
-        space_id: UUID,
-        target_user_id: UUID | None,
-        action: str,
-        audit_context: AuditContext | None,
-        result: str = "allowed",
-        metadata: dict[str, object] | None = None,
-    ) -> None:
-        if self.audit_service is None:
-            return
-        event_metadata = dict(metadata or {})
-        if target_user_id is not None:
-            event_metadata["target_user_id"] = str(target_user_id)
-        await self.audit_service.record(
-            event=AuditEvent(
-                tenant_id=current_user.tenant_id,
-                actor_id=current_user.id,
-                action=action,
-                resource_type="space",
-                resource_id=space_id,
-                result=result,
-                risk_level="high",
-                metadata=event_metadata,
-            ),
-            context=audit_context or AuditContext(),
-        )

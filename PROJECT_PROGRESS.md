@@ -64,16 +64,18 @@
 - 新增节点 ACL 管理 API：`GET/POST /api/v1/files/{node_id}/acl`、`PATCH/DELETE /api/v1/files/{node_id}/acl/{entry_id}`；节点 ACL 变更会递增 `nodes.permission_version` 并写入 `permission.node_acl.*` 审计。
 - 文件列表、创建文件夹、上传初始化、multipart complete 和下载入口已接入节点路径 ACL 校验；上传 complete 会重新检查父目录 `upload` 权限，避免上传会话创建后权限收紧仍可完成。
 - 补充节点 ACL 测试，覆盖 viewer 通过 ACL allow 获得上传权限、ACL 删除后失权、editor 被继承 deny 覆盖、关闭继承后子目录恢复角色权限、ACL deny download 返回统一隐藏错误并写拒绝审计。
+- 空间成员和节点 ACL 的新增、更新、删除已在同一业务事务中写入 `permission.changed` outbox event，payload 包含 `scope`、`resource_id`、`permission_version`、`reason`、`actor_id`、`affected_user_id` 和变更摘要，为 Redis 权限缓存失效和搜索 ACL 重建提供输入。
+- 补充权限变更事件测试，覆盖空间成员 add/update/remove 和节点 ACL create/update/remove 均写入 `permission.changed`，并校验 scope、reason、permission_version 和 affected_user_id。
 
 ### 进行中
 
-- Sprint 4 权限系统已开始；空间成员事实表、owner 成员自动写入、空间级成员角色检查、空间成员管理 API 和用户维度节点 ACL 基础闭环已完成，下一步接权限缓存失效事件和批量权限评估。
+- Sprint 4 权限系统已开始；空间成员事实表、owner 成员自动写入、空间级成员角色检查、空间成员管理 API、用户维度节点 ACL 基础闭环和 `permission.changed` outbox 事件写入已完成，下一步接批量权限评估和 Redis 缓存消费。
 
 ### 阻塞与风险
 
 - MinIO Python SDK 的 multipart create/complete/abort 在当前适配中需要调用客户端私有方法，已限定在 `infrastructure` 适配层；若后续出现兼容性、升级稳定性或批量吞吐问题，应评估更完整的开源 S3 兼容客户端或标准 HTTP/SigV4 实现。
 - 当前 Redis 限流仍是固定窗口策略，适用于上传初始化、分片签名和下载预签名的基础保护；若后续需要滑动窗口、令牌桶、多层级动态规则或管理端配置，应切换成熟限流库。
-- 当前空间、文件树、上传、下载、空间成员管理和节点 ACL 管理接口已接入权限检查；权限缓存、权限变更失效事件、批量权限评估、部门/用户组 ACL 主体和搜索 ACL 更新仍未接入。
+- 当前空间、文件树、上传、下载、空间成员管理和节点 ACL 管理接口已接入权限检查；权限变更 outbox 事件已写入但尚未接入 Redis 缓存消费 worker；批量权限评估、部门/用户组 ACL 主体和搜索 ACL 更新仍未接入。
 - 当前节点 ACL 路径加载采用逐级父节点查询并限制最大深度 64，适合一期目录深度可控场景；若后续目录深度、列表批量权限展示或搜索过滤压力升高，应引入递归 CTE、closure table 或批量权限评估缓存。
 - 过期上传清理已覆盖数据库会话终态、multipart abort 和 `uploads/...` 临时对象删除；对象复制成功但数据库最终化失败后的 `objects/...` 孤儿对象扫描仍需后续生命周期任务兜底。
 - 当前容量实现已覆盖空间维度的文件版本创建、彻底删除释放、空间容量校准和 DB 驱动的 blob/object 清理；用户/租户维度配额、定时调度配置和监控告警仍需后续补齐。
@@ -83,7 +85,7 @@
 
 ### 下一步
 
-- 完成本轮节点 ACL 基础闭环的全量验证、提交和推送后，接权限缓存失效事件和批量权限评估：先发布 `permission.changed` outbox 事件并预留缓存版本，再为文件列表返回常用权限做批量评估。
+- 完成本轮 `permission.changed` 事件写入的全量验证、提交和推送后，接批量权限评估和 Redis 缓存消费：先为文件列表返回常用权限做批量评估，再实现消费 `permission.changed` 的缓存失效 worker。
 
 ### 涉及文件
 
@@ -112,6 +114,7 @@
 - `backend/app/modules/file/models.py`
 - `backend/app/modules/file/schemas.py`
 - `backend/app/modules/file/acl.py`
+- `backend/app/modules/file/acl_audit.py`
 - `backend/app/modules/file/acl_router.py`
 - `backend/app/modules/file/download.py`
 - `backend/app/modules/file/router.py`
@@ -123,11 +126,14 @@
 - `backend/app/modules/permission/constants.py`
 - `backend/app/modules/permission/actions.py`
 - `backend/app/modules/permission/models.py`
+- `backend/app/modules/permission/events.py`
 - `backend/app/modules/permission/repository.py`
 - `backend/app/modules/permission/schemas.py`
 - `backend/app/modules/permission/service.py`
+- `backend/app/modules/permission/validators.py`
 - `backend/app/modules/space/members.py`
 - `backend/app/modules/space/router.py`
+- `backend/app/modules/space/member_audit.py`
 - `backend/app/modules/upload/service.py`
 - `backend/app/modules/upload/lifecycle.py`
 - `backend/app/db/models.py`
@@ -137,6 +143,7 @@
 - `backend/app/modules/auth/repository.py`
 - `backend/app/modules/auth/router.py`
 - `backend/app/modules/auth/service.py`
+- `backend/app/modules/audit/service.py`
 - `backend/app/modules/auth/models.py`
 - `backend/app/modules/auth/schemas.py`
 - `backend/app/core/security.py`
@@ -248,13 +255,21 @@
 - 已运行 `git diff --check`，未发现空白错误。
 - 本轮空间成员管理 API 实现未启动 API、Worker 或 Docker Compose 服务。
 - 已运行 `uv run pytest tests/test_node_acl.py`，结果为 3 passed。
-- 已运行 `uv run ruff format --check .`，结果为 114 files already formatted。
+- 已运行 `uv run ruff format --check .`，结果为 118 files already formatted。
 - 已运行 `uv run ruff check .`，结果为 All checks passed。
-- 已运行 `uv run mypy app`，结果为 no issues found in 90 source files。
+- 已运行 `uv run mypy app`，结果为 no issues found in 94 source files。
 - 已运行 `uv run pytest`，结果为 65 passed。
 - 已运行 `uv run alembic upgrade head --sql`，确认 `acl_entries` 表、唯一索引、CHECK 约束和 JSONB 动作集合可生成 PostgreSQL SQL。
 - 已运行 `git diff --check`，未发现空白错误。
 - 本轮节点 ACL 基础闭环实现未启动 API、Worker 或 Docker Compose 服务。
+- 已运行 `uv run pytest tests/test_space_members.py tests/test_node_acl.py`，结果为 6 passed。
+- 已运行 `uv run ruff format --check .`，结果为 118 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 94 source files。
+- 已运行 `uv run pytest`，结果为 65 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认当前迁移链仍可生成 PostgreSQL SQL。
+- 已运行 `git diff --check`，未发现空白错误。
+- 本轮 `permission.changed` 事件写入实现未启动 API、Worker 或 Docker Compose 服务。
 - 已运行 `uv run ruff format --check .`，结果为 100 files already formatted。
 - 已运行 `uv run ruff check .`，结果为 All checks passed。
 - 已运行 `uv run mypy app`，结果为 no issues found in 80 source files。

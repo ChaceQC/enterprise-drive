@@ -6,14 +6,13 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import utc_now
-from app.modules.permission.actions import PERMISSION_ACTIONS
 from app.modules.permission.constants import (
-    ACL_EFFECTS,
     ACL_SUBJECT_USER,
     SPACE_ROLE_OWNER,
     SPACE_ROLES,
 )
 from app.modules.permission.models import AclEntry, SpaceMember
+from app.modules.permission.validators import validate_acl_entry
 from app.modules.space.models import Space
 
 
@@ -144,7 +143,7 @@ class PermissionRepository:
         *,
         tenant_id: UUID,
         space_id: UUID,
-    ) -> None:
+    ) -> int:
         await self.session.execute(
             update(Space)
             .where(Space.tenant_id == tenant_id, Space.id == space_id)
@@ -154,6 +153,13 @@ class PermissionRepository:
             )
         )
         await self.session.flush()
+        result = await self.session.execute(
+            select(Space.permission_version).where(
+                Space.tenant_id == tenant_id,
+                Space.id == space_id,
+            )
+        )
+        return int(result.scalar_one())
 
     async def create_acl_entry(
         self,
@@ -166,7 +172,7 @@ class PermissionRepository:
         inherit: bool,
         created_by: UUID,
     ) -> AclEntry:
-        self._validate_acl(effect=effect, actions=actions)
+        validate_acl_entry(effect=effect, actions=actions)
         entry = AclEntry(
             tenant_id=tenant_id,
             node_id=node_id,
@@ -236,7 +242,7 @@ class PermissionRepository:
         actions: list[str],
         inherit: bool,
     ) -> AclEntry:
-        self._validate_acl(effect=effect, actions=actions)
+        validate_acl_entry(effect=effect, actions=actions)
         entry.effect = effect
         entry.actions = actions
         entry.inherit = inherit
@@ -284,13 +290,3 @@ class PermissionRepository:
 
     async def rollback(self) -> None:
         await self.session.rollback()
-
-    @staticmethod
-    def _validate_acl(*, effect: str, actions: list[str]) -> None:
-        if effect not in ACL_EFFECTS:
-            raise ValueError(f"unsupported acl effect: {effect}")
-        if not actions:
-            raise ValueError("acl actions cannot be empty")
-        unsupported_actions = set(actions) - PERMISSION_ACTIONS
-        if unsupported_actions:
-            raise ValueError(f"unsupported acl actions: {sorted(unsupported_actions)}")

@@ -5,13 +5,15 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError
 
 from app.api.errors import ApiError
-from app.modules.audit.schemas import AuditContext, AuditEvent
+from app.modules.audit.schemas import AuditContext
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
 from app.modules.auth.service import AuthService
+from app.modules.file.acl_audit import record_acl_event
 from app.modules.file.models import Node
 from app.modules.file.repository import FileRepository
 from app.modules.permission.actions import ACTION_GRANT
+from app.modules.permission.events import emit_permission_changed
 from app.modules.permission.repository import PermissionRepository
 from app.modules.permission.schemas import (
     AclEntryListResponse,
@@ -81,11 +83,12 @@ class FileAclService:
                 inherit=inherit,
                 created_by=current_user.id,
             )
-            await self.file_repository.bump_node_permission_version(
+            permission_version = await self.file_repository.bump_node_permission_version(
                 tenant_id=current_user.tenant_id,
                 node_id=node.id,
             )
-            await self._record_acl_event(
+            await record_acl_event(
+                audit_service=self.audit_service,
                 current_user=current_user,
                 node=node,
                 action="permission.node_acl.created",
@@ -93,6 +96,23 @@ class FileAclService:
                 metadata={
                     "entry_id": str(entry.id),
                     "subject_user_id": str(subject_user_id),
+                    "effect": effect,
+                    "actions": actions,
+                    "inherit": inherit,
+                },
+            )
+            await emit_permission_changed(
+                audit_service=self.audit_service,
+                tenant_id=current_user.tenant_id,
+                actor_id=current_user.id,
+                scope="node",
+                resource_id=node.id,
+                permission_version=permission_version,
+                reason="node_acl_created",
+                affected_user_id=subject_user_id,
+                metadata={
+                    "space_id": str(node.space_id),
+                    "entry_id": str(entry.id),
                     "effect": effect,
                     "actions": actions,
                     "inherit": inherit,
@@ -134,16 +154,37 @@ class FileAclService:
             actions=actions,
             inherit=inherit,
         )
-        await self.file_repository.bump_node_permission_version(
+        permission_version = await self.file_repository.bump_node_permission_version(
             tenant_id=current_user.tenant_id,
             node_id=node.id,
         )
-        await self._record_acl_event(
+        await record_acl_event(
+            audit_service=self.audit_service,
             current_user=current_user,
             node=node,
             action="permission.node_acl.updated",
             audit_context=audit_context,
             metadata={
+                "entry_id": str(entry.id),
+                "old_effect": old_effect,
+                "new_effect": effect,
+                "old_actions": old_actions,
+                "new_actions": actions,
+                "old_inherit": old_inherit,
+                "new_inherit": inherit,
+            },
+        )
+        await emit_permission_changed(
+            audit_service=self.audit_service,
+            tenant_id=current_user.tenant_id,
+            actor_id=current_user.id,
+            scope="node",
+            resource_id=node.id,
+            permission_version=permission_version,
+            reason="node_acl_updated",
+            affected_user_id=entry.subject_id,
+            metadata={
+                "space_id": str(node.space_id),
                 "entry_id": str(entry.id),
                 "old_effect": old_effect,
                 "new_effect": effect,
@@ -177,11 +218,12 @@ class FileAclService:
             node_id=node.id,
             entry_id=entry_id,
         )
-        await self.file_repository.bump_node_permission_version(
+        permission_version = await self.file_repository.bump_node_permission_version(
             tenant_id=current_user.tenant_id,
             node_id=node.id,
         )
-        await self._record_acl_event(
+        await record_acl_event(
+            audit_service=self.audit_service,
             current_user=current_user,
             node=node,
             action="permission.node_acl.removed",
@@ -189,6 +231,23 @@ class FileAclService:
             metadata={
                 "entry_id": str(entry.id),
                 "subject_user_id": str(entry.subject_id),
+                "effect": entry.effect,
+                "actions": list(entry.actions),
+                "inherit": entry.inherit,
+            },
+        )
+        await emit_permission_changed(
+            audit_service=self.audit_service,
+            tenant_id=current_user.tenant_id,
+            actor_id=current_user.id,
+            scope="node",
+            resource_id=node.id,
+            permission_version=permission_version,
+            reason="node_acl_removed",
+            affected_user_id=entry.subject_id,
+            metadata={
+                "space_id": str(node.space_id),
+                "entry_id": str(entry.id),
                 "effect": entry.effect,
                 "actions": list(entry.actions),
                 "inherit": entry.inherit,
@@ -240,28 +299,3 @@ class FileAclService:
         )
         if user is None:
             raise ApiError("USER_NOT_FOUND", "用户不存在或不可用", status_code=404)
-
-    async def _record_acl_event(
-        self,
-        *,
-        current_user: User,
-        node: Node,
-        action: str,
-        audit_context: AuditContext | None,
-        metadata: dict[str, object],
-    ) -> None:
-        if self.audit_service is None:
-            return
-        await self.audit_service.record(
-            event=AuditEvent(
-                tenant_id=current_user.tenant_id,
-                actor_id=current_user.id,
-                action=action,
-                resource_type="node",
-                resource_id=node.id,
-                result="allowed",
-                risk_level="high",
-                metadata={"space_id": str(node.space_id), **metadata},
-            ),
-            context=audit_context or AuditContext(),
-        )

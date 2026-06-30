@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 from app.modules.audit.repository import AuditRepository
 from app.modules.audit.schemas import AuditContext, AuditEvent
 
@@ -24,4 +26,34 @@ class AuditService:
                 "actor_id": str(event.actor_id) if event.actor_id else None,
                 "risk_level": event.risk_level,
             },
+        )
+
+    async def record_permission_changed(
+        self,
+        *,
+        tenant_id: UUID,
+        actor_id: UUID,
+        scope: str,
+        resource_id: UUID,
+        permission_version: int,
+        reason: str,
+        affected_user_id: UUID | None = None,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        payload = {
+            "scope": scope,
+            "resource_id": str(resource_id),
+            "permission_version": permission_version,
+            "reason": reason,
+            "actor_id": str(actor_id),
+            **(metadata or {}),
+        }
+        if affected_user_id is not None:
+            payload["affected_user_id"] = str(affected_user_id)
+        await self.repository.add_outbox_event(
+            tenant_id=tenant_id,
+            event_type="permission.changed",
+            aggregate_type=scope,
+            aggregate_id=resource_id,
+            payload=payload,
         )

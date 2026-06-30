@@ -9,7 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
-from app.modules.audit.models import AuditLog
+from app.modules.audit.models import AuditLog, OutboxEvent
 from app.modules.file.models import Node
 from tests.helpers import (
     add_space_member,
@@ -153,9 +153,25 @@ async def test_acl_allow_grants_viewer_upload_and_delete_revokes_it(
             await session.execute(select(Node).where(Node.id == UUID(str(space["root_node_id"]))))
         ).scalar_one()
         audit_actions = list((await session.execute(select(AuditLog.action))).scalars().all())
+        permission_events = list(
+            (
+                await session.execute(
+                    select(OutboxEvent).where(OutboxEvent.event_type == "permission.changed")
+                )
+            )
+            .scalars()
+            .all()
+        )
     assert root.permission_version == 3
     assert "permission.node_acl.created" in audit_actions
     assert "permission.node_acl.removed" in audit_actions
+    assert [event.payload["reason"] for event in permission_events] == [
+        "node_acl_created",
+        "node_acl_removed",
+    ]
+    assert {event.payload["scope"] for event in permission_events} == {"node"}
+    assert permission_events[-1].payload["permission_version"] == 3
+    assert permission_events[-1].payload["affected_user_id"] == str(member_id)
 
 
 @pytest.mark.asyncio
@@ -245,7 +261,20 @@ async def test_acl_deny_overrides_role_and_inherit_controls_descendants(
                 select(AuditLog).where(AuditLog.action == "permission.node_acl.updated")
             )
         ).scalar_one()
+        changed_events = list(
+            (
+                await session.execute(
+                    select(OutboxEvent).where(OutboxEvent.event_type == "permission.changed")
+                )
+            )
+            .scalars()
+            .all()
+        )
+        changed_event = next(
+            event for event in changed_events if event.payload["reason"] == "node_acl_updated"
+        )
     assert updated_audit.request_id == "req_acl_update"
+    assert changed_event.payload["new_inherit"] is False
 
 
 @pytest.mark.asyncio

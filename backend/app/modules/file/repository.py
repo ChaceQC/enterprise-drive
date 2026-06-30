@@ -369,13 +369,17 @@ class FileRepository:
             delete(Node).where(Node.tenant_id == tenant_id, Node.id == node_id)
         )
 
-    async def bump_node_permission_version(self, *, tenant_id: UUID, node_id: UUID) -> None:
+    async def bump_node_permission_version(self, *, tenant_id: UUID, node_id: UUID) -> int:
         await self.session.execute(
             update(Node)
             .where(Node.tenant_id == tenant_id, Node.id == node_id)
             .values(permission_version=Node.permission_version + 1, updated_at=utc_now())
         )
         await self.session.flush()
+        result = await self.session.execute(
+            select(Node.permission_version).where(Node.tenant_id == tenant_id, Node.id == node_id)
+        )
+        return int(result.scalar_one())
 
     async def flush(self) -> None:
         await self.session.flush()

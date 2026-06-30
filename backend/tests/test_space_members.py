@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
-from app.modules.audit.models import AuditLog
+from app.modules.audit.models import AuditLog, OutboxEvent
 from app.modules.space.models import Space
 from tests.helpers import (
     client as client,
@@ -120,11 +120,28 @@ async def test_owner_can_manage_member_lifecycle_and_permissions_follow_role(
     async with session_factory() as session:
         refreshed_space = (await session.execute(select(Space))).scalar_one()
         audit_actions = list((await session.execute(select(AuditLog.action))).scalars().all())
+        permission_events = list(
+            (
+                await session.execute(
+                    select(OutboxEvent).where(OutboxEvent.event_type == "permission.changed")
+                )
+            )
+            .scalars()
+            .all()
+        )
 
     assert refreshed_space.permission_version == 4
     assert "permission.space_member.added" in audit_actions
     assert "permission.space_member.updated" in audit_actions
     assert "permission.space_member.removed" in audit_actions
+    assert [event.payload["reason"] for event in permission_events] == [
+        "space_member_added",
+        "space_member_updated",
+        "space_member_removed",
+    ]
+    assert {event.payload["scope"] for event in permission_events} == {"space"}
+    assert permission_events[-1].payload["permission_version"] == 4
+    assert permission_events[-1].payload["affected_user_id"] == str(member_id)
 
 
 @pytest.mark.asyncio
