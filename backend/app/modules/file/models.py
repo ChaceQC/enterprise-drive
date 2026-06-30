@@ -24,6 +24,7 @@ from app.db.base import Base
 class FileBlob(Base):
     __tablename__ = "file_blobs"
     __table_args__ = (
+        Index("idx_file_blobs_cleanup", "tenant_id", "status", "ref_count", "created_at"),
         Index(
             "uq_file_blobs_hash",
             "tenant_id",
@@ -47,6 +48,7 @@ class FileBlob(Base):
     storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
     mime_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
     ref_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

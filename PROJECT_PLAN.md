@@ -55,6 +55,7 @@
 - 过期上传清理任务。（已完成 `upload.expire_sessions`，按租户扫描过期会话并清理临时对象）
 - 基础限流。（已完成上传初始化、分片签名和下载预签名的 Redis 固定窗口限流）
 - 删除容量释放。（已完成回收站节点彻底删除时释放空间容量并写入负向容量流水）
+- Blob 垃圾回收和最终对象清理。（已完成 `file.cleanup_unreferenced_blobs`，按租户清理无版本引用且引用计数为 0 的最终对象）
 - 下载预签名 URL。（已完成当前版本下载签名）
 - 上传下载审计。（已完成上传初始化、秒传、complete、abort、expired 和下载成功/拒绝审计）
 
@@ -75,10 +76,10 @@
 ### Sprint 6：管理、治理、上线
 
 - 管理 API、审计查询、统计。
-- 生命周期清理、容量校准。
+- 生命周期治理、孤儿对象扫描和容量治理增强。
 - Dockerfile、部署文档、宿主机 Nginx 配置说明。
 - 发布、回滚和可观测性检查。
 
 ## 5. 当前下一步
 
-2026-07-01 代码审计发现的实现边界问题已完成首轮整改：浏览器认证改为 BFF + HttpOnly Cookie Session，移除 JWT/refresh token 兼容路径；对象存储默认实现已移除 `boto3/botocore` 并改用 MinIO Python SDK；Redis 固定窗口限流已改为 Lua 原子脚本。容量校准草稿已从 `stash@{0}: paused quota reconciliation draft` 恢复并整理为 `quota.reconcile_space_usage` 维护任务，下一步推进 blob/object 垃圾回收和对象生命周期任务。
+2026-07-01 代码审计发现的实现边界问题已完成首轮整改：浏览器认证改为 BFF + HttpOnly Cookie Session，移除 JWT/refresh token 兼容路径；对象存储默认实现已移除 `boto3/botocore` 并改用 MinIO Python SDK；Redis 固定窗口限流已改为 Lua 原子脚本。容量校准草稿已从 `stash@{0}: paused quota reconciliation draft` 恢复并整理为 `quota.reconcile_space_usage` 维护任务；blob/object 垃圾回收已整理为 `file.cleanup_unreferenced_blobs` 维护任务。下一步进入 Sprint 4 权限系统，优先补空间成员、空间角色、目录 ACL、继承和拒绝优先策略。

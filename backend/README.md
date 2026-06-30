@@ -62,6 +62,7 @@ uv run pytest
 - `upload.expire_sessions` 维护任务，按租户清理过期上传会话并写入 `upload.expired` 审计事件。
 - Redis Lua 原子固定窗口基础限流，覆盖上传初始化、分片签名和下载预签名。
 - `quota.reconcile_space_usage` 维护任务，支持空间容量只读报告和修复模式。
+- `file.cleanup_unreferenced_blobs` 维护任务，清理 ref_count 为 0 且无版本引用的最终对象和 blob 元数据。
 - 文件下载预签名 URL 接口，按当前文件版本生成短期私有对象下载地址。
 - 下载成功和拒绝均写入 `file.downloaded` 审计事件与 outbox event。
 - 管理员 seed 脚本。
@@ -105,9 +106,9 @@ uv run pytest
 
 上传初始化请求包含 `space_id`、`parent_id`、`file_name`、`size_bytes`、`content_hash`、`hash_algo`、`mime_type` 和 `conflict_policy`。当前 `hash_algo` 仅支持 `sha256`，不支持的算法返回 `UPLOAD_HASH_ALGO_UNSUPPORTED`；当前 `conflict_policy` 仅支持 `fail`，同目录同名返回 `NODE_NAME_EXISTS`。
 
-当 `file_blobs` 已存在同租户、同 hash 算法、同内容 hash、同大小的对象时，初始化接口返回 `mode=instant`，并直接创建文件节点和首个版本。当未命中秒传时，接口创建对象存储 multipart upload 和数据库上传会话，返回 `mode=multipart`、`session_id`、`part_size_bytes`、`total_parts` 和 `expires_at`。
+当 `file_blobs` 已存在同租户、同 hash 算法、同内容 hash、同大小且状态为 `active` 的对象时，初始化接口返回 `mode=instant`，并直接创建文件节点和首个版本。若同 hash blob 正在 `deleting`，接口返回 `BLOB_DELETING`，客户端应稍后重试。当未命中可复用 blob 时，接口创建对象存储 multipart upload 和数据库上传会话，返回 `mode=multipart`、`session_id`、`part_size_bytes`、`total_parts` 和 `expires_at`。
 
-完成 multipart 上传时，客户端提交全部分片的 `part_no`、`etag` 和可选 `size_bytes`。服务端先将会话推进到 `completing`，再调用对象存储合并分片；合并后先检查对象大小，再计算服务端 `sha256` 并与初始化时的 `content_hash` 比对。二者都匹配后，若同租户同 hash、同大小 blob 已存在，会复用已有 blob 并清理本次 `uploads/...` 临时对象；若不存在，会先复制到 `objects/{tenant_id}/{hash_prefix}/{content_hash}`，再写入 blob、文件节点、版本、分片记录、容量流水和上传完成审计，提交后清理临时对象。hash 不匹配返回 `UPLOAD_HASH_MISMATCH`，上传会话标记为 `failed`，写入 `upload.failed` 审计，不创建文件版本和容量流水。重复调用已完成的 complete 会返回同一完成结果。abort 会将未完成会话标记为 `aborted`，并调用对象存储取消 multipart upload。
+完成 multipart 上传时，客户端提交全部分片的 `part_no`、`etag` 和可选 `size_bytes`。服务端先将会话推进到 `completing`，再调用对象存储合并分片；合并后先检查对象大小，再计算服务端 `sha256` 并与初始化时的 `content_hash` 比对。二者都匹配后，若同租户同 hash、同大小 active blob 已存在，会原子增加引用计数、复用已有 blob 并清理本次 `uploads/...` 临时对象；若不存在，会先复制到 `objects/{tenant_id}/{hash_prefix}/{content_hash}`，再写入 blob、文件节点、版本、分片记录、容量流水和上传完成审计，提交后清理临时对象。若同 hash blob 正在 `deleting`，complete 返回 `BLOB_DELETING` 并标记上传失败，避免复用或新建被垃圾回收占用唯一约束的 blob。hash 不匹配返回 `UPLOAD_HASH_MISMATCH`，上传会话标记为 `failed`，写入 `upload.failed` 审计，不创建文件版本和容量流水。重复调用已完成的 complete 会返回同一完成结果。abort 会将未完成会话标记为 `aborted`，并调用对象存储取消 multipart upload。
 
 过期上传由 Celery 任务 `upload.expire_sessions` 扫描处理，可传入 `tenant_id`、`limit` 和 `request_id`。任务会按租户查找已过期的 `initiated`、`uploading`、`completing` 会话，先标记为 `expired`，再最佳努力调用对象存储取消 multipart upload，并仅删除 `uploads/...` 临时对象，避免误删最终 `objects/...` 内容。对象存储清理失败不会回滚会话终态，会写入 `upload.expired` 审计 metadata 和任务统计中的 `storage_errors`。
 
@@ -133,11 +134,12 @@ uv run pytest
 - `DRIVE_DOWNLOAD_PRESIGN_RATE_LIMIT_COUNT`
 - `DRIVE_DOWNLOAD_PRESIGN_RATE_LIMIT_WINDOW_SECONDS`
 
-当前上传接口沿用临时空间拥有者访问边界。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除到回收站不释放容量；彻底删除回收站节点时通过原子 update 扣减 `quota_accounts.used_bytes`，并写入 `reason=file_purged`、`ref_type=node` 的负向容量流水。容量校准任务 `quota.reconcile_space_usage` 使用 PostgreSQL 中的文件版本记录作为事实来源，默认只报告空间容量快照和账本漂移，传入 `repair=true` 时会修复缺失的空间容量账户、校准 `quota_accounts.used_bytes`，并用 `reason=quota_reconciled` 写入账本差额和 `quota.reconciled` 系统审计。对象存储最终对象不会在彻底删除接口内同步删除，后续由 blob 垃圾回收和对象生命周期任务处理；用户/租户维度配额将在后续步骤补齐。
+当前上传接口沿用临时空间拥有者访问边界。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除到回收站不释放容量；彻底删除回收站节点时通过原子 update 扣减 `quota_accounts.used_bytes`，并写入 `reason=file_purged`、`ref_type=node` 的负向容量流水。容量校准任务 `quota.reconcile_space_usage` 使用 PostgreSQL 中的文件版本记录作为事实来源，默认只报告空间容量快照和账本漂移，传入 `repair=true` 时会修复缺失的空间容量账户、校准 `quota_accounts.used_bytes`，并用 `reason=quota_reconciled` 写入账本差额和 `quota.reconciled` 系统审计。彻底删除接口不在用户请求事务中同步删除最终对象；`file.cleanup_unreferenced_blobs` 会扫描 active、`ref_count=0` 且无 `file_versions` 引用的 blob，先标记为 `deleting`，再删除对象存储内容和 DB 元数据。对象存储删除失败会恢复为 `active` 并计入 `storage_errors`；对象存储中没有 DB 元数据的孤儿对象扫描仍需后续治理任务补齐。用户/租户维度配额将在后续步骤补齐。
 
 维护任务可通过 Celery 任务调用：
 
 - `quota.reconcile_space_usage(tenant_id=None, limit=100, repair=False, request_id=None)`
+- `file.cleanup_unreferenced_blobs(tenant_id=None, limit=100, request_id=None)`
 
 ## 下载接口
 

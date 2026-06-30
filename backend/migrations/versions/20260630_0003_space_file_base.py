@@ -52,11 +52,17 @@ def upgrade() -> None:
         sa.Column("storage_key", sa.String(length=512), nullable=False),
         sa.Column("mime_type", sa.String(length=255), nullable=True),
         sa.Column("ref_count", sa.Integer(), nullable=False),
+        sa.Column("status", sa.String(length=32), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()")),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index("ix_file_blobs_tenant_id", "file_blobs", ["tenant_id"])
+    op.create_index(
+        "idx_file_blobs_cleanup",
+        "file_blobs",
+        ["tenant_id", "status", "ref_count", "created_at"],
+    )
     op.create_index(
         "uq_file_blobs_hash",
         "file_blobs",
@@ -153,6 +159,7 @@ def downgrade() -> None:
     op.drop_index("ix_nodes_tenant_id", table_name="nodes")
     op.drop_table("nodes")
     op.drop_index("uq_file_blobs_hash", table_name="file_blobs")
+    op.drop_index("idx_file_blobs_cleanup", table_name="file_blobs")
     op.drop_index("ix_file_blobs_tenant_id", table_name="file_blobs")
     op.drop_table("file_blobs")
     op.drop_index("uq_spaces_tenant_slug", table_name="spaces")

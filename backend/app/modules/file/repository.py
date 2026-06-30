@@ -4,6 +4,7 @@ from uuid import UUID
 
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.pagination import PageCursor
 from app.modules.file.models import FileBlob, FileVersion, Node
@@ -197,6 +198,99 @@ class FileRepository:
         )
         return list(result.scalars().all())
 
+    async def list_unreferenced_blob_ids(
+        self,
+        *,
+        tenant_id: UUID,
+        limit: int,
+    ) -> list[UUID]:
+        result = await self.session.execute(
+            select(FileBlob.id)
+            .where(
+                FileBlob.tenant_id == tenant_id,
+                FileBlob.ref_count == 0,
+                FileBlob.status == "active",
+                _blob_has_no_versions(),
+            )
+            .order_by(FileBlob.created_at, FileBlob.id)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def mark_blob_deleting(
+        self,
+        *,
+        tenant_id: UUID,
+        blob_id: UUID,
+    ) -> bool:
+        result = await self.session.execute(
+            update(FileBlob)
+            .where(
+                FileBlob.tenant_id == tenant_id,
+                FileBlob.id == blob_id,
+                FileBlob.ref_count == 0,
+                FileBlob.status == "active",
+                _blob_has_no_versions(),
+            )
+            .values(status="deleting")
+            .returning(FileBlob.id)
+        )
+        return result.scalar_one_or_none() is not None
+
+    async def get_deleting_blob_for_update(
+        self,
+        *,
+        tenant_id: UUID,
+        blob_id: UUID,
+    ) -> FileBlob | None:
+        result = await self.session.execute(
+            select(FileBlob)
+            .where(
+                FileBlob.tenant_id == tenant_id,
+                FileBlob.id == blob_id,
+                FileBlob.ref_count == 0,
+                FileBlob.status == "deleting",
+                _blob_has_no_versions(),
+            )
+            .with_for_update()
+        )
+        return result.scalar_one_or_none()
+
+    async def restore_blob_active(
+        self,
+        *,
+        tenant_id: UUID,
+        blob_id: UUID,
+    ) -> None:
+        await self.session.execute(
+            update(FileBlob)
+            .where(
+                FileBlob.tenant_id == tenant_id,
+                FileBlob.id == blob_id,
+                FileBlob.status == "deleting",
+            )
+            .values(status="active")
+        )
+
+    async def delete_deleting_blob(
+        self,
+        *,
+        tenant_id: UUID,
+        blob_id: UUID,
+    ) -> bool:
+        result = await self.session.execute(
+            delete(FileBlob)
+            .where(
+                FileBlob.tenant_id == tenant_id,
+                FileBlob.id == blob_id,
+                FileBlob.ref_count == 0,
+                FileBlob.status == "deleting",
+                _blob_has_no_versions(),
+            )
+            .returning(FileBlob.id)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def decrement_blob_ref_counts(
         self,
         *,
@@ -246,3 +340,14 @@ class FileRepository:
 
     async def rollback(self) -> None:
         await self.session.rollback()
+
+
+def _blob_has_no_versions() -> ColumnElement[bool]:
+    return ~(
+        select(FileVersion.id)
+        .where(
+            FileVersion.tenant_id == FileBlob.tenant_id,
+            FileVersion.blob_id == FileBlob.id,
+        )
+        .exists()
+    )

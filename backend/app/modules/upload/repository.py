@@ -28,6 +28,25 @@ class UploadRepository:
                 FileBlob.hash_algo == hash_algo,
                 FileBlob.content_hash == content_hash,
                 FileBlob.size_bytes == size_bytes,
+                FileBlob.status == "active",
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_blob_by_hash_any_status(
+        self,
+        *,
+        tenant_id: UUID,
+        hash_algo: str,
+        content_hash: str,
+        size_bytes: int,
+    ) -> FileBlob | None:
+        result = await self.session.execute(
+            select(FileBlob).where(
+                FileBlob.tenant_id == tenant_id,
+                FileBlob.hash_algo == hash_algo,
+                FileBlob.content_hash == content_hash,
+                FileBlob.size_bytes == size_bytes,
             )
         )
         return result.scalar_one_or_none()
@@ -79,12 +98,18 @@ class UploadRepository:
         await self.session.flush()
         return version
 
-    async def increment_blob_ref_count(self, *, tenant_id: UUID, blob_id: UUID) -> None:
-        await self.session.execute(
+    async def increment_blob_ref_count(self, *, tenant_id: UUID, blob_id: UUID) -> bool:
+        result = await self.session.execute(
             update(FileBlob)
-            .where(FileBlob.tenant_id == tenant_id, FileBlob.id == blob_id)
+            .where(
+                FileBlob.tenant_id == tenant_id,
+                FileBlob.id == blob_id,
+                FileBlob.status == "active",
+            )
             .values(ref_count=FileBlob.ref_count + 1)
+            .returning(FileBlob.id)
         )
+        return result.scalar_one_or_none() is not None
 
     async def create_file_blob(
         self,
@@ -105,6 +130,7 @@ class UploadRepository:
             storage_key=storage_key,
             mime_type=mime_type,
             ref_count=ref_count,
+            status="active",
         )
         self.session.add(blob)
         await self.session.flush()

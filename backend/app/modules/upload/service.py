@@ -108,6 +108,14 @@ class UploadService:
                 mime_type=mime_type or existing_blob.mime_type,
                 audit_context=audit_context,
             )
+        existing_blob_any_status = await self.repository.get_blob_by_hash_any_status(
+            tenant_id=current_user.tenant_id,
+            hash_algo=hash_algo,
+            content_hash=content_hash,
+            size_bytes=size_bytes,
+        )
+        if existing_blob_any_status is not None:
+            raise ApiError("BLOB_DELETING", "文件内容正在清理，请稍后重试", status_code=409)
 
         return await self._create_multipart_upload(
             current_user=current_user,
@@ -217,10 +225,12 @@ class UploadService:
                 mime_type=mime_type,
                 created_by=current_user.id,
             )
-            await self.repository.increment_blob_ref_count(
+            blob_referenced = await self.repository.increment_blob_ref_count(
                 tenant_id=current_user.tenant_id,
                 blob_id=blob_id,
             )
+            if not blob_referenced:
+                raise ApiError("BLOB_DELETING", "文件内容正在清理，请稍后重试", status_code=409)
             node.current_version_id = version.id
             await self.quota_service.reserve_file_version(
                 tenant_id=current_user.tenant_id,
@@ -238,6 +248,9 @@ class UploadService:
                 metadata=instant_upload_metadata(node=node, blob_id=blob_id),
             )
             await self.repository.commit()
+        except ApiError:
+            await self.repository.rollback()
+            raise
         except IntegrityError as exc:
             await self.repository.rollback()
             raise node_name_conflict_error() from exc

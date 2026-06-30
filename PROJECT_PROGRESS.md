@@ -21,7 +21,7 @@
 - 同步更新 README、后端 README、执行计划和完整技术计划书中的基础限流状态、配置项和下一步说明。
 - 新增 `DELETE /api/v1/files/{node_id}/purge` 彻底删除接口，只允许彻底删除已在回收站的节点。
 - 删除到回收站保持容量占用不变；彻底删除会删除节点元数据和文件版本，按版本大小合计释放空间容量，并写入 `reason=file_purged`、`ref_type=node` 的负向容量流水。
-- 彻底删除会扣减相关 `file_blobs.ref_count`，但不在接口事务中同步删除对象存储最终对象，后续由 blob 垃圾回收和对象生命周期任务处理。
+- 彻底删除会扣减相关 `file_blobs.ref_count`，但不在接口事务中同步删除对象存储最终对象；本轮已由 `file.cleanup_unreferenced_blobs` 维护任务接管 DB 驱动的最终对象清理。
 - 补充彻底删除响应模型 `PurgeNodeResponse`，返回根节点 ID、彻底删除节点数量和释放容量字节数。
 - 补充文件操作测试，覆盖软删不释放容量、彻底删除文件释放容量、彻底删除目录释放后代版本容量、blob 引用计数扣减、审计写入、活跃节点和根目录拒绝彻底删除。
 - 同步更新 README、后端 README、执行计划和完整技术计划书中的彻底删除容量释放策略、接口清单、后续容量校准和对象生命周期边界。
@@ -43,10 +43,15 @@
 - 容量校准修复模式会补建缺失的空间容量账户、校准 `quota_accounts.used_bytes`，并用 `reason=quota_reconciled` 写入账本差额；修复时写入 `quota.reconciled` 系统审计和 outbox event。
 - 新增 Celery 维护任务 `quota.reconcile_space_usage` 并路由到 `maintenance` 队列，支持 `tenant_id`、`limit`、`repair` 和 `request_id` 参数。
 - 补充容量校准测试，覆盖只读报告不落库、修复快照和账本漂移、补建缺失空间容量账户、系统审计写入和 worker 聚合入口。
+- 新增 `file_blobs.status`，用 `active` / `deleting` 区分可复用内容对象和正在清理的内容对象；上传秒传和 multipart complete 只复用 active blob，同 hash blob 正在清理时返回 `BLOB_DELETING`。
+- 新增 `BlobCleanupService`，按租户扫描 `ref_count=0`、`status=active` 且无 `file_versions` 引用的 blob，先标记为 `deleting`，再在数据库事务外删除对象存储内容，最后删除 blob 元数据。
+- 对象存储删除失败时会恢复 blob 为 `active`，计入 `storage_errors`，并写入 `file.blob.cleanup_failed` 系统审计；删除成功会写入 `file.blob.cleaned` 系统审计和 outbox event。
+- 新增 Celery 维护任务 `file.cleanup_unreferenced_blobs` 并路由到 `maintenance` 队列，支持 `tenant_id`、`limit` 和 `request_id` 参数。
+- 补充 blob 清理测试，覆盖成功清理对象和元数据、对象存储删除失败恢复 active、仍被版本引用时跳过、worker 聚合入口和上传初始化遇到 deleting blob 时拒绝复用。
 
 ### 进行中
 
-- 准备提交并推送容量校准恢复结果；代码和文档已完成，下一步转入 blob/object 垃圾回收和对象生命周期任务。
+- Sprint 3 上传下载、容量校准和 DB 驱动的 blob/object 清理已形成闭环；下一步进入 Sprint 4 权限系统。
 
 ### 阻塞与风险
 
@@ -54,13 +59,14 @@
 - 当前 Redis 限流仍是固定窗口策略，适用于上传初始化、分片签名和下载预签名的基础保护；若后续需要滑动窗口、令牌桶、多层级动态规则或管理端配置，应切换成熟限流库。
 - 当前空间、文件树、上传和下载接口仍暂以“当前租户 + 空间拥有者”作为访问边界，空间成员、目录 ACL、继承权限和拒绝优先策略尚未接入；该边界已在 README 和后端 README 标为临时实现。
 - 过期上传清理已覆盖数据库会话终态、multipart abort 和 `uploads/...` 临时对象删除；对象复制成功但数据库最终化失败后的 `objects/...` 孤儿对象扫描仍需后续生命周期任务兜底。
-- 当前容量实现已覆盖空间维度的文件版本创建、彻底删除释放和空间容量校准；用户/租户维度配额、定时调度配置、监控告警和 blob/object 垃圾回收仍需后续补齐。
+- 当前容量实现已覆盖空间维度的文件版本创建、彻底删除释放、空间容量校准和 DB 驱动的 blob/object 清理；用户/租户维度配额、定时调度配置和监控告警仍需后续补齐。
+- `file.cleanup_unreferenced_blobs` 只清理仍有 DB blob 元数据且已无版本引用的最终对象；对象存储里没有 DB 元数据的孤儿对象扫描仍需后续治理任务兜底。
 - 当前清理任务按批次扫描租户内过期会话，尚未接入定时调度配置、任务监控指标和失败告警。
 - 当前基础限流覆盖上传初始化、分片签名和下载预签名；登录失败、外链访问、搜索和管理接口限流仍需随对应模块接入。
 
 ### 下一步
 
-- 完成容量校准恢复的全量验证、提交和推送后，推进 blob/object 垃圾回收和对象生命周期任务：扫描 `file_blobs.ref_count=0` 的最终对象，安全删除对象存储内容并记录审计。
+- 完成本轮 blob/object 清理任务的全量验证、提交和推送后，进入 Sprint 4 权限系统：先补空间成员与空间角色模型，再接目录 ACL、继承和拒绝优先策略。
 
 ### 涉及文件
 
@@ -84,7 +90,9 @@
 - `backend/app/modules/upload/hash.py`
 - `backend/app/modules/upload/router.py`
 - `backend/app/modules/file/router.py`
+- `backend/app/modules/file/blob_cleanup.py`
 - `backend/app/modules/file/repository.py`
+- `backend/app/modules/file/models.py`
 - `backend/app/modules/file/schemas.py`
 - `backend/app/modules/file/service.py`
 - `backend/app/modules/file/tree.py`
@@ -92,6 +100,7 @@
 - `backend/app/modules/quota/service.py`
 - `backend/app/modules/quota/reconciliation.py`
 - `backend/app/workers/quota_tasks.py`
+- `backend/app/workers/file_tasks.py`
 - `backend/app/modules/auth/repository.py`
 - `backend/app/modules/auth/router.py`
 - `backend/app/modules/auth/service.py`
@@ -105,6 +114,7 @@
 - `backend/tests/test_auth.py`
 - `backend/tests/test_space_file.py`
 - `backend/tests/test_quota_reconciliation.py`
+- `backend/tests/test_blob_cleanup.py`
 - `backend/tests/helpers.py`
 - `README.md`
 - `backend/README.md`
@@ -170,6 +180,16 @@
 - 已运行 `uv run alembic upgrade head --sql`，确认当前迁移仍可生成 PostgreSQL SQL。
 - 已运行 `git diff --check`，未发现空白错误。
 - 本轮容量校准恢复未启动 API、Worker 或 Docker Compose 服务；已确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 未监听。
+- 已运行 `uv run ruff format .`，格式化 blob 清理相关文件。
+- 已运行 `uv run pytest tests/test_blob_cleanup.py`，结果为 5 passed。
+- 已运行 `uv run pytest tests/test_upload.py tests/test_file_operations.py`，结果为 19 passed。
+- 已运行 `uv run ruff format --check .`，结果为 100 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 80 source files。
+- 已运行 `uv run pytest`，结果为 58 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认 `file_blobs.status` 和 `idx_file_blobs_cleanup` 可生成 PostgreSQL SQL。
+- 已运行 `git diff --check`，未发现空白错误。
+- 本轮 blob/object 清理实现未启动 API、Worker 或 Docker Compose 服务。
 
 ## 2026-06-30
 
