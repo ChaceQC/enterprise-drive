@@ -87,3 +87,12 @@ class StorageAdapter(Protocol):
         expires_in_seconds: int,
     ) -> PresignedDownload:
         """Create a short-lived URL for downloading one private object."""
+
+    async def calculate_object_hash(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        hash_algo: str,
+    ) -> str:
+        """Calculate a content hash for one completed private object."""

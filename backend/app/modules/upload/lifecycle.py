@@ -21,6 +21,7 @@ from app.modules.upload.audit import (
     failed_upload_metadata,
     record_upload_event,
 )
+from app.modules.upload.hash import ensure_supported_upload_hash_algo, normalize_upload_hash
 from app.modules.upload.models import UploadSession
 from app.modules.upload.repository import UploadRepository
 from app.modules.upload.schemas import (
@@ -113,6 +114,12 @@ class UploadLifecycleService:
                 audit_context=audit_context,
             )
             raise ApiError("UPLOAD_SIZE_MISMATCH", "上传对象大小不匹配", status_code=422)
+
+        await self._validate_completed_object_hash(
+            current_user=current_user,
+            upload_session=upload_session,
+            audit_context=audit_context,
+        )
 
         upload_session = await self._get_upload_session_for_update(
             current_user=current_user,
@@ -300,6 +307,51 @@ class UploadLifecycleService:
             metadata=failed_upload_metadata(upload_session=upload_session, reason=reason),
         )
         await self.repository.commit()
+
+    async def _validate_completed_object_hash(
+        self,
+        *,
+        current_user: User,
+        upload_session: UploadSession,
+        audit_context: AuditContext | None,
+    ) -> None:
+        try:
+            ensure_supported_upload_hash_algo(upload_session.hash_algo)
+        except ApiError:
+            await self._mark_failed(
+                current_user=current_user,
+                session_id=upload_session.id,
+                reason="unsupported_hash_algo",
+                audit_context=audit_context,
+            )
+            raise
+
+        hash_algo = upload_session.hash_algo.lower()
+        try:
+            actual_hash = await self.storage.calculate_object_hash(
+                bucket=upload_session.storage_bucket,
+                storage_key=upload_session.storage_key,
+                hash_algo=hash_algo,
+            )
+        except Exception as exc:
+            await self._mark_failed(
+                current_user=current_user,
+                session_id=upload_session.id,
+                reason="hash_calculation_failed",
+                audit_context=audit_context,
+            )
+            raise ApiError(
+                "UPLOAD_HASH_VALIDATION_FAILED", "上传文件 hash 校验失败", status_code=502
+            ) from exc
+
+        if normalize_upload_hash(actual_hash) != normalize_upload_hash(upload_session.content_hash):
+            await self._mark_failed(
+                current_user=current_user,
+                session_id=upload_session.id,
+                reason="hash_mismatch",
+                audit_context=audit_context,
+            )
+            raise ApiError("UPLOAD_HASH_MISMATCH", "上传文件 hash 不匹配", status_code=422)
 
     async def _get_upload_session_for_update(
         self,

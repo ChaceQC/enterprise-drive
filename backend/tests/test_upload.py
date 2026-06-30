@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from uuid import UUID
 
 import pytest
@@ -27,6 +28,10 @@ from tests.helpers import (
 from tests.helpers import (
     settings as settings,
 )
+
+
+def zero_bytes_sha256(size_bytes: int) -> str:
+    return hashlib.sha256(b"\x00" * size_bytes).hexdigest()
 
 
 @pytest.mark.asyncio
@@ -243,6 +248,7 @@ async def test_complete_multipart_upload_creates_file_version_and_is_idempotent(
     token = await login(client)
     space = await create_space(client, token, slug="complete-upload-space")
     size_bytes = settings.upload_part_size_bytes + 128
+    content_hash = zero_bytes_sha256(size_bytes)
     init_response = await client.post(
         "/api/v1/uploads/init",
         headers={"Authorization": f"Bearer {token}", "X-Request-ID": "req_upload_start"},
@@ -251,7 +257,7 @@ async def test_complete_multipart_upload_creates_file_version_and_is_idempotent(
             "parent_id": space["root_node_id"],
             "file_name": "完整上传.bin",
             "size_bytes": size_bytes,
-            "content_hash": "e" * 64,
+            "content_hash": content_hash,
             "hash_algo": "sha256",
             "mime_type": "application/octet-stream",
         },
@@ -322,6 +328,8 @@ async def test_complete_multipart_upload_creates_file_version_and_is_idempotent(
     assert upload_session.completed_node_id == node.id
     assert upload_session.completed_version_id == version.id
     assert upload_session.completed_blob_id == blob.id
+    assert upload_session.content_hash == content_hash
+    assert blob.content_hash == content_hash
     assert blob.ref_count == 1
     assert blob.storage_key.startswith(f"uploads/{space['tenant_id']}/")
     assert node.name == "完整上传.bin"
@@ -338,6 +346,109 @@ async def test_complete_multipart_upload_creates_file_version_and_is_idempotent(
     assert [(part.part_no, part.etag) for part in upload_parts] == [(1, "etag-1"), (2, "etag-2")]
     assert audit.request_id == "req_upload_complete"
     assert outbox_event.aggregate_type == "audit_log"
+
+
+@pytest.mark.asyncio
+async def test_complete_upload_rejects_hash_mismatch_without_creating_version(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="hash-mismatch-space")
+    size_bytes = 1024
+    init_response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "file_name": "hash不匹配.bin",
+            "size_bytes": size_bytes,
+            "content_hash": "2" * 64,
+            "hash_algo": "sha256",
+        },
+    )
+
+    response = await client.post(
+        f"/api/v1/uploads/{init_response.json()['session_id']}/complete",
+        headers={"Authorization": f"Bearer {token}", "X-Request-ID": "req_upload_hash_mismatch"},
+        json={"parts": [{"part_no": 1, "etag": "etag-1", "size_bytes": size_bytes}]},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "UPLOAD_HASH_MISMATCH"
+
+    async with session_factory() as session:
+        upload_session = (
+            await session.execute(
+                select(UploadSession).where(
+                    UploadSession.id == UUID(init_response.json()["session_id"])
+                )
+            )
+        ).scalar_one()
+        blobs = (await session.execute(select(FileBlob))).scalars().all()
+        nodes = (
+            (
+                await session.execute(
+                    select(Node).where(Node.parent_id == UUID(str(space["root_node_id"])))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        versions = (await session.execute(select(FileVersion))).scalars().all()
+        quota_account = (await session.execute(select(QuotaAccount))).scalar_one()
+        ledgers = (await session.execute(select(QuotaLedger))).scalars().all()
+        audit = (
+            await session.execute(select(AuditLog).where(AuditLog.action == "upload.failed"))
+        ).scalar_one()
+
+    assert upload_session.status == "failed"
+    assert upload_session.completed_node_id is None
+    assert upload_session.completed_version_id is None
+    assert upload_session.completed_blob_id is None
+    assert blobs == []
+    assert nodes == []
+    assert versions == []
+    assert quota_account.used_bytes == 0
+    assert ledgers == []
+    assert audit.request_id == "req_upload_hash_mismatch"
+    assert audit.result == "denied"
+    assert audit.metadata_json["reason"] == "hash_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_init_upload_rejects_unsupported_hash_algo(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="unsupported-hash-space")
+
+    response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "file_name": "md5.bin",
+            "size_bytes": 1024,
+            "content_hash": "3" * 32,
+            "hash_algo": "md5",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "UPLOAD_HASH_ALGO_UNSUPPORTED"
+
+    async with session_factory() as session:
+        sessions = (await session.execute(select(UploadSession))).scalars().all()
+
+    assert sessions == []
 
 
 @pytest.mark.asyncio

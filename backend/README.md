@@ -55,9 +55,9 @@ uv run pytest
 - S3/MinIO 对象存储适配器，业务层通过 `StorageAdapter` 协议隔离具体 SDK。
 - 上传初始化、上传状态查询、分片预签名 URL、multipart complete 和 abort 接口。
 - 秒传分支：命中同租户同 hash、同大小 blob 时直接创建文件节点和版本，并增加 blob 引用计数。
-- multipart complete 成功后写入 `file_blobs`、`nodes`、`file_versions`、`upload_parts` 和上传会话完成结果。
+- multipart complete 成功合并后服务端校验 `sha256`，通过后写入 `file_blobs`、`nodes`、`file_versions`、`upload_parts` 和上传会话完成结果。
 - 秒传和 multipart complete 创建文件版本时原子增加空间容量快照，并写入 `quota_ledger` 容量流水。
-- 上传初始化、秒传、complete、abort 和失败审计事件。
+- 上传初始化、秒传、complete、abort 和 hash 不匹配等失败审计事件。
 - 文件下载预签名 URL 接口，按当前文件版本生成短期私有对象下载地址。
 - 下载成功和拒绝均写入 `file.downloaded` 审计事件与 outbox event。
 - 管理员 seed 脚本。
@@ -95,11 +95,11 @@ uv run pytest
 - `POST /api/v1/uploads/{session_id}/complete`
 - `POST /api/v1/uploads/{session_id}/abort`
 
-上传初始化请求包含 `space_id`、`parent_id`、`file_name`、`size_bytes`、`content_hash`、`hash_algo`、`mime_type` 和 `conflict_policy`。当前 `conflict_policy` 仅支持 `fail`，同目录同名返回 `NODE_NAME_EXISTS`。
+上传初始化请求包含 `space_id`、`parent_id`、`file_name`、`size_bytes`、`content_hash`、`hash_algo`、`mime_type` 和 `conflict_policy`。当前 `hash_algo` 仅支持 `sha256`，不支持的算法返回 `UPLOAD_HASH_ALGO_UNSUPPORTED`；当前 `conflict_policy` 仅支持 `fail`，同目录同名返回 `NODE_NAME_EXISTS`。
 
 当 `file_blobs` 已存在同租户、同 hash 算法、同内容 hash、同大小的对象时，初始化接口返回 `mode=instant`，并直接创建文件节点和首个版本。当未命中秒传时，接口创建对象存储 multipart upload 和数据库上传会话，返回 `mode=multipart`、`session_id`、`part_size_bytes`、`total_parts` 和 `expires_at`。
 
-完成 multipart 上传时，客户端提交全部分片的 `part_no`、`etag` 和可选 `size_bytes`。服务端先将会话推进到 `completing`，再调用对象存储合并分片，合并成功后写入 blob、文件节点、版本、分片记录和上传完成审计。重复调用已完成的 complete 会返回同一完成结果。abort 会将未完成会话标记为 `aborted`，并调用对象存储取消 multipart upload。
+完成 multipart 上传时，客户端提交全部分片的 `part_no`、`etag` 和可选 `size_bytes`。服务端先将会话推进到 `completing`，再调用对象存储合并分片；合并后先检查对象大小，再计算服务端 `sha256` 并与初始化时的 `content_hash` 比对，二者都匹配后才写入 blob、文件节点、版本、分片记录、容量流水和上传完成审计。hash 不匹配返回 `UPLOAD_HASH_MISMATCH`，上传会话标记为 `failed`，写入 `upload.failed` 审计，不创建文件版本和容量流水。重复调用已完成的 complete 会返回同一完成结果。abort 会将未完成会话标记为 `aborted`，并调用对象存储取消 multipart upload。
 
 对象存储和上传策略由以下环境变量控制：
 
@@ -114,7 +114,7 @@ uv run pytest
 - `DRIVE_DOWNLOAD_PRESIGN_EXPIRES_SECONDS`
 - `DRIVE_DEFAULT_SPACE_QUOTA_BYTES`
 
-当前上传接口沿用临时空间拥有者访问边界。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除释放容量、容量校准、用户/租户维度配额、服务端 hash 校验、最终对象 key 规整、过期会话清理和上传限流将在后续步骤补齐。
+当前上传接口沿用临时空间拥有者访问边界。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除释放容量、容量校准、用户/租户维度配额、最终对象 key 规整、过期会话清理和上传限流将在后续步骤补齐。
 
 ## 下载接口
 

@@ -67,24 +67,29 @@
 - 上传初始化会快速检查空间剩余容量；秒传和 multipart complete 创建文件版本时原子增加空间容量快照并写入 `quota_ledger`。
 - 补充空间和上传测试，覆盖空间容量账户创建、秒传容量流水、multipart complete 容量流水和容量不足拒绝。
 - 同步更新 README、后端 README、执行计划和完整技术计划书中的容量账本初版状态、环境变量和后续限制。
+- 新增上传 hash 工具，仅允许 `sha256` 上传 hash 算法，并在初始化上传时统一规范化 hash。
+- 扩展 `StorageAdapter`，补充已完成对象的服务端 hash 计算能力；S3/MinIO 适配器通过 `get_object` 流式计算 `sha256`，测试适配器按对象内容或分片大小模拟 hash。
+- multipart complete 在对象存储合并和大小校验后，会服务端计算对象 `sha256` 并与初始化时的 `content_hash` 比对，匹配后才创建 `file_blobs`、`nodes`、`file_versions` 和 `quota_ledger`。
+- hash 不匹配时上传会话标记为 `failed`，写入 `upload.failed` 审计事件，返回 `UPLOAD_HASH_MISMATCH`，不创建文件版本、blob 和容量流水。
+- 同步更新 README、后端 README、执行计划和完整技术计划书中的服务端 hash 校验、错误码、失败行为和后续限制。
 
 ### 进行中
 
-- Sprint 3 服务端 hash 校验、最终对象 key 规整、上传清理任务、上传/下载限流、容量释放和容量校准设计与实现。
+- Sprint 3 最终对象 key 规整、上传清理任务、上传/下载限流、容量释放和容量校准设计与实现。
 
 ### 阻塞与风险
 
 - 当前空间和文件树接口暂以“当前租户 + 空间拥有者”作为访问边界，空间成员、目录 ACL、继承权限和拒绝优先策略尚未接入；该边界已在 README 和后端 README 标为临时实现，后续需要由权限模块替换。
 - 当前目录删除和恢复为同步遍历当前子树，适合 Sprint 2 骨架和普通目录验证；大目录后续需要改为后台任务或引入 `deleted_root_id` 等冗余状态，避免长事务。
 - `conflict_policy` 当前实现为 fail-only，同名冲突返回 `NODE_NAME_EXISTS`；`keep_both` 和 `replace` 后续按上传/版本策略补充。
-- 当前上传下载接口已完成 init、status、part presign、complete、abort、download presign 和空间容量账本初版；过期会话清理、上传/下载限流、容量释放和容量校准尚未接入。
+- 当前上传下载接口已完成 init、status、part presign、complete、abort、download presign、空间容量账本初版和 multipart complete 后服务端 `sha256` 校验；过期会话清理、上传/下载限流、容量释放和容量校准尚未接入。
 - 当前上传和下载权限仍沿用“当前租户 + 空间拥有者”临时边界，后续需要由 Sprint 4 权限模块替换。
-- 当前对象存储上传完成后暂以 `upload_sessions.storage_key` 作为 blob 的 `storage_key`；最终 `objects/{tenant_id}/{hash_prefix}/{content_hash}` key 规整、完成后 hash 校验和生命周期清理策略需在后续步骤落地。
+- 当前对象存储上传完成后暂以 `upload_sessions.storage_key` 作为 blob 的 `storage_key`；最终 `objects/{tenant_id}/{hash_prefix}/{content_hash}` key 规整和生命周期清理策略需在后续步骤落地。
 - 当前容量初版仅覆盖空间维度和文件版本创建场景；用户/租户维度配额、删除释放容量、历史空间回填和定期校准任务仍需后续补齐。
 
 ### 下一步
 
-- 实现服务端 hash 校验：multipart complete 后读取对象内容或对象存储校验信息，校验 `content_hash` 后再创建文件版本；随后补最终对象 key 规整、过期上传清理、上传/下载限流、容量释放和容量校准。
+- 实现最终对象 key 规整：multipart complete 校验通过后，将对象迁移或复制到 `objects/{tenant_id}/{hash_prefix}/{content_hash}`，并处理重复 blob、孤儿临时对象和失败补偿；随后补过期上传清理、上传/下载限流、容量释放和容量校准。
 
 ### 涉及文件
 
@@ -99,6 +104,7 @@
 - `backend/app/modules/upload/router.py`
 - `backend/app/modules/upload/service.py`
 - `backend/app/modules/upload/lifecycle.py`
+- `backend/app/modules/upload/hash.py`
 - `backend/app/modules/quota/models.py`
 - `backend/app/modules/quota/repository.py`
 - `backend/app/modules/quota/service.py`
@@ -232,4 +238,20 @@
 - 已运行 `uv run python -m scripts.seed_admin`，管理员 seed 通过。
 - 已启动本地 API `uv run uvicorn app.main:app --host 127.0.0.1 --port 18080`。
 - 已使用 Python/httpx 真实验证 `/healthz`、`/api/v1/auth/login`、`POST /api/v1/spaces`、`POST /api/v1/uploads/init`、`POST /api/v1/uploads/{session_id}/parts/{part_no}/presign`、直接 PUT 两个分片到 MinIO 预签名 URL 和 `POST /api/v1/uploads/{session_id}/complete`；随后直接查询真实 PostgreSQL，确认空间 `quota_accounts.used_bytes` 和 `quota_ledger.delta_bytes` 均为 8,390,656，`quota_ledger.reason=file_version_created`。
+- 验证完成后已关闭本次启动的 API 和 Docker Compose 服务，并确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 不再监听。
+- 已运行 `uv run ruff format .`，格式化服务端 hash 校验相关代码和测试。
+- 已运行 `uv run pytest tests/test_upload.py tests/test_download.py`，结果为 12 passed。
+- 已运行 `uv sync --frozen --all-extras --dev`。
+- 已运行 `uv run ruff format --check .`，结果为 85 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 69 source files。
+- 已运行 `uv run pytest`，结果为 38 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认当前迁移仍可生成 PostgreSQL SQL。
+- 已确认启动前 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 未监听。
+- 已启动 Docker Compose 依赖服务 `postgres`、`redis`、`minio`、`opensearch` 并等待健康。
+- 已运行 `uv run alembic upgrade head`，真实 PostgreSQL migration 通过。
+- 已运行 `uv run python -m scripts.seed_admin`，管理员 seed 通过。
+- 已启动本地 API `uv run uvicorn app.main:app --host 127.0.0.1 --port 18080`。
+- 已使用 Python/httpx 真实验证 `/healthz`、`/api/v1/auth/login`、`POST /api/v1/spaces`、`POST /api/v1/uploads/init`、`POST /api/v1/uploads/{session_id}/parts/{part_no}/presign`、直接 PUT 两个分片到 MinIO 预签名 URL、`POST /api/v1/uploads/{session_id}/complete` 和 `GET /api/v1/files/{node_id}/download`；服务端 `sha256` 与原始内容匹配时 complete 成功，下载字节数 8,390,708 且内容一致。
+- 已使用 Python/httpx 真实验证错误 `content_hash` 的 multipart complete 返回 `UPLOAD_HASH_MISMATCH`；随后直接查询真实 PostgreSQL，确认失败会话状态为 `failed`，`completed_node_id`、`completed_version_id`、`completed_blob_id` 均为空，文件版本/blob/容量流水数量未增加，`upload.failed` 审计 metadata reason 为 `hash_mismatch`。
 - 验证完成后已关闭本次启动的 API 和 Docker Compose 服务，并确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 不再监听。

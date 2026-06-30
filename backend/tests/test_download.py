@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from uuid import UUID
 
 import pytest
@@ -27,6 +28,10 @@ from tests.helpers import (
 )
 
 
+def zero_bytes_sha256(size_bytes: int) -> str:
+    return hashlib.sha256(b"\x00" * size_bytes).hexdigest()
+
+
 async def complete_small_file(
     client: AsyncClient,
     token: str,
@@ -43,7 +48,7 @@ async def complete_small_file(
             "parent_id": parent_id,
             "file_name": file_name,
             "size_bytes": 1024,
-            "content_hash": "4" * 64,
+            "content_hash": zero_bytes_sha256(1024),
             "hash_algo": "sha256",
             "mime_type": "text/plain",
         },

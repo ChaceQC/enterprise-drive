@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from datetime import timedelta
 from typing import Any
 from urllib.parse import quote
@@ -155,6 +156,17 @@ class S3StorageAdapter:
             headers={},
         )
 
+    async def calculate_object_hash(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        hash_algo: str,
+    ) -> str:
+        if hash_algo != "sha256":
+            raise ValueError(f"unsupported hash algorithm: {hash_algo}")
+        return await asyncio.to_thread(self._calculate_sha256, bucket, storage_key)
+
     def _ensure_bucket(self, bucket: str) -> None:
         try:
             self._client.head_bucket(Bucket=bucket)
@@ -165,3 +177,15 @@ class S3StorageAdapter:
                     "LocationConstraint": self.settings.s3_region
                 }
             self._client.create_bucket(**kwargs)
+
+    def _calculate_sha256(self, bucket: str, storage_key: str) -> str:
+        response = self._client.get_object(Bucket=bucket, Key=storage_key)
+        digest = hashlib.sha256()
+        body = response["Body"]
+        try:
+            for chunk in body.iter_chunks(chunk_size=1024 * 1024):
+                if chunk:
+                    digest.update(chunk)
+        finally:
+            body.close()
+        return digest.hexdigest()

@@ -23,6 +23,7 @@ from app.modules.upload.audit import (
     multipart_upload_metadata,
     record_upload_event,
 )
+from app.modules.upload.hash import ensure_supported_upload_hash_algo, normalize_upload_hash
 from app.modules.upload.models import UploadSession
 from app.modules.upload.repository import UploadRepository
 from app.modules.upload.schemas import (
@@ -67,6 +68,10 @@ class UploadService:
         mime_type: str | None,
         audit_context: AuditContext | None = None,
     ) -> InitUploadResponse:
+        ensure_supported_upload_hash_algo(hash_algo)
+        hash_algo = hash_algo.lower()
+        content_hash = normalize_upload_hash(content_hash)
+
         parent = await self._get_owned_parent_folder(
             current_user=current_user,
             space_id=space_id,
