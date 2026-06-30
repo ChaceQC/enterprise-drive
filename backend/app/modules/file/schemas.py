@@ -37,6 +37,7 @@ class FileNodeResponse(BaseModel):
     name: str
     current_version_id: UUID | None
     permission_version: int
+    permissions: dict[str, bool] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
 

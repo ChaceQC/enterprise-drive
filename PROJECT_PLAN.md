@@ -63,7 +63,7 @@
 
 - 空间成员和角色。（已完成 `space_members` 用户成员基础表、创建空间 owner 成员写入、空间级成员角色检查和 owner/admin 成员管理 API）
 - 目录 ACL、权限继承、拒绝优先。（已完成用户维度节点 ACL 基础表、管理 API、继承开关、deny 优先和文件/上传/下载关键入口校验）
-- 权限缓存和失效事件。（已完成 `permission.changed` outbox 事件写入，后续补 Redis 缓存消费和批量权限评估）
+- 权限缓存和失效事件。（已完成文件列表批量权限评估和 `permission.changed` outbox 事件写入，后续补 Redis 缓存消费）
 - 高危操作二次查库。
 
 ### Sprint 5：分享、预览、搜索
@@ -82,4 +82,4 @@
 
 ## 5. 当前下一步
 
-2026-07-01 代码审计发现的实现边界问题已完成首轮整改：浏览器认证改为 BFF + HttpOnly Cookie Session，移除 JWT/refresh token 兼容路径；对象存储默认实现已移除 `boto3/botocore` 并改用 MinIO Python SDK；Redis 固定窗口限流已改为 Lua 原子脚本。容量校准草稿已从 `stash@{0}: paused quota reconciliation draft` 恢复并整理为 `quota.reconcile_space_usage` 维护任务，worker 默认按批次和 cursor 扫完整个租户；blob/object 垃圾回收已整理为 `file.cleanup_unreferenced_blobs` 维护任务。Sprint 4 权限系统已开始，`space_members` 用户成员基础表、创建空间 owner 成员写入、空间级 `PermissionService` 角色检查和 owner/admin 空间成员管理 API 已落地，用户维度节点 ACL 基础能力已接入文件列表、文件夹创建、上传初始化、multipart complete 和下载入口，空间成员和节点 ACL 变更已写入 `permission.changed` outbox 事件。下一步补批量权限评估和 Redis 缓存消费，再随 org/search 模块扩展部门、用户组和搜索 ACL。
+2026-07-01 代码审计发现的实现边界问题已完成首轮整改：浏览器认证改为 BFF + HttpOnly Cookie Session，移除 JWT/refresh token 兼容路径；对象存储默认实现已移除 `boto3/botocore` 并改用 MinIO Python SDK；Redis 固定窗口限流已改为 Lua 原子脚本。容量校准草稿已从 `stash@{0}: paused quota reconciliation draft` 恢复并整理为 `quota.reconcile_space_usage` 维护任务，worker 默认按批次和 cursor 扫完整个租户；blob/object 垃圾回收已整理为 `file.cleanup_unreferenced_blobs` 维护任务。Sprint 4 权限系统已开始，`space_members` 用户成员基础表、创建空间 owner 成员写入、空间级 `PermissionService` 角色检查和 owner/admin 空间成员管理 API 已落地，用户维度节点 ACL 基础能力已接入文件列表、文件夹创建、上传初始化、multipart complete 和下载入口，文件列表已返回基于批量权限评估的子节点常用动作权限，空间成员和节点 ACL 变更已写入 `permission.changed` outbox 事件。下一步补 Redis 权限缓存消费，再随 org/search 模块扩展部门、用户组和搜索 ACL。

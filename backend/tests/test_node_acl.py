@@ -223,6 +223,16 @@ async def test_acl_deny_overrides_role_and_inherit_controls_descendants(
     )
     assert inherited_denied_response.status_code == 404
     assert inherited_denied_response.json()["code"] == "SPACE_NOT_FOUND"
+    denied_list_response = await client.get(
+        "/api/v1/files",
+        headers={"X-CSRF-Token": editor_token},
+        params={"space_id": space["id"], "parent_id": space["root_node_id"]},
+    )
+    assert denied_list_response.status_code == 200
+    denied_list_item = denied_list_response.json()["items"][0]
+    assert denied_list_item["id"] == child["id"]
+    assert denied_list_item["permissions"]["list"] is True
+    assert denied_list_item["permissions"]["upload"] is False
 
     admin_token = await login(client)
     update_acl_response = await client.patch(
@@ -242,6 +252,15 @@ async def test_acl_deny_overrides_role_and_inherit_controls_descendants(
         name="inherit-disabled-allowed",
     )
     assert allowed_child["name"] == "inherit-disabled-allowed"
+    allowed_list_response = await client.get(
+        "/api/v1/files",
+        headers={"X-CSRF-Token": editor_token},
+        params={"space_id": space["id"], "parent_id": space["root_node_id"]},
+    )
+    assert allowed_list_response.status_code == 200
+    allowed_list_item = allowed_list_response.json()["items"][0]
+    assert allowed_list_item["id"] == child["id"]
+    assert allowed_list_item["permissions"]["upload"] is True
 
     root_denied_response = await client.post(
         "/api/v1/files/folders",

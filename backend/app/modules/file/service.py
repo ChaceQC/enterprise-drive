@@ -35,7 +35,7 @@ from app.modules.permission.actions import (
     ACTION_UPDATE,
     ACTION_UPLOAD,
 )
-from app.modules.permission.service import PermissionService
+from app.modules.permission.service import FILE_LIST_PERMISSION_ACTIONS, PermissionService
 from app.modules.quota.service import QuotaService
 from app.modules.space.models import Space
 from app.modules.space.repository import SpaceRepository
@@ -129,7 +129,7 @@ class FileService:
             space=space,
             parent_id=parent_id,
         )
-        await self._ensure_node_access(
+        parent_path_ids = await self._ensure_node_access(
             current_user=current_user,
             node=parent_node,
             action=ACTION_LIST,
@@ -152,10 +152,22 @@ class FileService:
                 created_at=last_item.created_at,
                 item_id=last_item.id,
             )
+        permissions = await self.permission_service.batch_check_nodes(
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+            space_id=space.id,
+            node_paths={node.id: [*parent_path_ids, node.id] for node in items},
+            actions=FILE_LIST_PERMISSION_ACTIONS,
+        )
         return FileListResponse(
             space_id=space.id,
             parent_id=parent_node.id,
-            items=[FileNodeResponse.model_validate(node) for node in items],
+            items=[
+                FileNodeResponse.model_validate(node).model_copy(
+                    update={"permissions": permissions.get(node.id, {})}
+                )
+                for node in items
+            ],
             next_cursor=next_cursor,
         )
 
@@ -550,7 +562,7 @@ class FileService:
         action: str,
         error_code: str,
         include_deleted: bool = False,
-    ) -> None:
+    ) -> list[UUID]:
         node_path_ids = await self.repository.get_node_path_ids(
             tenant_id=current_user.tenant_id,
             space_id=node.space_id,
@@ -570,6 +582,8 @@ class FileService:
             if error_code == "NODE_NOT_FOUND":
                 raise ApiError(error_code, "节点不存在或无权访问", status_code=404)
             raise ApiError(error_code, "空间不存在或无权访问", status_code=404)
+        assert node_path_ids is not None
+        return node_path_ids
 
     async def _ensure_name_available(
         self,
