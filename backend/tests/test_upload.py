@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings
 from app.modules.audit.models import AuditLog, OutboxEvent
 from app.modules.file.models import FileBlob, FileVersion, Node
+from app.modules.quota.models import QuotaAccount, QuotaLedger
 from app.modules.upload.models import UploadPart, UploadSession
 from tests.helpers import (
     client as client,
@@ -152,6 +153,8 @@ async def test_init_upload_uses_instant_upload_when_blob_exists(
                 select(FileVersion).where(FileVersion.id == UUID(payload["version_id"]))
             )
         ).scalar_one()
+        quota_account = (await session.execute(select(QuotaAccount))).scalar_one()
+        quota_ledger = (await session.execute(select(QuotaLedger))).scalar_one()
         audit = (
             await session.execute(select(AuditLog).where(AuditLog.action == "upload.instant"))
         ).scalar_one()
@@ -165,6 +168,14 @@ async def test_init_upload_uses_instant_upload_when_blob_exists(
     assert node.name == "秒传.txt"
     assert node.current_version_id == version.id
     assert version.blob_id == blob_id
+    assert quota_account.owner_type == "space"
+    assert quota_account.owner_id == UUID(str(space["id"]))
+    assert quota_account.used_bytes == 1024
+    assert quota_ledger.account_id == quota_account.id
+    assert quota_ledger.delta_bytes == 1024
+    assert quota_ledger.reason == "file_version_created"
+    assert quota_ledger.ref_type == "file_version"
+    assert quota_ledger.ref_id == version.id
     assert audit.request_id == "req_upload_instant"
     assert outbox_event.aggregate_type == "audit_log"
 
@@ -294,6 +305,8 @@ async def test_complete_multipart_upload_creates_file_version_and_is_idempotent(
                 select(FileVersion).where(FileVersion.id == UUID(payload["version_id"]))
             )
         ).scalar_one()
+        quota_account = (await session.execute(select(QuotaAccount))).scalar_one()
+        quota_ledger = (await session.execute(select(QuotaLedger))).scalar_one()
         upload_parts = (
             (await session.execute(select(UploadPart).order_by(UploadPart.part_no))).scalars().all()
         )
@@ -314,9 +327,55 @@ async def test_complete_multipart_upload_creates_file_version_and_is_idempotent(
     assert node.name == "完整上传.bin"
     assert node.current_version_id == version.id
     assert version.blob_id == blob.id
+    assert quota_account.owner_type == "space"
+    assert quota_account.owner_id == UUID(str(space["id"]))
+    assert quota_account.used_bytes == size_bytes
+    assert quota_ledger.account_id == quota_account.id
+    assert quota_ledger.delta_bytes == size_bytes
+    assert quota_ledger.reason == "file_version_created"
+    assert quota_ledger.ref_type == "file_version"
+    assert quota_ledger.ref_id == version.id
     assert [(part.part_no, part.etag) for part in upload_parts] == [(1, "etag-1"), (2, "etag-2")]
     assert audit.request_id == "req_upload_complete"
     assert outbox_event.aggregate_type == "audit_log"
+
+
+@pytest.mark.asyncio
+async def test_init_upload_rejects_when_space_quota_exceeded(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    settings.default_space_quota_bytes = 512
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="quota-small-space")
+
+    response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "file_name": "超额.bin",
+            "size_bytes": 1024,
+            "content_hash": "9" * 64,
+            "hash_algo": "sha256",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "QUOTA_EXCEEDED"
+
+    async with session_factory() as session:
+        quota_account = (await session.execute(select(QuotaAccount))).scalar_one()
+        ledgers = (await session.execute(select(QuotaLedger))).scalars().all()
+        sessions = (await session.execute(select(UploadSession))).scalars().all()
+
+    assert quota_account.limit_bytes == 512
+    assert quota_account.used_bytes == 0
+    assert ledgers == []
+    assert sessions == []
 
 
 @pytest.mark.asyncio

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings
 from app.modules.audit.models import AuditLog, OutboxEvent
 from app.modules.file.models import Node
+from app.modules.quota.models import QuotaAccount
 from app.modules.space.models import Space
 from tests.helpers import (
     client as client,
@@ -49,6 +50,7 @@ async def test_create_space_creates_root_node_and_audit(
     async with session_factory() as session:
         space = (await session.execute(select(Space))).scalar_one()
         root_node = (await session.execute(select(Node))).scalar_one()
+        quota_account = (await session.execute(select(QuotaAccount))).scalar_one()
         audit_logs = (
             (await session.execute(select(AuditLog).order_by(AuditLog.created_at, AuditLog.action)))
             .scalars()
@@ -60,6 +62,11 @@ async def test_create_space_creates_root_node_and_audit(
     assert root_node.parent_id is None
     assert root_node.node_type == "folder"
     assert root_node.name == "root"
+    assert quota_account.tenant_id == space.tenant_id
+    assert quota_account.owner_type == "space"
+    assert quota_account.owner_id == space.id
+    assert quota_account.limit_bytes == settings.default_space_quota_bytes
+    assert quota_account.used_bytes == 0
     assert [log.action for log in audit_logs] == ["auth.login", "space.created"]
     assert audit_logs[-1].request_id == "req_space_create"
     assert "audit.space.created" in {event.event_type for event in outbox_events}

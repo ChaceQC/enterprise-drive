@@ -51,7 +51,7 @@
 ### Sprint 3：上传下载
 
 - upload_session、multipart presign、complete、abort。（已完成会话初始化、状态查询、分片 presign、multipart complete 和 abort）
-- 秒传、对象存储适配、容量初版。（已完成 StorageAdapter 和秒传创建首版本；容量账本待补充）
+- 秒传、对象存储适配、容量初版。（已完成 StorageAdapter、秒传创建首版本和空间容量账本初版）
 - 下载预签名 URL。（已完成当前版本下载签名）
 - 上传下载审计。（已完成上传初始化、秒传、complete、abort 和下载成功/拒绝审计）
 
@@ -78,4 +78,4 @@
 
 ## 5. 当前下一步
 
-继续推进 Sprint 3：补齐容量账本、服务端 hash 校验、最终对象 key 规整、过期上传清理和上传/下载限流边界。
+继续推进 Sprint 3：补齐服务端 hash 校验、最终对象 key 规整、过期上传清理、上传/下载限流、容量释放和容量校准边界。

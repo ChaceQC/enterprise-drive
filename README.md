@@ -30,9 +30,9 @@
 
 当前仓库已完成 Sprint 2 空间和文件树阶段，并开始 Sprint 3 上传下载链路。已建立 `backend` 后端工程、uv 依赖锁定、FastAPI 应用入口、配置加载、结构化日志、`X-Request-ID` 中间件、统一错误响应、健康检查、本地依赖 Compose 和后端 CI。认证基础能力已落地：租户、用户、refresh token 表，管理员 seed，本地账号登录、访问令牌和刷新令牌轮换。基础审计、outbox 和 Celery audit 队列 dispatcher 已接入。空间和文件树已具备 `spaces`、`nodes`、`file_blobs`、`file_versions` 元数据表，支持创建空间、创建文件夹、按游标列出目录节点、重命名、移动、删除到回收站和恢复。
 
-Sprint 3 已落地上传会话基础：`upload_sessions`、`upload_parts` 迁移，S3/MinIO 对象存储适配器，`POST /api/v1/uploads/init` 初始化上传，`GET /api/v1/uploads/{session_id}` 查询状态，`POST /api/v1/uploads/{session_id}/parts/{part_no}/presign` 获取分片上传预签名 URL，`POST /api/v1/uploads/{session_id}/complete` 完成 multipart 上传并创建文件节点、blob 和首个版本，`POST /api/v1/uploads/{session_id}/abort` 取消未完成上传，`GET /api/v1/files/{node_id}/download` 生成短期私有对象下载预签名 URL。初始化时若命中同租户同 hash、同大小的 `file_blobs`，会走秒传分支并创建文件节点和版本，同时增加 blob 引用计数并写入审计与 outbox。下载接口会返回下载地址、过期时间、文件名、当前版本、大小和 MIME，并记录成功与拒绝审计。
+Sprint 3 已落地上传会话基础：`upload_sessions`、`upload_parts` 迁移，`quota_accounts`、`quota_ledger` 容量账本迁移，S3/MinIO 对象存储适配器，`POST /api/v1/uploads/init` 初始化上传，`GET /api/v1/uploads/{session_id}` 查询状态，`POST /api/v1/uploads/{session_id}/parts/{part_no}/presign` 获取分片上传预签名 URL，`POST /api/v1/uploads/{session_id}/complete` 完成 multipart 上传并创建文件节点、blob 和首个版本，`POST /api/v1/uploads/{session_id}/abort` 取消未完成上传，`GET /api/v1/files/{node_id}/download` 生成短期私有对象下载预签名 URL。初始化时若命中同租户同 hash、同大小的 `file_blobs`，会走秒传分支并创建文件节点和版本，同时增加 blob 引用计数并写入审计与 outbox。空间创建会初始化默认容量账户，秒传和 multipart complete 创建文件版本时会原子增加空间容量快照并写入容量流水。下载接口会返回下载地址、过期时间、文件名、当前版本、大小和 MIME，并记录成功与拒绝审计。
 
-当前的权限边界仍是临时实现：空间、文件树、上传和下载 API 仅允许当前租户下的空间拥有者访问，目录 ACL、空间成员和角色将在 Sprint 4 权限系统中接入。容量账本、服务端 hash 校验、最终对象 key 规整、过期上传清理任务和上传/下载限流仍在 Sprint 3 后续步骤中实现。
+当前的权限边界仍是临时实现：空间、文件树、上传和下载 API 仅允许当前租户下的空间拥有者访问，目录 ACL、空间成员和角色将在 Sprint 4 权限系统中接入。服务端 hash 校验、最终对象 key 规整、过期上传清理任务、上传/下载限流、容量释放和容量校准仍在后续步骤中实现。
 
 本地后端验证：
 

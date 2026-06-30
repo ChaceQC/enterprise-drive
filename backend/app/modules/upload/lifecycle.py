@@ -13,6 +13,7 @@ from app.modules.auth.models import User
 from app.modules.file.models import Node
 from app.modules.file.repository import FileRepository
 from app.modules.file.validators import node_name_conflict_error
+from app.modules.quota.service import QuotaService
 from app.modules.space.repository import SpaceRepository
 from app.modules.upload.audit import (
     aborted_upload_metadata,
@@ -36,12 +37,14 @@ class UploadLifecycleService:
         repository: UploadRepository,
         file_repository: FileRepository,
         space_repository: SpaceRepository,
+        quota_service: QuotaService,
         storage: StorageAdapter,
         audit_service: AuditService | None = None,
     ) -> None:
         self.repository = repository
         self.file_repository = file_repository
         self.space_repository = space_repository
+        self.quota_service = quota_service
         self.storage = storage
         self.audit_service = audit_service
 
@@ -69,6 +72,11 @@ class UploadLifecycleService:
             upload_session=upload_session,
         )
         await self._ensure_name_available(current_user=current_user, upload_session=upload_session)
+        await self.quota_service.ensure_space_capacity(
+            tenant_id=current_user.tenant_id,
+            space_id=upload_session.space_id,
+            size_bytes=upload_session.size_bytes,
+        )
         upload_session.status = "completing"
         await self.repository.commit()
 
@@ -160,6 +168,12 @@ class UploadLifecycleService:
                 created_by=current_user.id,
             )
             node.current_version_id = version.id
+            await self.quota_service.reserve_file_version(
+                tenant_id=current_user.tenant_id,
+                space_id=upload_session.space_id,
+                version_id=version.id,
+                size_bytes=upload_session.size_bytes,
+            )
             upload_session.status = "completed"
             upload_session.completed_node_id = node.id
             upload_session.completed_version_id = version.id
@@ -179,6 +193,16 @@ class UploadLifecycleService:
                 ),
             )
             await self.repository.commit()
+        except ApiError as exc:
+            await self.repository.rollback()
+            if exc.code == "QUOTA_EXCEEDED":
+                await self._mark_failed(
+                    current_user=current_user,
+                    session_id=session_id,
+                    reason="quota_exceeded",
+                    audit_context=audit_context,
+                )
+            raise
         except IntegrityError as exc:
             await self.repository.rollback()
             await self._mark_failed(

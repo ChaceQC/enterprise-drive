@@ -9,6 +9,7 @@ from app.modules.audit.schemas import AuditContext, AuditEvent
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
 from app.modules.file.repository import FileRepository
+from app.modules.quota.service import QuotaService
 from app.modules.space.models import Space
 from app.modules.space.repository import SpaceRepository
 from app.modules.space.schemas import CreateSpaceResponse, SpaceListResponse, SpaceResponse
@@ -20,11 +21,13 @@ class SpaceService:
         *,
         repository: SpaceRepository,
         file_repository: FileRepository,
+        quota_service: QuotaService,
         settings: Settings,
         audit_service: AuditService | None = None,
     ) -> None:
         self.repository = repository
         self.file_repository = file_repository
+        self.quota_service = quota_service
         self.settings = settings
         self.audit_service = audit_service
 
@@ -65,6 +68,10 @@ class SpaceService:
                 node_type="folder",
                 name="root",
                 normalized_name="root",
+            )
+            await self.quota_service.ensure_space_account(
+                tenant_id=current_user.tenant_id,
+                space_id=space.id,
             )
             await self._record_created(
                 current_user=current_user,

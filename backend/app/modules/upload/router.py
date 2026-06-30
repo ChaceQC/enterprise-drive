@@ -14,6 +14,8 @@ from app.modules.audit.repository import AuditRepository
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
 from app.modules.file.repository import FileRepository
+from app.modules.quota.repository import QuotaRepository
+from app.modules.quota.service import QuotaService
 from app.modules.space.repository import SpaceRepository
 from app.modules.upload.lifecycle import UploadLifecycleService
 from app.modules.upload.repository import UploadRepository
@@ -40,6 +42,10 @@ def get_upload_service(
         repository=UploadRepository(session),
         file_repository=FileRepository(session),
         space_repository=SpaceRepository(session),
+        quota_service=QuotaService(
+            repository=QuotaRepository(session),
+            default_space_limit_bytes=settings.default_space_quota_bytes,
+        ),
         storage=storage,
         settings=settings,
         audit_service=AuditService(repository=AuditRepository(session)),
@@ -48,12 +54,17 @@ def get_upload_service(
 
 def get_upload_lifecycle_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
     storage: Annotated[StorageAdapter, Depends(get_storage_adapter)],
 ) -> UploadLifecycleService:
     return UploadLifecycleService(
         repository=UploadRepository(session),
         file_repository=FileRepository(session),
         space_repository=SpaceRepository(session),
+        quota_service=QuotaService(
+            repository=QuotaRepository(session),
+            default_space_limit_bytes=settings.default_space_quota_bytes,
+        ),
         storage=storage,
         audit_service=AuditService(repository=AuditRepository(session)),
     )

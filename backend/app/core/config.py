@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     upload_part_size_bytes: int = 8 * 1024 * 1024
     upload_presign_expires_seconds: int = 900
     download_presign_expires_seconds: int = 300
+    default_space_quota_bytes: int = 1024 * 1024 * 1024 * 1024
 
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 15

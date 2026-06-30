@@ -50,10 +50,13 @@ uv run pytest
 - 文件树节点重命名、移动、删除到回收站和恢复。
 - 空间创建、文件夹创建、重命名、移动、删除和恢复审计事件。
 - `upload_sessions`、`upload_parts` 基础表和迁移。
+- `quota_accounts`、`quota_ledger` 基础表和迁移。
+- 空间创建时同步初始化默认空间容量账户。
 - S3/MinIO 对象存储适配器，业务层通过 `StorageAdapter` 协议隔离具体 SDK。
 - 上传初始化、上传状态查询、分片预签名 URL、multipart complete 和 abort 接口。
 - 秒传分支：命中同租户同 hash、同大小 blob 时直接创建文件节点和版本，并增加 blob 引用计数。
 - multipart complete 成功后写入 `file_blobs`、`nodes`、`file_versions`、`upload_parts` 和上传会话完成结果。
+- 秒传和 multipart complete 创建文件版本时原子增加空间容量快照，并写入 `quota_ledger` 容量流水。
 - 上传初始化、秒传、complete、abort 和失败审计事件。
 - 文件下载预签名 URL 接口，按当前文件版本生成短期私有对象下载地址。
 - 下载成功和拒绝均写入 `file.downloaded` 审计事件与 outbox event。
@@ -109,8 +112,9 @@ uv run pytest
 - `DRIVE_UPLOAD_PART_SIZE_BYTES`
 - `DRIVE_UPLOAD_PRESIGN_EXPIRES_SECONDS`
 - `DRIVE_DOWNLOAD_PRESIGN_EXPIRES_SECONDS`
+- `DRIVE_DEFAULT_SPACE_QUOTA_BYTES`
 
-当前上传接口沿用临时空间拥有者访问边界。容量账本、服务端 hash 校验、最终对象 key 规整、过期会话清理和上传限流将在 Sprint 3 后续步骤补齐。
+当前上传接口沿用临时空间拥有者访问边界。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除释放容量、容量校准、用户/租户维度配额、服务端 hash 校验、最终对象 key 规整、过期会话清理和上传限流将在后续步骤补齐。
 
 ## 下载接口
 

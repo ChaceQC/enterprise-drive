@@ -16,6 +16,7 @@ from app.modules.auth.models import User
 from app.modules.file.models import Node
 from app.modules.file.repository import FileRepository
 from app.modules.file.validators import node_name_conflict_error, normalize_node_name
+from app.modules.quota.service import QuotaService
 from app.modules.space.repository import SpaceRepository
 from app.modules.upload.audit import (
     instant_upload_metadata,
@@ -40,6 +41,7 @@ class UploadService:
         repository: UploadRepository,
         file_repository: FileRepository,
         space_repository: SpaceRepository,
+        quota_service: QuotaService,
         storage: StorageAdapter,
         settings: Settings,
         audit_service: AuditService | None = None,
@@ -47,6 +49,7 @@ class UploadService:
         self.repository = repository
         self.file_repository = file_repository
         self.space_repository = space_repository
+        self.quota_service = quota_service
         self.storage = storage
         self.settings = settings
         self.audit_service = audit_service
@@ -75,6 +78,11 @@ class UploadService:
             space_id=space_id,
             parent_id=parent.id,
             normalized_name=normalized_name,
+        )
+        await self.quota_service.ensure_space_capacity(
+            tenant_id=current_user.tenant_id,
+            space_id=space_id,
+            size_bytes=size_bytes,
         )
 
         existing_blob = await self.repository.get_blob_by_hash(
@@ -208,6 +216,12 @@ class UploadService:
                 blob_id=blob_id,
             )
             node.current_version_id = version.id
+            await self.quota_service.reserve_file_version(
+                tenant_id=current_user.tenant_id,
+                space_id=parent.space_id,
+                version_id=version.id,
+                size_bytes=size_bytes,
+            )
             await self.repository.flush()
             await record_upload_event(
                 audit_service=self.audit_service,
