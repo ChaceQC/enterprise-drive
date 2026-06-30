@@ -53,6 +53,7 @@
 - upload_session、multipart presign、complete、abort。（已完成会话初始化、状态查询、分片 presign、multipart complete 和 abort）
 - 秒传、对象存储适配、容量初版、服务端 hash 校验和最终对象 key 规整。（已完成 StorageAdapter、秒传创建首版本、空间容量账本初版、multipart complete 后 `sha256` 校验和 `objects/{tenant_id}/{hash_prefix}/{content_hash}` 归档）
 - 过期上传清理任务。（已完成 `upload.expire_sessions`，按租户扫描过期会话并清理临时对象）
+- 基础限流。（已完成上传初始化、分片签名和下载预签名的 Redis 固定窗口限流）
 - 下载预签名 URL。（已完成当前版本下载签名）
 - 上传下载审计。（已完成上传初始化、秒传、complete、abort、expired 和下载成功/拒绝审计）
 
@@ -79,4 +80,4 @@
 
 ## 5. 当前下一步
 
-继续推进 Sprint 3：补齐上传/下载限流、容量释放和容量校准边界；下一步优先实现上传初始化、分片签名和下载预签名的基础限流策略。
+继续推进 Sprint 3：补齐容量释放和容量校准边界；下一步优先实现文件删除到回收站或彻底删除后的容量释放策略。

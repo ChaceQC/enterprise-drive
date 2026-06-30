@@ -6,9 +6,16 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import build_audit_context, get_current_user, get_storage_adapter
+from app.api.deps import (
+    build_audit_context,
+    enforce_rate_limit,
+    get_current_user,
+    get_rate_limiter,
+    get_storage_adapter,
+)
 from app.core.config import Settings, get_settings
 from app.db.session import get_db_session
+from app.infrastructure.rate_limit.base import RateLimiter
 from app.infrastructure.storage.base import StorageAdapter
 from app.modules.audit.repository import AuditRepository
 from app.modules.audit.service import AuditService
@@ -75,8 +82,16 @@ async def init_upload(
     http_request: Request,
     request: InitUploadRequest,
     current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
     service: Annotated[UploadService, Depends(get_upload_service)],
 ) -> InitUploadResponse:
+    await enforce_rate_limit(
+        settings=settings,
+        rate_limiter=rate_limiter,
+        current_user=current_user,
+        action="upload.init",
+    )
     return await service.init_upload(
         current_user=current_user,
         space_id=request.space_id,
@@ -107,8 +122,17 @@ async def presign_upload_part(
     session_id: UUID,
     part_no: Annotated[int, Path(ge=1)],
     current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
     service: Annotated[UploadService, Depends(get_upload_service)],
 ) -> UploadPartUrlResponse:
+    await enforce_rate_limit(
+        settings=settings,
+        rate_limiter=rate_limiter,
+        current_user=current_user,
+        action="upload.part_presign",
+        resource_key=f"session:{session_id}",
+    )
     return await service.presign_upload_part(
         current_user=current_user,
         session_id=session_id,

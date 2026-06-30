@@ -6,9 +6,16 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import build_audit_context, get_current_user, get_storage_adapter
+from app.api.deps import (
+    build_audit_context,
+    enforce_rate_limit,
+    get_current_user,
+    get_rate_limiter,
+    get_storage_adapter,
+)
 from app.core.config import Settings, get_settings
 from app.db.session import get_db_session
+from app.infrastructure.rate_limit.base import RateLimiter
 from app.infrastructure.storage.base import StorageAdapter
 from app.modules.audit.repository import AuditRepository
 from app.modules.audit.service import AuditService
@@ -143,8 +150,18 @@ async def create_download_url(
     http_request: Request,
     node_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
     service: Annotated[FileDownloadService, Depends(get_file_download_service)],
 ) -> FileDownloadUrlResponse:
+    await enforce_rate_limit(
+        settings=settings,
+        rate_limiter=rate_limiter,
+        current_user=current_user,
+        action="file.download_presign",
+        resource_key=f"node:{node_id}",
+        request=http_request,
+    )
     return await service.create_download_url(
         current_user=current_user,
         node_id=node_id,

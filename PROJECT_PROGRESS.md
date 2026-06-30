@@ -12,10 +12,17 @@
 - 在 multipart complete 重新加锁最终写入前补充状态校验，避免过期清理与完成上传并发时继续创建文件版本。
 - 补充上传清理测试，覆盖过期会话清理、终态/未到期会话跳过、对象存储 abort/delete 调用和审计写入。
 - 同步更新 README、后端 README、执行计划和完整技术计划书中的过期上传清理状态、maintenance 队列职责和下一步说明。
+- 新增限流基础设施，提供 `RateLimiter` 协议、Redis 固定窗口实现和测试用内存固定窗口实现。
+- 上传初始化已按 `tenant + user` 维度接入基础限流，触发后返回 HTTP 429 和 `RATE_LIMITED`。
+- 分片签名已按 `tenant + user + upload session` 维度接入基础限流，避免同一用户不同上传会话互相误伤。
+- 下载预签名已按 `tenant + user + node + IP` 维度接入基础限流。
+- 新增限流配置项：`DRIVE_RATE_LIMIT_ENABLED`、`DRIVE_UPLOAD_INIT_RATE_LIMIT_COUNT`、`DRIVE_UPLOAD_INIT_RATE_LIMIT_WINDOW_SECONDS`、`DRIVE_UPLOAD_PART_PRESIGN_RATE_LIMIT_COUNT`、`DRIVE_UPLOAD_PART_PRESIGN_RATE_LIMIT_WINDOW_SECONDS`、`DRIVE_DOWNLOAD_PRESIGN_RATE_LIMIT_COUNT`、`DRIVE_DOWNLOAD_PRESIGN_RATE_LIMIT_WINDOW_SECONDS`。
+- 补充限流测试，覆盖上传初始化、分片签名、分片签名 session 维度隔离和下载预签名的 429 行为。
+- 同步更新 README、后端 README、执行计划和完整技术计划书中的基础限流状态、配置项和下一步说明。
 
 ### 进行中
 
-- Sprint 3 上传/下载限流、容量释放和容量校准设计与实现。
+- Sprint 3 容量释放和容量校准设计与实现。
 
 ### 阻塞与风险
 
@@ -23,10 +30,11 @@
 - 过期上传清理已覆盖数据库会话终态、multipart abort 和 `uploads/...` 临时对象删除；对象复制成功但数据库最终化失败后的 `objects/...` 孤儿对象扫描仍需后续生命周期任务兜底。
 - 当前容量初版仅覆盖空间维度和文件版本创建场景；删除释放容量、历史空间回填、用户/租户维度配额和定期校准任务仍需后续补齐。
 - 当前清理任务按批次扫描租户内过期会话，尚未接入定时调度配置、任务监控指标和失败告警。
+- 当前基础限流覆盖上传初始化、分片签名和下载预签名；登录失败、外链访问、搜索和管理接口限流仍需随对应模块接入。
 
 ### 下一步
 
-- 实现上传初始化、分片签名和下载预签名的基础限流策略，并补充限流配置、测试和文档。
+- 实现文件删除到回收站或彻底删除后的容量释放策略，并补充容量流水、测试和文档。
 
 ### 涉及文件
 
@@ -37,8 +45,17 @@
 - `backend/app/modules/upload/storage_keys.py`
 - `backend/app/workers/upload_tasks.py`
 - `backend/app/infrastructure/queue/celery_app.py`
+- `backend/app/infrastructure/rate_limit/base.py`
+- `backend/app/infrastructure/rate_limit/redis.py`
+- `backend/app/infrastructure/rate_limit/testing.py`
+- `backend/app/api/deps.py`
+- `backend/app/core/config.py`
+- `backend/app/modules/upload/router.py`
+- `backend/app/modules/file/router.py`
 - `backend/app/modules/auth/repository.py`
 - `backend/tests/test_upload_cleanup.py`
+- `backend/tests/test_rate_limit.py`
+- `backend/tests/helpers.py`
 - `README.md`
 - `backend/README.md`
 - `PROJECT_PLAN.md`
@@ -58,6 +75,17 @@
 - 已运行 `uv run alembic upgrade head`，真实 PostgreSQL migration 通过。
 - 已运行 `uv run python -m scripts.seed_admin`，管理员 seed 通过。
 - 已使用真实 PostgreSQL 和 MinIO 验证过期上传清理：创建 multipart 上传会话后强制过期，调用 `UploadCleanupService.expire_upload_sessions` 返回 `scanned=1`、`expired=1`、`aborted=1`、`deleted=1`、`storage_errors=0`；数据库会话状态为 `expired`，`upload.expired` 审计 actor_type 为 `system`，outbox 状态为 `pending`，MinIO 中对应 `uploads/...` 对象不存在。
+- 验证完成后已关闭本次启动的 Docker Compose 服务，并确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 不再监听。
+- 已运行 `uv run pytest tests/test_rate_limit.py`，结果为 4 passed。
+- 已运行 `uv run ruff format .`。
+- 已运行 `uv run ruff format --check .`，结果为 94 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 76 source files。
+- 已运行 `uv run pytest`，结果为 45 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认当前迁移仍可生成 PostgreSQL SQL。
+- 已确认启动前 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 未监听。
+- 已从 `backend` 目录启动 Docker Compose `redis` 服务，使用真实 Redis 验证 `RedisFixedWindowRateLimiter`：同一 key 在 `limit=1` 窗口内第一次允许、第二次拒绝且 `retry_after_seconds > 0`。
+- 已从 `backend` 目录启动 Docker Compose `postgres`、`redis`、`minio` 服务，运行真实 PostgreSQL migration 和管理员 seed 后，通过 ASGI + 真实 Redis + 真实 MinIO 验证上传初始化限流：环境变量设置 `DRIVE_UPLOAD_INIT_RATE_LIMIT_COUNT=1` 后，同一用户第一次 `POST /api/v1/uploads/init` 返回 201，第二次返回 429，错误码为 `RATE_LIMITED`，`details.action=upload.init`。
 - 验证完成后已关闭本次启动的 Docker Compose 服务，并确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 不再监听。
 
 ## 2026-06-30

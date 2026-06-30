@@ -59,6 +59,7 @@ uv run pytest
 - 秒传和 multipart complete 创建文件版本时原子增加空间容量快照，并写入 `quota_ledger` 容量流水。
 - 上传初始化、秒传、complete、abort 和 hash 不匹配等失败审计事件。
 - `upload.expire_sessions` 维护任务，按租户清理过期上传会话并写入 `upload.expired` 审计事件。
+- Redis 固定窗口基础限流，覆盖上传初始化、分片签名和下载预签名。
 - 文件下载预签名 URL 接口，按当前文件版本生成短期私有对象下载地址。
 - 下载成功和拒绝均写入 `file.downloaded` 审计事件与 outbox event。
 - 管理员 seed 脚本。
@@ -104,6 +105,8 @@ uv run pytest
 
 过期上传由 Celery 任务 `upload.expire_sessions` 扫描处理，可传入 `tenant_id`、`limit` 和 `request_id`。任务会按租户查找已过期的 `initiated`、`uploading`、`completing` 会话，先标记为 `expired`，再最佳努力调用对象存储取消 multipart upload，并仅删除 `uploads/...` 临时对象，避免误删最终 `objects/...` 内容。对象存储清理失败不会回滚会话终态，会写入 `upload.expired` 审计 metadata 和任务统计中的 `storage_errors`。
 
+上传初始化和分片签名已接入基础限流。上传初始化按 `tenant + user` 维度计数；分片签名按 `tenant + user + upload session` 维度计数。触发限流时返回 HTTP 429，错误码为 `RATE_LIMITED`，错误详情包含 `action`、`limit`、`window_seconds` 和 `retry_after_seconds`。
+
 对象存储和上传策略由以下环境变量控制：
 
 - `DRIVE_S3_ENDPOINT_URL`
@@ -116,13 +119,22 @@ uv run pytest
 - `DRIVE_UPLOAD_PRESIGN_EXPIRES_SECONDS`
 - `DRIVE_DOWNLOAD_PRESIGN_EXPIRES_SECONDS`
 - `DRIVE_DEFAULT_SPACE_QUOTA_BYTES`
+- `DRIVE_RATE_LIMIT_ENABLED`
+- `DRIVE_UPLOAD_INIT_RATE_LIMIT_COUNT`
+- `DRIVE_UPLOAD_INIT_RATE_LIMIT_WINDOW_SECONDS`
+- `DRIVE_UPLOAD_PART_PRESIGN_RATE_LIMIT_COUNT`
+- `DRIVE_UPLOAD_PART_PRESIGN_RATE_LIMIT_WINDOW_SECONDS`
+- `DRIVE_DOWNLOAD_PRESIGN_RATE_LIMIT_COUNT`
+- `DRIVE_DOWNLOAD_PRESIGN_RATE_LIMIT_WINDOW_SECONDS`
 
-当前上传接口沿用临时空间拥有者访问边界。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除释放容量、容量校准、用户/租户维度配额和上传限流将在后续步骤补齐。
+当前上传接口沿用临时空间拥有者访问边界。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除释放容量、容量校准和用户/租户维度配额将在后续步骤补齐。
 
 ## 下载接口
 
 - `GET /api/v1/files/{node_id}/download`
 
 下载接口基于 `nodes.current_version_id` 查询当前版本和 blob，返回 `download_url`、`expires_at`、`file_name`、`version_id`、`size_bytes`、`mime_type` 和额外 `headers`。S3/MinIO 适配器会使用 `ResponseContentDisposition` 设置下载文件名，并同时提供 ASCII `filename` 和 UTF-8 `filename*`。
+
+下载预签名已接入基础限流，按 `tenant + user + node + IP` 维度计数。触发限流时返回 HTTP 429，错误码为 `RATE_LIMITED`。
 
 当前下载接口沿用临时空间拥有者访问边界：非空间拥有者返回统一的 `NODE_NOT_FOUND`，目录节点返回 `NODE_NOT_FILE`，缺失当前版本返回 `FILE_VERSION_NOT_FOUND`。下载成功与拒绝都会写入 `file.downloaded` 审计事件；后续 Sprint 4 接入空间成员、目录 ACL、继承权限和拒绝优先策略后，将由权限模块替换该临时边界。
