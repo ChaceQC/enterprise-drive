@@ -39,6 +39,7 @@
 - Redis 固定窗口限流已改为 Lua 脚本，在一次 `EVAL` 内完成 `INCR`、条件 `EXPIRE` 和 `TTL` 读取，避免留下无 TTL key。
 - 同步更新 `AGENT.md`、README、后端 README、执行计划、完整技术计划书和代码审计记录中的认证、对象存储与限流说明。
 - 已按要求恢复 `stash@{0}: paused quota reconciliation draft` 中的容量校准草稿，并按 AGENT 规则整理为基于现有 SQLAlchemy、Celery 和 PostgreSQL 事实表的维护任务，没有引入新的外部依赖或自研调度框架。
+- 复查暂停的容量校准草稿：当前 `refs/stash` 已为空，但已从 Git unreachable commit 中定位到 `75600a4 On dev: paused quota reconciliation draft`；其内容已由 `8310cda`、`bd6de63` 和 `1a0960b` 的容量校准提交覆盖，并保留后续幂等与批量扫描修正。
 - 新增 `QuotaReconciliationService`，以 `file_versions` 和 `nodes.space_id` 汇总实际空间容量，支持 `repair=false` 只读报告模式和 `repair=true` 修复模式。
 - 容量校准修复模式会补建缺失的空间容量账户；已有账户修复前使用数据库行锁并重新聚合实际用量和账本合计，再校准 `quota_accounts.used_bytes`，并只按最新差额写入 `reason=quota_reconciled` 的账本流水，重复执行不会追加无差额修复流水；修复时写入 `quota.reconciled` 系统审计和 outbox event。
 - 新增 Celery 维护任务 `quota.reconcile_space_usage` 并路由到 `maintenance` 队列，支持 `tenant_id`、`limit`、`repair`、`request_id`、`scan_all` 和 `max_items` 参数；统计始终完整，返回明细超过 `max_items` 时用 `items_truncated=true` 标记。
@@ -80,16 +81,20 @@
 - 节点 ACL 创建接口改为使用 `subject_type` 和 `subject_id`，不保留旧 `subject_user_id` 字段；创建前会验证用户、部门或用户组存在且可用。
 - 文件树、下载、上传初始化和 multipart complete 入口均注入同一事务内的 `OrgService`，部门/用户组 ACL 会覆盖高危动作二次校验。
 - 部门/用户组 ACL 变更写入 `permission.changed` outbox event 时携带主体信息，不携带 `affected_user_id`，当前由 `permission.invalidate_cache` 保守失效租户内节点权限缓存。
+- 新增 search 模块 ACL token builder，可从空间成员角色和搜索可见 allow ACL 生成 `acl_tokens`，并从搜索可见 deny ACL 生成 `deny_acl_tokens`；当前 token 词表包括 `space:{space_id}:role:{role}`、`user:{user_id}`、`department:{department_id}`、`group:{group_id}`，不提前生成 `public:{tenant_id}`，公共/外链主体等分享模块建模后再接入。`upload` 等非搜索可见授权不写入索引 token，仍由权限引擎二次校验兜底。
+- 权限变更现在同事务额外写入 `search.acl_rebuild_requested` outbox event，避免搜索 worker 与权限缓存 worker 抢占同一条 `permission.changed` 事件。
+- 新增 `search.dispatch_outbox` Celery 任务并路由到 `search` 队列，当前消费 `search.*` 事件并记录派发，为后续 OpenSearch 索引写入和查询过滤提供独立入口。
 
 ### 进行中
 
-- Sprint 4 权限系统已开始；空间成员事实表、owner 成员自动写入、空间级成员角色检查、空间成员管理 API、用户/部门/用户组节点 ACL 基础闭环、文件列表批量权限评估、`permission.changed` outbox 事件写入、Redis 权限缓存失效 worker 和 org 部门/用户组主体展开已完成，下一步接搜索 ACL。
+- Sprint 4 权限系统已开始；空间成员事实表、owner 成员自动写入、空间级成员角色检查、空间成员管理 API、用户/部门/用户组节点 ACL 基础闭环、文件列表批量权限评估、`permission.changed` outbox 事件写入、Redis 权限缓存失效 worker、org 部门/用户组主体展开和搜索 ACL 重建事件已完成，下一步接 OpenSearch 索引写入和查询过滤。
 
 ### 阻塞与风险
 
 - MinIO Python SDK 的 multipart create/complete/abort 在当前适配中需要调用客户端私有方法，已限定在 `infrastructure` 适配层；若后续出现兼容性、升级稳定性或批量吞吐问题，应评估更完整的开源 S3 兼容客户端或标准 HTTP/SigV4 实现。
 - 当前 Redis 限流仍是固定窗口策略，适用于上传初始化、分片签名和下载预签名的基础保护；若后续需要滑动窗口、令牌桶、多层级动态规则或管理端配置，应切换成熟限流库。
-- 当前空间、文件树、上传、下载、空间成员管理和节点 ACL 管理接口已接入权限检查；文件列表已返回当前页子节点的批量权限评估结果；权限变更 outbox 事件已接入 Redis 缓存失效 worker；org 部门/用户组 ACL 主体已接入，搜索 ACL 更新仍未接入。
+- 当前空间、文件树、上传、下载、空间成员管理和节点 ACL 管理接口已接入权限检查；文件列表已返回当前页子节点的批量权限评估结果；权限变更 outbox 事件已接入 Redis 缓存失效 worker；org 部门/用户组 ACL 主体和搜索 ACL 重建事件已接入。
+- 搜索 ACL 当前只完成 token builder、outbox 事件和 `search.*` worker 队列入口，尚未写入 OpenSearch，也尚未提供 `/search` 查询 API；后续接 OpenSearch 时必须同时使用 `acl_tokens` allow 过滤和 `deny_acl_tokens` 排除过滤，继续以 PostgreSQL 为事实来源并做应用层二次权限校验。
 - 部门/用户组 ACL 变更当前无法精确枚举所有受影响用户缓存，已采用通配模式保守失效租户内节点权限缓存；若后续权限缓存读路径启用并出现大租户性能压力，应补充 subject membership 反向索引或异步展开任务。
 - 当前 Redis 权限缓存已完成失效 worker，但权限判断读路径尚未启用 Redis 缓存；接入读缓存时必须保持数据库为事实来源，高危动作继续二次查库。
 - 当前节点 ACL 路径加载采用逐级父节点查询并限制最大深度 64，适合一期目录深度可控场景；若后续目录深度、列表批量权限展示或搜索过滤压力升高，应引入递归 CTE、closure table 或批量权限评估缓存。
@@ -101,7 +106,7 @@
 
 ### 下一步
 
-- 接入搜索 ACL token 构建和权限变更后的索引重建事件，确保搜索结果按用户、部门、用户组和空间角色过滤。
+- 接入 OpenSearch 文件索引写入和搜索查询过滤，使用 ACL token 做查询层过滤，并对返回结果做二次权限校验。
 
 ### 涉及文件
 
@@ -151,6 +156,8 @@
 - `backend/app/modules/permission/schemas.py`
 - `backend/app/modules/permission/service.py`
 - `backend/app/modules/permission/validators.py`
+- `backend/app/modules/search/acl.py`
+- `backend/app/modules/search/events.py`
 - `backend/app/modules/space/members.py`
 - `backend/app/modules/space/router.py`
 - `backend/app/modules/space/member_audit.py`
@@ -163,6 +170,7 @@
 - `backend/app/workers/audit_tasks.py`
 - `backend/app/workers/permission_tasks.py`
 - `backend/app/workers/quota_tasks.py`
+- `backend/app/workers/search_tasks.py`
 - `backend/app/workers/file_tasks.py`
 - `backend/app/modules/auth/repository.py`
 - `backend/app/modules/auth/router.py`
@@ -185,6 +193,7 @@
 - `backend/tests/test_node_acl.py`
 - `backend/tests/test_org_repository.py`
 - `backend/tests/test_permission_cache.py`
+- `backend/tests/test_search_acl.py`
 - `backend/tests/test_quota_reconciliation.py`
 - `backend/tests/test_blob_cleanup.py`
 - `backend/tests/helpers.py`
@@ -294,6 +303,14 @@
 - 已运行 `uv run ruff check .`，结果为 All checks passed。
 - 已运行 `uv run mypy app`，结果为 no issues found in 100 source files。
 - 已运行 `uv run pytest`，结果为 71 passed。
+- 本轮未启动 API、Worker 或 Docker Compose 服务。
+- 已运行 `uv run pytest tests/test_search_acl.py tests/test_permission_cache.py tests/test_node_acl.py tests/test_space_members.py tests/test_quota_reconciliation.py -q`，结果为 19 passed，覆盖搜索 ACL token 构建、search outbox 独立消费、权限变更写入搜索重建事件、权限缓存、节点/空间 ACL 既有行为和容量校准复原状态。
+- 已运行 `uv run ruff format app/modules/search app/workers/search_tasks.py app/modules/permission/events.py app/infrastructure/queue/celery_app.py tests/test_search_acl.py`，格式化本轮涉及的 Python 文件。
+- 已运行 `uv run ruff format --check .`，结果为 133 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 104 source files。
+- 已运行 `uv run pytest`，结果为 76 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认当前迁移链仍可生成 PostgreSQL SQL。
 - 本轮未启动 API、Worker 或 Docker Compose 服务。
 - 已运行 `uv run pytest tests/test_node_acl.py tests/test_space_file.py -q`，结果为 10 passed，覆盖文件列表批量权限字段和节点 ACL 继承 deny 行为。
 - 已运行 `uv run ruff format app/modules/permission/service.py app/modules/file/service.py app/modules/file/schemas.py tests/test_node_acl.py`，格式化本轮涉及的 Python 文件。

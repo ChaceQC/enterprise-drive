@@ -3,6 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from app.modules.audit.service import AuditService
+from app.modules.search.events import emit_search_acl_rebuild_requested
 
 
 async def emit_permission_changed(
@@ -27,5 +28,14 @@ async def emit_permission_changed(
         permission_version=permission_version,
         reason=reason,
         affected_user_id=affected_user_id,
+        metadata=metadata,
+    )
+    await emit_search_acl_rebuild_requested(
+        audit_service=audit_service,
+        tenant_id=tenant_id,
+        scope=scope,
+        resource_id=resource_id,
+        permission_version=permission_version,
+        reason=reason,
         metadata=metadata,
     )
