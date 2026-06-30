@@ -216,5 +216,5 @@
 1. 对象存储默认实现、依赖基线和相关文档已完成整改，后续只需持续观察 MinIO Python SDK multipart 私有方法的兼容性风险。
 2. Redis 固定窗口限流已改为 Lua 原子脚本；后续新增复杂限流策略时再评估成熟限流库。
 3. 浏览器认证已改为 BFF + HttpOnly Cookie Session，后续接入 OIDC/OAuth 2.1 + PKCE 时应继续保持 BFF 会话边界。
-4. 在恢复容量校准前，先确认容量校准基于 PostgreSQL 事实表和现有 SQLAlchemy 能力实现，避免引入额外复杂调度或自研规则引擎。
+4. 容量校准已恢复为基于 PostgreSQL 事实表和现有 SQLAlchemy 能力的维护任务，未引入额外复杂调度或自研规则引擎；后续继续推进 blob/object 垃圾回收。
 5. 为暂留轻量实现补充触发条件记录；后续触发时优先使用成熟库或框架能力。

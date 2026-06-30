@@ -38,10 +38,15 @@
 - 对象存储默认实现已移除 `boto3/botocore`，改用非云厂商专有的 MinIO Python SDK；业务层仍只依赖 `StorageAdapter` 协议。
 - Redis 固定窗口限流已改为 Lua 脚本，在一次 `EVAL` 内完成 `INCR`、条件 `EXPIRE` 和 `TTL` 读取，避免留下无 TTL key。
 - 同步更新 `AGENT.md`、README、后端 README、执行计划、完整技术计划书和代码审计记录中的认证、对象存储与限流说明。
+- 已按要求恢复 `stash@{0}: paused quota reconciliation draft` 中的容量校准草稿，并按 AGENT 规则整理为基于现有 SQLAlchemy、Celery 和 PostgreSQL 事实表的维护任务，没有引入新的外部依赖或自研调度框架。
+- 新增 `QuotaReconciliationService`，以 `file_versions` 和 `nodes.space_id` 汇总实际空间容量，支持 `repair=false` 只读报告模式和 `repair=true` 修复模式。
+- 容量校准修复模式会补建缺失的空间容量账户、校准 `quota_accounts.used_bytes`，并用 `reason=quota_reconciled` 写入账本差额；修复时写入 `quota.reconciled` 系统审计和 outbox event。
+- 新增 Celery 维护任务 `quota.reconcile_space_usage` 并路由到 `maintenance` 队列，支持 `tenant_id`、`limit`、`repair` 和 `request_id` 参数。
+- 补充容量校准测试，覆盖只读报告不落库、修复快照和账本漂移、补建缺失空间容量账户、系统审计写入和 worker 聚合入口。
 
 ### 进行中
 
-- 容量校准实现仍暂停在 `stash@{0}`：`paused quota reconciliation draft`；本轮审计整改不应用、不覆盖该 stash，后续恢复容量校准时再单独处理。
+- 准备提交并推送容量校准恢复结果；代码和文档已完成，下一步转入 blob/object 垃圾回收和对象生命周期任务。
 
 ### 阻塞与风险
 
@@ -49,13 +54,13 @@
 - 当前 Redis 限流仍是固定窗口策略，适用于上传初始化、分片签名和下载预签名的基础保护；若后续需要滑动窗口、令牌桶、多层级动态规则或管理端配置，应切换成熟限流库。
 - 当前空间、文件树、上传和下载接口仍暂以“当前租户 + 空间拥有者”作为访问边界，空间成员、目录 ACL、继承权限和拒绝优先策略尚未接入；该边界已在 README 和后端 README 标为临时实现。
 - 过期上传清理已覆盖数据库会话终态、multipart abort 和 `uploads/...` 临时对象删除；对象复制成功但数据库最终化失败后的 `objects/...` 孤儿对象扫描仍需后续生命周期任务兜底。
-- 当前容量实现已覆盖空间维度的文件版本创建和彻底删除释放；历史空间回填、用户/租户维度配额、定期校准任务和 blob/object 垃圾回收仍需后续补齐。
+- 当前容量实现已覆盖空间维度的文件版本创建、彻底删除释放和空间容量校准；用户/租户维度配额、定时调度配置、监控告警和 blob/object 垃圾回收仍需后续补齐。
 - 当前清理任务按批次扫描租户内过期会话，尚未接入定时调度配置、任务监控指标和失败告警。
 - 当前基础限流覆盖上传初始化、分片签名和下载预签名；登录失败、外链访问、搜索和管理接口限流仍需随对应模块接入。
 
 ### 下一步
 
-- 完成本轮审计整改的全量验证、提交和推送后，在保留 `stash@{0}: paused quota reconciliation draft` 的前提下恢复容量校准设计，补齐 blob/object 垃圾回收和容量校准任务。
+- 完成容量校准恢复的全量验证、提交和推送后，推进 blob/object 垃圾回收和对象生命周期任务：扫描 `file_blobs.ref_count=0` 的最终对象，安全删除对象存储内容并记录审计。
 
 ### 涉及文件
 
@@ -85,6 +90,8 @@
 - `backend/app/modules/file/tree.py`
 - `backend/app/modules/quota/repository.py`
 - `backend/app/modules/quota/service.py`
+- `backend/app/modules/quota/reconciliation.py`
+- `backend/app/workers/quota_tasks.py`
 - `backend/app/modules/auth/repository.py`
 - `backend/app/modules/auth/router.py`
 - `backend/app/modules/auth/service.py`
@@ -97,6 +104,7 @@
 - `backend/tests/test_file_operations.py`
 - `backend/tests/test_auth.py`
 - `backend/tests/test_space_file.py`
+- `backend/tests/test_quota_reconciliation.py`
 - `backend/tests/helpers.py`
 - `README.md`
 - `backend/README.md`
@@ -153,6 +161,15 @@
 - 已再次运行 `uv run ruff check .`，结果为 All checks passed。
 - 已再次运行 `uv run pytest`，结果为 49 passed。
 - 已再次运行 `git diff --check`，未发现空白错误。
+- 恢复容量校准草稿后，已运行 `uv run pytest tests/test_quota_reconciliation.py -q`，结果为 4 passed。
+- 已运行 `uv run ruff format .`，格式化容量校准相关文件。
+- 已运行 `uv run ruff format --check .`，结果为 97 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 78 source files。
+- 已运行 `uv run pytest`，结果为 53 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认当前迁移仍可生成 PostgreSQL SQL。
+- 已运行 `git diff --check`，未发现空白错误。
+- 本轮容量校准恢复未启动 API、Worker 或 Docker Compose 服务；已确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 未监听。
 
 ## 2026-06-30
 

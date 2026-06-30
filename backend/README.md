@@ -61,6 +61,7 @@ uv run pytest
 - 上传初始化、秒传、complete、abort 和 hash 不匹配等失败审计事件。
 - `upload.expire_sessions` 维护任务，按租户清理过期上传会话并写入 `upload.expired` 审计事件。
 - Redis Lua 原子固定窗口基础限流，覆盖上传初始化、分片签名和下载预签名。
+- `quota.reconcile_space_usage` 维护任务，支持空间容量只读报告和修复模式。
 - 文件下载预签名 URL 接口，按当前文件版本生成短期私有对象下载地址。
 - 下载成功和拒绝均写入 `file.downloaded` 审计事件与 outbox event。
 - 管理员 seed 脚本。
@@ -132,7 +133,11 @@ uv run pytest
 - `DRIVE_DOWNLOAD_PRESIGN_RATE_LIMIT_COUNT`
 - `DRIVE_DOWNLOAD_PRESIGN_RATE_LIMIT_WINDOW_SECONDS`
 
-当前上传接口沿用临时空间拥有者访问边界。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除到回收站不释放容量；彻底删除回收站节点时通过原子 update 扣减 `quota_accounts.used_bytes`，并写入 `reason=file_purged`、`ref_type=node` 的负向容量流水。对象存储最终对象不会在彻底删除接口内同步删除，后续由 blob 垃圾回收和对象生命周期任务处理；容量校准和用户/租户维度配额将在后续步骤补齐。
+当前上传接口沿用临时空间拥有者访问边界。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除到回收站不释放容量；彻底删除回收站节点时通过原子 update 扣减 `quota_accounts.used_bytes`，并写入 `reason=file_purged`、`ref_type=node` 的负向容量流水。容量校准任务 `quota.reconcile_space_usage` 使用 PostgreSQL 中的文件版本记录作为事实来源，默认只报告空间容量快照和账本漂移，传入 `repair=true` 时会修复缺失的空间容量账户、校准 `quota_accounts.used_bytes`，并用 `reason=quota_reconciled` 写入账本差额和 `quota.reconciled` 系统审计。对象存储最终对象不会在彻底删除接口内同步删除，后续由 blob 垃圾回收和对象生命周期任务处理；用户/租户维度配额将在后续步骤补齐。
+
+维护任务可通过 Celery 任务调用：
+
+- `quota.reconcile_space_usage(tenant_id=None, limit=100, repair=False, request_id=None)`
 
 ## 下载接口
 
