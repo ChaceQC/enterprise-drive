@@ -28,7 +28,18 @@
 
 ## 当前状态
 
-当前仓库处于初始规划阶段，已建立项目协作约束、技术计划书、执行版项目计划和进度记录。后续开发应先搭建 `backend` 工程底座，再按 Sprint 推进模块实现。
+当前仓库处于 Sprint 1 工程底座阶段，已建立 `backend` 后端工程、uv 依赖锁定、FastAPI 应用入口、配置加载、结构化日志、`X-Request-ID` 中间件、统一错误响应、健康检查、本地依赖 Compose 和后端 CI。
+
+本地后端验证：
+
+```bash
+cd backend
+uv sync --all-extras --dev
+uv run ruff check .
+uv run ruff format --check .
+uv run mypy app
+uv run pytest
+```
 
 ## 文档
 
@@ -36,6 +47,7 @@
 - `PROJECT_PLAN.md`：执行版项目计划。
 - `PROJECT_PROGRESS.md`：项目进度记录。
 - `企业网盘开发者技术计划书.md`：完整技术计划书。
+- `backend/README.md`：后端工程启动与验证说明。
 
 ## 部署说明
 

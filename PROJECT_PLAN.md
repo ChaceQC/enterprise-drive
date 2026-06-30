@@ -77,4 +77,4 @@
 
 ## 5. 当前下一步
 
-搭建 Sprint 1 工程底座：创建 `backend` 目录、初始化 uv 项目、建立 FastAPI 应用入口、配置加载、结构化日志、健康检查和基础 CI。
+继续推进 Sprint 1：补充 SQLAlchemy 基础模型、Alembic 初始迁移、本地账号认证、JWT refresh token 轮换和管理员 seed。
