@@ -12,7 +12,13 @@ from app.modules.auth.service import AuthService
 from app.modules.file.acl_audit import record_acl_event
 from app.modules.file.models import Node
 from app.modules.file.repository import FileRepository
+from app.modules.org.service import OrgService
 from app.modules.permission.actions import ACTION_GRANT
+from app.modules.permission.constants import (
+    ACL_SUBJECT_DEPARTMENT,
+    ACL_SUBJECT_GROUP,
+    ACL_SUBJECT_USER,
+)
 from app.modules.permission.events import emit_permission_changed
 from app.modules.permission.repository import PermissionRepository
 from app.modules.permission.schemas import (
@@ -33,6 +39,7 @@ class FileAclService:
         permission_service: PermissionService,
         space_repository: SpaceRepository,
         auth_service: AuthService,
+        org_service: OrgService,
         audit_service: AuditService | None = None,
     ) -> None:
         self.file_repository = file_repository
@@ -40,6 +47,7 @@ class FileAclService:
         self.permission_service = permission_service
         self.space_repository = space_repository
         self.auth_service = auth_service
+        self.org_service = org_service
         self.audit_service = audit_service
 
     async def list_acl_entries(
@@ -62,22 +70,25 @@ class FileAclService:
         *,
         current_user: User,
         node_id: UUID,
-        subject_user_id: UUID,
+        subject_type: str,
+        subject_id: UUID,
         effect: str,
         actions: list[str],
         inherit: bool,
         audit_context: AuditContext | None = None,
     ) -> AclEntryResponse:
         node = await self._get_grantable_node(current_user=current_user, node_id=node_id)
-        await self._ensure_active_target_user(
+        await self._ensure_active_target_subject(
             current_user=current_user,
-            subject_user_id=subject_user_id,
+            subject_type=subject_type,
+            subject_id=subject_id,
         )
         try:
             entry = await self.permission_repository.create_acl_entry(
                 tenant_id=current_user.tenant_id,
                 node_id=node.id,
-                subject_id=subject_user_id,
+                subject_type=subject_type,
+                subject_id=subject_id,
                 effect=effect,
                 actions=actions,
                 inherit=inherit,
@@ -95,7 +106,8 @@ class FileAclService:
                 audit_context=audit_context,
                 metadata={
                     "entry_id": str(entry.id),
-                    "subject_user_id": str(subject_user_id),
+                    "subject_type": subject_type,
+                    "subject_id": str(subject_id),
                     "effect": effect,
                     "actions": actions,
                     "inherit": inherit,
@@ -109,10 +121,12 @@ class FileAclService:
                 resource_id=node.id,
                 permission_version=permission_version,
                 reason="node_acl_created",
-                affected_user_id=subject_user_id,
+                affected_user_id=subject_id if subject_type == ACL_SUBJECT_USER else None,
                 metadata={
                     "space_id": str(node.space_id),
                     "entry_id": str(entry.id),
+                    "subject_type": subject_type,
+                    "subject_id": str(subject_id),
                     "effect": effect,
                     "actions": actions,
                     "inherit": inherit,
@@ -182,10 +196,12 @@ class FileAclService:
             resource_id=node.id,
             permission_version=permission_version,
             reason="node_acl_updated",
-            affected_user_id=entry.subject_id,
+            affected_user_id=entry.subject_id if entry.subject_type == ACL_SUBJECT_USER else None,
             metadata={
                 "space_id": str(node.space_id),
                 "entry_id": str(entry.id),
+                "subject_type": entry.subject_type,
+                "subject_id": str(entry.subject_id),
                 "old_effect": old_effect,
                 "new_effect": effect,
                 "old_actions": old_actions,
@@ -230,7 +246,8 @@ class FileAclService:
             audit_context=audit_context,
             metadata={
                 "entry_id": str(entry.id),
-                "subject_user_id": str(entry.subject_id),
+                "subject_type": entry.subject_type,
+                "subject_id": str(entry.subject_id),
                 "effect": entry.effect,
                 "actions": list(entry.actions),
                 "inherit": entry.inherit,
@@ -244,10 +261,12 @@ class FileAclService:
             resource_id=node.id,
             permission_version=permission_version,
             reason="node_acl_removed",
-            affected_user_id=entry.subject_id,
+            affected_user_id=entry.subject_id if entry.subject_type == ACL_SUBJECT_USER else None,
             metadata={
                 "space_id": str(node.space_id),
                 "entry_id": str(entry.id),
+                "subject_type": entry.subject_type,
+                "subject_id": str(entry.subject_id),
                 "effect": entry.effect,
                 "actions": list(entry.actions),
                 "inherit": entry.inherit,
@@ -287,15 +306,35 @@ class FileAclService:
             raise ApiError("NODE_NOT_FOUND", "节点不存在或无权访问", status_code=404)
         return node
 
-    async def _ensure_active_target_user(
+    async def _ensure_active_target_subject(
         self,
         *,
         current_user: User,
-        subject_user_id: UUID,
+        subject_type: str,
+        subject_id: UUID,
     ) -> None:
-        user = await self.auth_service.get_active_user(
-            tenant_id=current_user.tenant_id,
-            user_id=subject_user_id,
-        )
-        if user is None:
-            raise ApiError("USER_NOT_FOUND", "用户不存在或不可用", status_code=404)
+        if subject_type == ACL_SUBJECT_USER:
+            user = await self.auth_service.get_active_user(
+                tenant_id=current_user.tenant_id,
+                user_id=subject_id,
+            )
+            if user is None:
+                raise ApiError("USER_NOT_FOUND", "用户不存在或不可用", status_code=404)
+            return
+        if subject_type == ACL_SUBJECT_DEPARTMENT:
+            department = await self.org_service.get_active_department(
+                tenant_id=current_user.tenant_id,
+                department_id=subject_id,
+            )
+            if department is None:
+                raise ApiError("DEPARTMENT_NOT_FOUND", "部门不存在或不可用", status_code=404)
+            return
+        if subject_type == ACL_SUBJECT_GROUP:
+            group = await self.org_service.get_active_user_group(
+                tenant_id=current_user.tenant_id,
+                group_id=subject_id,
+            )
+            if group is None:
+                raise ApiError("GROUP_NOT_FOUND", "用户组不存在或不可用", status_code=404)
+            return
+        raise ApiError("ACL_SUBJECT_TYPE_INVALID", "ACL 主体类型不支持", status_code=422)

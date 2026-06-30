@@ -7,6 +7,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 SpaceMemberRole = Literal["owner", "admin", "editor", "viewer"]
+AclSubjectType = Literal["user", "department", "group"]
 AclEffect = Literal["allow", "deny"]
 AclAction = Literal[
     "delete",
@@ -75,7 +76,8 @@ class AclEntryListResponse(BaseModel):
 
 
 class CreateAclEntryRequest(BaseModel):
-    subject_user_id: UUID
+    subject_type: AclSubjectType
+    subject_id: UUID
     effect: AclEffect
     actions: list[AclAction] = Field(min_length=1)
     inherit: bool = True

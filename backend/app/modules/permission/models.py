@@ -62,7 +62,10 @@ class SpaceMember(Base):
 class AclEntry(Base):
     __tablename__ = "acl_entries"
     __table_args__ = (
-        CheckConstraint("subject_type in ('user')", name="ck_acl_entries_subject_type"),
+        CheckConstraint(
+            "subject_type in ('user', 'department', 'group')",
+            name="ck_acl_entries_subject_type",
+        ),
         CheckConstraint("effect in ('allow', 'deny')", name="ck_acl_entries_effect"),
         Index(
             "uq_acl_entries_subject_effect",

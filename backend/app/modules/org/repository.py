@@ -48,6 +48,36 @@ class OrgRepository:
         await self.session.flush()
         return group
 
+    async def get_active_department(
+        self,
+        *,
+        tenant_id: UUID,
+        department_id: UUID,
+    ) -> Department | None:
+        result = await self.session.execute(
+            select(Department).where(
+                Department.tenant_id == tenant_id,
+                Department.id == department_id,
+                Department.status == "active",
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_active_user_group(
+        self,
+        *,
+        tenant_id: UUID,
+        group_id: UUID,
+    ) -> UserGroup | None:
+        result = await self.session.execute(
+            select(UserGroup).where(
+                UserGroup.tenant_id == tenant_id,
+                UserGroup.id == group_id,
+                UserGroup.status == "active",
+            )
+        )
+        return result.scalar_one_or_none()
+
     async def add_department_member(
         self,
         *,

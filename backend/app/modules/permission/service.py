@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from app.modules.org.service import OrgService
 from app.modules.permission.actions import (
     ACTION_DELETE,
     ACTION_DOWNLOAD,
@@ -19,6 +20,9 @@ from app.modules.permission.actions import (
 from app.modules.permission.constants import (
     ACL_EFFECT_ALLOW,
     ACL_EFFECT_DENY,
+    ACL_SUBJECT_DEPARTMENT,
+    ACL_SUBJECT_GROUP,
+    ACL_SUBJECT_USER,
     SPACE_ROLE_ADMIN,
     SPACE_ROLE_EDITOR,
     SPACE_ROLE_OWNER,
@@ -54,8 +58,11 @@ SPACE_ROLE_ACTIONS = {
 
 
 class PermissionService:
-    def __init__(self, *, repository: PermissionRepository) -> None:
+    def __init__(
+        self, *, repository: PermissionRepository, org_service: OrgService | None = None
+    ) -> None:
         self.repository = repository
+        self.org_service = org_service
 
     async def can_access_space(
         self,
@@ -96,9 +103,10 @@ class PermissionService:
             return False
 
         role_allows = action in SPACE_ROLE_ACTIONS.get(member.role, frozenset())
-        acl_entries = await self.repository.list_user_acl_entries_for_nodes(
+        subjects = await self._list_user_subjects(tenant_id=tenant_id, user_id=user_id)
+        acl_entries = await self.repository.list_acl_entries_for_subjects(
             tenant_id=tenant_id,
-            user_id=user_id,
+            subjects=subjects,
             node_ids=node_path_ids,
         )
         target_node_id = node_path_ids[-1] if node_path_ids else None
@@ -142,9 +150,10 @@ class PermissionService:
             {path_node_id for node_path in node_paths.values() for path_node_id in node_path},
             key=str,
         )
-        acl_entries = await self.repository.list_user_acl_entries_for_nodes(
+        subjects = await self._list_user_subjects(tenant_id=tenant_id, user_id=user_id)
+        acl_entries = await self.repository.list_acl_entries_for_subjects(
             tenant_id=tenant_id,
-            user_id=user_id,
+            subjects=subjects,
             node_ids=node_ids,
         )
 
@@ -167,6 +176,29 @@ class PermissionService:
                     node_permissions[action] = action in role_actions
             result[node_id] = node_permissions
         return result
+
+    async def _list_user_subjects(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+    ) -> dict[str, set[UUID]]:
+        subjects = {ACL_SUBJECT_USER: {user_id}}
+        if self.org_service is None:
+            return subjects
+        department_ids = await self.org_service.list_user_department_ids(
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        group_ids = await self.org_service.list_user_group_ids(
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
+        if department_ids:
+            subjects[ACL_SUBJECT_DEPARTMENT] = set(department_ids)
+        if group_ids:
+            subjects[ACL_SUBJECT_GROUP] = set(group_ids)
+        return subjects
 
 
 FILE_LIST_PERMISSION_ACTIONS = [

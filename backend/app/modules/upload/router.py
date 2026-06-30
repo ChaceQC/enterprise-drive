@@ -21,6 +21,8 @@ from app.modules.audit.repository import AuditRepository
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
 from app.modules.file.repository import FileRepository
+from app.modules.org.repository import OrgRepository
+from app.modules.org.service import OrgService
 from app.modules.permission.repository import PermissionRepository
 from app.modules.permission.service import PermissionService
 from app.modules.quota.repository import QuotaRepository
@@ -48,11 +50,15 @@ def get_upload_service(
     storage: Annotated[StorageAdapter, Depends(get_storage_adapter)],
 ) -> UploadService:
     permission_repository = PermissionRepository(session)
+    org_service = OrgService(repository=OrgRepository(session))
     return UploadService(
         repository=UploadRepository(session),
         file_repository=FileRepository(session),
         space_repository=SpaceRepository(session),
-        permission_service=PermissionService(repository=permission_repository),
+        permission_service=PermissionService(
+            repository=permission_repository,
+            org_service=org_service,
+        ),
         quota_service=QuotaService(
             repository=QuotaRepository(session),
             default_space_limit_bytes=settings.default_space_quota_bytes,
@@ -69,11 +75,15 @@ def get_upload_lifecycle_service(
     storage: Annotated[StorageAdapter, Depends(get_storage_adapter)],
 ) -> UploadLifecycleService:
     permission_repository = PermissionRepository(session)
+    org_service = OrgService(repository=OrgRepository(session))
     return UploadLifecycleService(
         repository=UploadRepository(session),
         file_repository=FileRepository(session),
         space_repository=SpaceRepository(session),
-        permission_service=PermissionService(repository=permission_repository),
+        permission_service=PermissionService(
+            repository=permission_repository,
+            org_service=org_service,
+        ),
         quota_service=QuotaService(
             repository=QuotaRepository(session),
             default_space_limit_bytes=settings.default_space_quota_bytes,

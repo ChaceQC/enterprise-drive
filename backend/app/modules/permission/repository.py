@@ -2,15 +2,11 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import utc_now
-from app.modules.permission.constants import (
-    ACL_SUBJECT_USER,
-    SPACE_ROLE_OWNER,
-    SPACE_ROLES,
-)
+from app.modules.permission.constants import SPACE_ROLE_OWNER, SPACE_ROLES
 from app.modules.permission.models import AclEntry, SpaceMember
 from app.modules.permission.validators import validate_acl_entry
 from app.modules.space.models import Space
@@ -166,17 +162,18 @@ class PermissionRepository:
         *,
         tenant_id: UUID,
         node_id: UUID,
+        subject_type: str,
         subject_id: UUID,
         effect: str,
         actions: list[str],
         inherit: bool,
         created_by: UUID,
     ) -> AclEntry:
-        validate_acl_entry(effect=effect, actions=actions)
+        validate_acl_entry(subject_type=subject_type, effect=effect, actions=actions)
         entry = AclEntry(
             tenant_id=tenant_id,
             node_id=node_id,
-            subject_type=ACL_SUBJECT_USER,
+            subject_type=subject_type,
             subject_id=subject_id,
             effect=effect,
             actions=actions,
@@ -242,7 +239,7 @@ class PermissionRepository:
         actions: list[str],
         inherit: bool,
     ) -> AclEntry:
-        validate_acl_entry(effect=effect, actions=actions)
+        validate_acl_entry(subject_type=entry.subject_type, effect=effect, actions=actions)
         entry.effect = effect
         entry.actions = actions
         entry.inherit = inherit
@@ -266,21 +263,27 @@ class PermissionRepository:
         )
         await self.session.flush()
 
-    async def list_user_acl_entries_for_nodes(
+    async def list_acl_entries_for_subjects(
         self,
         *,
         tenant_id: UUID,
-        user_id: UUID,
+        subjects: dict[str, set[UUID]],
         node_ids: list[UUID],
     ) -> list[AclEntry]:
         if not node_ids:
+            return []
+        subject_conditions = [
+            (AclEntry.subject_type == subject_type) & (AclEntry.subject_id.in_(subject_ids))
+            for subject_type, subject_ids in subjects.items()
+            if subject_ids
+        ]
+        if not subject_conditions:
             return []
         result = await self.session.execute(
             select(AclEntry).where(
                 AclEntry.tenant_id == tenant_id,
                 AclEntry.node_id.in_(node_ids),
-                AclEntry.subject_type == ACL_SUBJECT_USER,
-                AclEntry.subject_id == user_id,
+                or_(*subject_conditions),
             )
         )
         return list(result.scalars().all())

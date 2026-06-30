@@ -99,6 +99,25 @@ async def test_permission_cache_invalidator_removes_space_and_node_patterns() ->
     assert node_result.deleted == 1
     assert invalidator.keys == {other_user_key}
 
+    org_subject_event = OutboxEvent(
+        tenant_id=tenant_id,
+        event_type=PERMISSION_CHANGED_EVENT,
+        aggregate_type="node",
+        aggregate_id=node_id,
+        payload={
+            "scope": "node",
+            "resource_id": str(node_id),
+            "permission_version": 5,
+            "subject_type": "department",
+            "subject_id": str(uuid4()),
+        },
+    )
+
+    org_subject_result = await invalidator.invalidate_permission_changed(event=org_subject_event)
+
+    assert org_subject_result.deleted == 1
+    assert invalidator.keys == set()
+
 
 @pytest.mark.asyncio
 async def test_permission_cache_worker_consumes_only_permission_changed_events(

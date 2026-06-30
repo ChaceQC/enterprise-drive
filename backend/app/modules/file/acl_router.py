@@ -16,6 +16,8 @@ from app.modules.auth.repository import AuthRepository
 from app.modules.auth.service import AuthService
 from app.modules.file.acl import FileAclService
 from app.modules.file.repository import FileRepository
+from app.modules.org.repository import OrgRepository
+from app.modules.org.service import OrgService
 from app.modules.permission.repository import PermissionRepository
 from app.modules.permission.schemas import (
     AclEntryListResponse,
@@ -35,12 +37,17 @@ def get_file_acl_service(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> FileAclService:
     permission_repository = PermissionRepository(session)
+    org_service = OrgService(repository=OrgRepository(session))
     return FileAclService(
         file_repository=FileRepository(session),
         permission_repository=permission_repository,
-        permission_service=PermissionService(repository=permission_repository),
+        permission_service=PermissionService(
+            repository=permission_repository,
+            org_service=org_service,
+        ),
         space_repository=SpaceRepository(session),
         auth_service=AuthService(repository=AuthRepository(session), settings=settings),
+        org_service=org_service,
         audit_service=AuditService(repository=AuditRepository(session)),
     )
 
@@ -69,7 +76,8 @@ async def create_node_acl_entry(
     return await service.create_acl_entry(
         current_user=current_user,
         node_id=node_id,
-        subject_user_id=request.subject_user_id,
+        subject_type=request.subject_type,
+        subject_id=request.subject_id,
         effect=request.effect,
         actions=list(request.actions),
         inherit=request.inherit,

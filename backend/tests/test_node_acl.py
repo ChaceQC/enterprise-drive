@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings
 from app.modules.audit.models import AuditLog, OutboxEvent
 from app.modules.file.models import Node
+from app.modules.org.repository import OrgRepository
 from tests.helpers import (
     add_space_member,
     create_folder,
@@ -103,7 +104,8 @@ async def test_acl_allow_grants_viewer_upload_and_delete_revokes_it(
         f"/api/v1/files/{space['root_node_id']}/acl",
         headers={"X-CSRF-Token": admin_token, "X-Request-ID": "req_acl_create"},
         json={
-            "subject_user_id": str(member_id),
+            "subject_type": "user",
+            "subject_id": str(member_id),
             "effect": "allow",
             "actions": ["upload"],
             "inherit": True,
@@ -202,7 +204,8 @@ async def test_acl_deny_overrides_role_and_inherit_controls_descendants(
         f"/api/v1/files/{space['root_node_id']}/acl",
         headers={"X-CSRF-Token": admin_token},
         json={
-            "subject_user_id": str(member_id),
+            "subject_type": "user",
+            "subject_id": str(member_id),
             "effect": "deny",
             "actions": ["upload"],
             "inherit": True,
@@ -297,6 +300,123 @@ async def test_acl_deny_overrides_role_and_inherit_controls_descendants(
 
 
 @pytest.mark.asyncio
+async def test_department_allow_and_group_deny_expand_acl_subjects(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    admin_token = await login(client)
+    space = await create_space(client, admin_token, slug="acl-org-subjects")
+    member_id = await create_second_user(session_factory)
+    await add_space_member(
+        session_factory,
+        tenant_id=str(space["tenant_id"]),
+        space_id=str(space["id"]),
+        role="viewer",
+    )
+
+    async with session_factory() as session:
+        repository = OrgRepository(session)
+        department = await repository.create_department(
+            tenant_id=UUID(str(space["tenant_id"])),
+            name="研发部",
+            path="/研发部",
+        )
+        group = await repository.create_user_group(
+            tenant_id=UUID(str(space["tenant_id"])),
+            slug="restricted-upload",
+            name="受限上传组",
+        )
+        await repository.add_department_member(
+            tenant_id=UUID(str(space["tenant_id"])),
+            department_id=department.id,
+            user_id=member_id,
+        )
+        await repository.add_user_group_member(
+            tenant_id=UUID(str(space["tenant_id"])),
+            group_id=group.id,
+            user_id=member_id,
+        )
+        await repository.commit()
+        department_id = department.id
+        group_id = group.id
+
+    create_department_acl_response = await client.post(
+        f"/api/v1/files/{space['root_node_id']}/acl",
+        headers={"X-CSRF-Token": admin_token},
+        json={
+            "subject_type": "department",
+            "subject_id": str(department_id),
+            "effect": "allow",
+            "actions": ["upload"],
+            "inherit": True,
+        },
+    )
+    assert create_department_acl_response.status_code == 201
+    assert create_department_acl_response.json()["subject_type"] == "department"
+
+    viewer_token = await login(client, username="member", password="member-password")
+    allowed_folder = await create_folder(
+        client,
+        viewer_token,
+        space_id=str(space["id"]),
+        parent_id=str(space["root_node_id"]),
+        name="department-allowed",
+    )
+    assert allowed_folder["name"] == "department-allowed"
+
+    admin_token = await login(client)
+    create_group_acl_response = await client.post(
+        f"/api/v1/files/{space['root_node_id']}/acl",
+        headers={"X-CSRF-Token": admin_token},
+        json={
+            "subject_type": "group",
+            "subject_id": str(group_id),
+            "effect": "deny",
+            "actions": ["upload"],
+            "inherit": True,
+        },
+    )
+    assert create_group_acl_response.status_code == 201
+    assert create_group_acl_response.json()["subject_type"] == "group"
+
+    viewer_token = await login(client, username="member", password="member-password")
+    denied_response = await client.post(
+        "/api/v1/files/folders",
+        headers={"X-CSRF-Token": viewer_token},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "name": "group-denied",
+        },
+    )
+    assert denied_response.status_code == 404
+    assert denied_response.json()["code"] == "SPACE_NOT_FOUND"
+
+    async with session_factory() as session:
+        permission_events = (
+            (
+                await session.execute(
+                    select(OutboxEvent)
+                    .where(OutboxEvent.event_type == "permission.changed")
+                    .order_by(OutboxEvent.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    org_events = [
+        event
+        for event in permission_events
+        if event.payload.get("subject_type") in {"department", "group"}
+    ]
+    assert [event.payload["subject_type"] for event in org_events] == ["department", "group"]
+    assert all("affected_user_id" not in event.payload for event in org_events)
+
+
+@pytest.mark.asyncio
 async def test_acl_deny_download_hides_file_and_records_denied_audit(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
@@ -324,7 +444,8 @@ async def test_acl_deny_download_hides_file_and_records_denied_audit(
         f"/api/v1/files/{space['root_node_id']}/acl",
         headers={"X-CSRF-Token": admin_token},
         json={
-            "subject_user_id": str(member_id),
+            "subject_type": "user",
+            "subject_id": str(member_id),
             "effect": "deny",
             "actions": ["download"],
             "inherit": True,

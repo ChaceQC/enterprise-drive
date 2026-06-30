@@ -14,7 +14,7 @@ async def emit_permission_changed(
     resource_id: UUID,
     permission_version: int,
     reason: str,
-    affected_user_id: UUID,
+    affected_user_id: UUID | None = None,
     metadata: dict[str, object],
 ) -> None:
     if audit_service is None:
