@@ -45,7 +45,8 @@ uv run pytest
 - `spaces`、`nodes`、`file_blobs`、`file_versions` 基础表和迁移。
 - 空间创建时同步创建空间根目录节点。
 - 文件夹创建、目录子节点列表和签名 cursor pagination。
-- 空间创建和文件夹创建审计事件。
+- 文件树节点重命名、移动、删除到回收站和恢复。
+- 空间创建、文件夹创建、重命名、移动、删除和恢复审计事件。
 - 管理员 seed 脚本。
 
 ## 认证接口
@@ -62,7 +63,13 @@ uv run pytest
 - `GET /api/v1/spaces`
 - `POST /api/v1/files/folders`
 - `GET /api/v1/files?space_id=...&parent_id=...`
+- `PATCH /api/v1/files/{node_id}`
+- `POST /api/v1/files/{node_id}/move`
+- `DELETE /api/v1/files/{node_id}`
+- `POST /api/v1/files/{node_id}/restore`
 
 当前空间和文件树接口使用临时访问边界：只允许当前租户下的空间拥有者访问。空间成员、目录 ACL、继承权限和拒绝优先策略将在 Sprint 4 权限系统中接入。
 
 文件夹名称会进行 Unicode NFC 归一化并去除首尾空白，禁止 `/`、`\`、NUL、控制字符和路径穿越片段。同一目录下未删除节点的名称由数据库唯一索引兜底，根目录由 `tenant_id + space_id` 唯一索引兜底。
+
+根目录不允许重命名、移动或删除。当前目录删除和恢复会同步遍历当前子树，适合 Sprint 2 骨架和普通目录验证；大目录后续需要改为后台任务或引入 `deleted_root_id` 等冗余状态来避免长事务。

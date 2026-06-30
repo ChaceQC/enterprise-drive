@@ -28,7 +28,7 @@
 
 ## 当前状态
 
-当前仓库已完成 Sprint 1 工程底座并进入 Sprint 2 空间和文件树阶段。已建立 `backend` 后端工程、uv 依赖锁定、FastAPI 应用入口、配置加载、结构化日志、`X-Request-ID` 中间件、统一错误响应、健康检查、本地依赖 Compose 和后端 CI。认证基础能力已落地：租户、用户、refresh token 表，管理员 seed，本地账号登录、访问令牌和刷新令牌轮换。基础审计、outbox 和 Celery audit 队列 dispatcher 已接入。空间和文件树已具备 `spaces`、`nodes`、`file_blobs`、`file_versions` 元数据表，支持创建空间、创建文件夹和按游标列出目录节点。
+当前仓库已完成 Sprint 1 工程底座并进入 Sprint 2 空间和文件树阶段。已建立 `backend` 后端工程、uv 依赖锁定、FastAPI 应用入口、配置加载、结构化日志、`X-Request-ID` 中间件、统一错误响应、健康检查、本地依赖 Compose 和后端 CI。认证基础能力已落地：租户、用户、refresh token 表，管理员 seed，本地账号登录、访问令牌和刷新令牌轮换。基础审计、outbox 和 Celery audit 队列 dispatcher 已接入。空间和文件树已具备 `spaces`、`nodes`、`file_blobs`、`file_versions` 元数据表，支持创建空间、创建文件夹、按游标列出目录节点、重命名、移动、删除到回收站和恢复。
 
 Sprint 2 当前的权限边界是临时实现：空间和文件树 API 仅允许当前租户下的空间拥有者访问，目录 ACL、空间成员和角色将在 Sprint 4 权限系统中接入。
 

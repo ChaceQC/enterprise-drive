@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import unicodedata
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
@@ -8,12 +7,22 @@ from sqlalchemy.exc import IntegrityError
 from app.api.errors import ApiError
 from app.core.config import Settings
 from app.core.pagination import decode_page_cursor, encode_page_cursor
-from app.modules.audit.schemas import AuditContext, AuditEvent
+from app.core.security import utc_now
+from app.modules.audit.schemas import AuditContext
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
+from app.modules.file.audit import record_folder_created, record_node_event
 from app.modules.file.models import Node
 from app.modules.file.repository import FileRepository
-from app.modules.file.schemas import FileListResponse, FileNodeResponse
+from app.modules.file.schemas import DeleteNodeResponse, FileListResponse, FileNodeResponse
+from app.modules.file.tree import (
+    collect_restore_subtree,
+    collect_subtree,
+    ensure_mutable_node,
+    ensure_not_moving_into_self,
+    touch_node,
+)
+from app.modules.file.validators import node_name_conflict_error, normalize_node_name
 from app.modules.space.models import Space
 from app.modules.space.repository import SpaceRepository
 
@@ -56,7 +65,7 @@ class FileService:
             normalized_name=normalized_name,
         )
         if existing_sibling is not None:
-            raise ApiError("NODE_NAME_EXISTS", "同一目录下已存在同名文件或文件夹", status_code=409)
+            raise node_name_conflict_error()
 
         try:
             folder = await self.repository.create_node(
@@ -68,7 +77,8 @@ class FileService:
                 name=normalized_name,
                 normalized_name=normalized_name,
             )
-            await self._record_folder_created(
+            await record_folder_created(
+                audit_service=self.audit_service,
                 current_user=current_user,
                 folder=folder,
                 audit_context=audit_context,
@@ -76,9 +86,7 @@ class FileService:
             await self.repository.commit()
         except IntegrityError as exc:
             await self.repository.rollback()
-            raise ApiError(
-                "NODE_NAME_EXISTS", "同一目录下已存在同名文件或文件夹", status_code=409
-            ) from exc
+            raise node_name_conflict_error() from exc
 
         return FileNodeResponse.model_validate(folder)
 
@@ -121,6 +129,203 @@ class FileService:
             next_cursor=next_cursor,
         )
 
+    async def rename_node(
+        self,
+        *,
+        current_user: User,
+        node_id: UUID,
+        name: str,
+        audit_context: AuditContext | None = None,
+    ) -> FileNodeResponse:
+        node = await self._get_owned_node(current_user=current_user, node_id=node_id)
+        ensure_mutable_node(node)
+        normalized_name = normalize_node_name(name)
+        await self._ensure_name_available(
+            tenant_id=current_user.tenant_id,
+            space_id=node.space_id,
+            parent_id=node.parent_id,
+            normalized_name=normalized_name,
+            exclude_node_id=node.id,
+        )
+
+        old_name = node.name
+        try:
+            node.name = normalized_name
+            node.normalized_name = normalized_name
+            touch_node(node)
+            await self.repository.flush()
+            await record_node_event(
+                audit_service=self.audit_service,
+                current_user=current_user,
+                node=node,
+                action="file.renamed",
+                audit_context=audit_context,
+                metadata={"old_name": old_name, "new_name": normalized_name},
+            )
+            await self.repository.commit()
+        except IntegrityError as exc:
+            await self.repository.rollback()
+            raise node_name_conflict_error() from exc
+
+        return FileNodeResponse.model_validate(node)
+
+    async def move_node(
+        self,
+        *,
+        current_user: User,
+        node_id: UUID,
+        target_parent_id: UUID,
+        new_name: str | None,
+        audit_context: AuditContext | None = None,
+    ) -> FileNodeResponse:
+        node = await self._get_owned_node(current_user=current_user, node_id=node_id)
+        ensure_mutable_node(node)
+        target_parent = await self._get_active_folder(
+            current_user=current_user,
+            space_id=node.space_id,
+            node_id=target_parent_id,
+        )
+        await ensure_not_moving_into_self(
+            repository=self.repository,
+            node=node,
+            target_parent=target_parent,
+        )
+        normalized_name = (
+            normalize_node_name(new_name) if new_name is not None else node.normalized_name
+        )
+        await self._ensure_name_available(
+            tenant_id=current_user.tenant_id,
+            space_id=node.space_id,
+            parent_id=target_parent.id,
+            normalized_name=normalized_name,
+            exclude_node_id=node.id,
+        )
+
+        old_parent_id = node.parent_id
+        old_name = node.name
+        try:
+            node.parent_id = target_parent.id
+            node.name = normalized_name
+            node.normalized_name = normalized_name
+            touch_node(node)
+            await self.repository.flush()
+            await record_node_event(
+                audit_service=self.audit_service,
+                current_user=current_user,
+                node=node,
+                action="file.moved",
+                audit_context=audit_context,
+                metadata={
+                    "old_parent_id": str(old_parent_id) if old_parent_id else None,
+                    "new_parent_id": str(target_parent.id),
+                    "old_name": old_name,
+                    "new_name": normalized_name,
+                },
+            )
+            await self.repository.commit()
+        except IntegrityError as exc:
+            await self.repository.rollback()
+            raise node_name_conflict_error() from exc
+
+        return FileNodeResponse.model_validate(node)
+
+    async def delete_node(
+        self,
+        *,
+        current_user: User,
+        node_id: UUID,
+        audit_context: AuditContext | None = None,
+    ) -> DeleteNodeResponse:
+        node = await self._get_owned_node(current_user=current_user, node_id=node_id)
+        ensure_mutable_node(node)
+        subtree_nodes = await collect_subtree(
+            repository=self.repository,
+            node=node,
+            include_deleted=False,
+        )
+        now = utc_now()
+
+        for subtree_node in subtree_nodes:
+            subtree_node.is_deleted = True
+            subtree_node.deleted_at = now
+            subtree_node.deleted_by = current_user.id
+            touch_node(subtree_node)
+
+        await self.repository.flush()
+        await record_node_event(
+            audit_service=self.audit_service,
+            current_user=current_user,
+            node=node,
+            action="file.deleted",
+            audit_context=audit_context,
+            metadata={"deleted_count": len(subtree_nodes)},
+        )
+        await self.repository.commit()
+        return DeleteNodeResponse(node_id=node.id, deleted_count=len(subtree_nodes))
+
+    async def restore_node(
+        self,
+        *,
+        current_user: User,
+        node_id: UUID,
+        target_parent_id: UUID | None,
+        new_name: str | None,
+        audit_context: AuditContext | None = None,
+    ) -> FileNodeResponse:
+        node = await self._get_owned_node(
+            current_user=current_user,
+            node_id=node_id,
+            include_deleted=True,
+        )
+        ensure_mutable_node(node)
+        if not node.is_deleted:
+            raise ApiError("NODE_NOT_DELETED", "节点不在回收站中", status_code=400)
+
+        restore_parent = await self._resolve_restore_parent(
+            current_user=current_user,
+            node=node,
+            target_parent_id=target_parent_id,
+        )
+        normalized_name = (
+            normalize_node_name(new_name) if new_name is not None else node.normalized_name
+        )
+        await self._ensure_name_available(
+            tenant_id=current_user.tenant_id,
+            space_id=node.space_id,
+            parent_id=restore_parent.id,
+            normalized_name=normalized_name,
+            exclude_node_id=node.id,
+        )
+
+        subtree_nodes = await collect_restore_subtree(repository=self.repository, node=node)
+        try:
+            node.parent_id = restore_parent.id
+            node.name = normalized_name
+            node.normalized_name = normalized_name
+            for subtree_node in subtree_nodes:
+                subtree_node.is_deleted = False
+                subtree_node.deleted_at = None
+                subtree_node.deleted_by = None
+                touch_node(subtree_node)
+            await self.repository.flush()
+            await record_node_event(
+                audit_service=self.audit_service,
+                current_user=current_user,
+                node=node,
+                action="file.restored",
+                audit_context=audit_context,
+                metadata={
+                    "restore_parent_id": str(restore_parent.id),
+                    "restored_count": len(subtree_nodes),
+                },
+            )
+            await self.repository.commit()
+        except IntegrityError as exc:
+            await self.repository.rollback()
+            raise node_name_conflict_error() from exc
+
+        return FileNodeResponse.model_validate(node)
+
     async def _get_owned_space(self, *, current_user: User, space_id: UUID) -> Space:
         space = await self.space_repository.get_owned_active_space(
             tenant_id=current_user.tenant_id,
@@ -156,42 +361,67 @@ class FileService:
             raise ApiError("PARENT_NOT_FOLDER", "父节点不是文件夹", status_code=400)
         return node
 
-    async def _record_folder_created(
+    async def _get_owned_node(
         self,
         *,
         current_user: User,
-        folder: Node,
-        audit_context: AuditContext | None,
-    ) -> None:
-        if self.audit_service is None:
-            return
-        await self.audit_service.record(
-            event=AuditEvent(
-                tenant_id=current_user.tenant_id,
-                actor_id=current_user.id,
-                action="file.folder.created",
-                resource_type="node",
-                resource_id=folder.id,
-                result="allowed",
-                metadata={
-                    "space_id": str(folder.space_id),
-                    "parent_id": str(folder.parent_id) if folder.parent_id else None,
-                },
-            ),
-            context=audit_context or AuditContext(),
+        node_id: UUID,
+        include_deleted: bool = False,
+    ) -> Node:
+        node = await self.repository.get_node_by_id(
+            tenant_id=current_user.tenant_id,
+            node_id=node_id,
+            include_deleted=include_deleted,
+        )
+        if node is None:
+            raise ApiError("NODE_NOT_FOUND", "节点不存在或无权访问", status_code=404)
+        await self._get_owned_space(current_user=current_user, space_id=node.space_id)
+        return node
+
+    async def _get_active_folder(
+        self,
+        *,
+        current_user: User,
+        space_id: UUID,
+        node_id: UUID,
+    ) -> Node:
+        return await self._get_parent_node(
+            current_user=current_user,
+            space=await self._get_owned_space(current_user=current_user, space_id=space_id),
+            parent_id=node_id,
         )
 
+    async def _resolve_restore_parent(
+        self,
+        *,
+        current_user: User,
+        node: Node,
+        target_parent_id: UUID | None,
+    ) -> Node:
+        parent_id = target_parent_id or node.parent_id
+        if parent_id is None:
+            raise ApiError("PARENT_NOT_FOUND", "父目录不存在或无权访问", status_code=404)
+        return await self._get_active_folder(
+            current_user=current_user,
+            space_id=node.space_id,
+            node_id=parent_id,
+        )
 
-def normalize_node_name(name: str) -> str:
-    normalized_name = unicodedata.normalize("NFC", name).strip()
-    if not normalized_name:
-        raise ApiError("NODE_NAME_INVALID", "文件名不能为空", status_code=422)
-    if normalized_name in {".", ".."} or ".." in normalized_name.split("/"):
-        raise ApiError("NODE_NAME_INVALID", "文件名不能包含路径穿越片段", status_code=422)
-    if any(char in normalized_name for char in {"/", "\\", "\x00"}):
-        raise ApiError("NODE_NAME_INVALID", "文件名不能包含路径分隔符或 NUL 字符", status_code=422)
-    if any(ord(char) < 32 for char in normalized_name):
-        raise ApiError("NODE_NAME_INVALID", "文件名不能包含控制字符", status_code=422)
-    if len(normalized_name) > 255:
-        raise ApiError("NODE_NAME_INVALID", "文件名不能超过 255 个字符", status_code=422)
-    return normalized_name
+    async def _ensure_name_available(
+        self,
+        *,
+        tenant_id: UUID,
+        space_id: UUID,
+        parent_id: UUID | None,
+        normalized_name: str,
+        exclude_node_id: UUID | None,
+    ) -> None:
+        existing_sibling = await self.repository.get_sibling_by_name(
+            tenant_id=tenant_id,
+            space_id=space_id,
+            parent_id=parent_id,
+            normalized_name=normalized_name,
+            exclude_node_id=exclude_node_id,
+        )
+        if existing_sibling is not None:
+            raise node_name_conflict_error()

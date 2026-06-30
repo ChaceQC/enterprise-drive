@@ -13,7 +13,15 @@ from app.modules.audit.repository import AuditRepository
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
 from app.modules.file.repository import FileRepository
-from app.modules.file.schemas import CreateFolderRequest, FileListResponse, FileNodeResponse
+from app.modules.file.schemas import (
+    CreateFolderRequest,
+    DeleteNodeResponse,
+    FileListResponse,
+    FileNodeResponse,
+    MoveNodeRequest,
+    RenameNodeRequest,
+    RestoreNodeRequest,
+)
 from app.modules.file.service import FileService
 from app.modules.space.repository import SpaceRepository
 
@@ -63,4 +71,68 @@ async def list_files(
         parent_id=parent_id,
         cursor=cursor,
         page_size=page_size,
+    )
+
+
+@router.patch("/{node_id}", response_model=FileNodeResponse)
+async def rename_node(
+    http_request: Request,
+    node_id: UUID,
+    request: RenameNodeRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[FileService, Depends(get_file_service)],
+) -> FileNodeResponse:
+    return await service.rename_node(
+        current_user=current_user,
+        node_id=node_id,
+        name=request.name,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.post("/{node_id}/move", response_model=FileNodeResponse)
+async def move_node(
+    http_request: Request,
+    node_id: UUID,
+    request: MoveNodeRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[FileService, Depends(get_file_service)],
+) -> FileNodeResponse:
+    return await service.move_node(
+        current_user=current_user,
+        node_id=node_id,
+        target_parent_id=request.target_parent_id,
+        new_name=request.new_name,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.delete("/{node_id}", response_model=DeleteNodeResponse)
+async def delete_node(
+    http_request: Request,
+    node_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[FileService, Depends(get_file_service)],
+) -> DeleteNodeResponse:
+    return await service.delete_node(
+        current_user=current_user,
+        node_id=node_id,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.post("/{node_id}/restore", response_model=FileNodeResponse)
+async def restore_node(
+    http_request: Request,
+    node_id: UUID,
+    request: RestoreNodeRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[FileService, Depends(get_file_service)],
+) -> FileNodeResponse:
+    return await service.restore_node(
+        current_user=current_user,
+        node_id=node_id,
+        target_parent_id=request.target_parent_id,
+        new_name=request.new_name,
+        audit_context=build_audit_context(http_request),
     )

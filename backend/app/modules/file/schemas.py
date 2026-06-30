@@ -12,6 +12,20 @@ class CreateFolderRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
 
 
+class RenameNodeRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+
+
+class MoveNodeRequest(BaseModel):
+    target_parent_id: UUID
+    new_name: str | None = Field(default=None, min_length=1, max_length=255)
+
+
+class RestoreNodeRequest(BaseModel):
+    target_parent_id: UUID | None = None
+    new_name: str | None = Field(default=None, min_length=1, max_length=255)
+
+
 class FileNodeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -32,3 +46,8 @@ class FileListResponse(BaseModel):
     parent_id: UUID
     items: list[FileNodeResponse]
     next_cursor: str | None = None
+
+
+class DeleteNodeResponse(BaseModel):
+    node_id: UUID
+    deleted_count: int

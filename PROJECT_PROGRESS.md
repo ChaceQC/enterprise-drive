@@ -34,18 +34,26 @@
 - 空间创建和文件夹创建写入审计日志与 outbox event。
 - 补充空间和文件树 API 测试，覆盖创建空间、重复空间标识、创建文件夹、重复文件夹名、非法文件夹名和非拥有者访问边界。
 - 同步更新 README、后端 README、执行计划和完整技术计划书中的空间/文件树 API、索引与当前阶段说明。
+- 实现文件树节点重命名、移动、删除到回收站和恢复接口。
+- 重命名、移动、删除和恢复均写入审计日志与 outbox event。
+- 禁止根目录重命名、移动和删除，禁止目录移动到自身或自身子目录。
+- 删除目录时同步标记当前子树进入回收站；恢复目录时仅恢复同一批删除的子树，避免误恢复更早单独删除的节点。
+- 将文件树服务拆分为 `audit`、`tree`、`validators` 辅助模块，避免 `FileService` 职责膨胀。
+- 将测试公共夹具抽到 `tests/helpers.py`，并拆分空间/基础文件树测试与文件操作测试。
 
 ### 进行中
 
-- Sprint 2 文件树目录操作完善。
+- Sprint 3 上传下载前置模型和接口设计。
 
 ### 阻塞与风险
 
 - 当前空间和文件树接口暂以“当前租户 + 空间拥有者”作为访问边界，空间成员、目录 ACL、继承权限和拒绝优先策略尚未接入；该边界已在 README 和后端 README 标为临时实现，后续需要由权限模块替换。
+- 当前目录删除和恢复为同步遍历当前子树，适合 Sprint 2 骨架和普通目录验证；大目录后续需要改为后台任务或引入 `deleted_root_id` 等冗余状态，避免长事务。
+- `conflict_policy` 当前实现为 fail-only，同名冲突返回 `NODE_NAME_EXISTS`；`keep_both` 和 `replace` 后续按上传/版本策略补充。
 
 ### 下一步
 
-- 补充文件树重命名、移动、删除到回收站和恢复接口，并预留可替换为权限模块的策略入口。
+- 补充上传会话、对象存储适配、秒传和 multipart presign 的前置模型与接口骨架。
 
 ### 验证
 
@@ -75,4 +83,20 @@
 - 已运行 `uv run python -m scripts.seed_admin`，管理员 seed 通过。
 - 已启动本地 API `uv run uvicorn app.main:app --host 127.0.0.1 --port 18080`。
 - 已真实验证 `/api/v1/auth/login`、`POST /api/v1/spaces`、`POST /api/v1/files/folders`、`GET /api/v1/files`。
+- 验证完成后已关闭本次启动的 API 和 Docker Compose 服务，并确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 不再监听。
+- 已运行 `uv run ruff format .`。
+- 已运行 `uv run ruff check .`。
+- 已运行 `uv run mypy app`。
+- 已运行 `uv run pytest tests/test_space_file.py tests/test_file_operations.py`，结果为 12 passed。
+- 已运行 `uv sync --frozen --all-extras --dev`。
+- 已运行 `uv run ruff format --check .`。
+- 已运行 `uv run ruff check .`。
+- 已运行 `uv run mypy app`。
+- 已运行 `uv run pytest`，结果为 26 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认当前迁移可生成 PostgreSQL SQL。
+- 已启动 Docker Compose 依赖服务 `postgres`、`redis`、`minio`、`opensearch` 并等待健康。
+- 已运行 `uv run alembic upgrade head`，真实 PostgreSQL migration 通过。
+- 已运行 `uv run python -m scripts.seed_admin`，管理员 seed 通过。
+- 已启动本地 API `uv run uvicorn app.main:app --host 127.0.0.1 --port 18080`。
+- 已真实验证 `/api/v1/auth/login`、`POST /api/v1/spaces`、`POST /api/v1/files/folders`、`PATCH /api/v1/files/{node_id}`、`POST /api/v1/files/{node_id}/move`、`DELETE /api/v1/files/{node_id}`、`POST /api/v1/files/{node_id}/restore`、`GET /api/v1/files`。
 - 验证完成后已关闭本次启动的 API 和 Docker Compose 服务，并确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 不再监听。
