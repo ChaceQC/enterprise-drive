@@ -6,11 +6,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Path, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import build_audit_context, get_current_user
+from app.api.deps import build_audit_context, get_current_user, get_storage_adapter
 from app.core.config import Settings, get_settings
 from app.db.session import get_db_session
 from app.infrastructure.storage.base import StorageAdapter
-from app.infrastructure.storage.s3 import S3StorageAdapter
 from app.modules.audit.repository import AuditRepository
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
@@ -30,12 +29,6 @@ from app.modules.upload.schemas import (
 from app.modules.upload.service import UploadService
 
 router = APIRouter()
-
-
-def get_storage_adapter(
-    settings: Annotated[Settings, Depends(get_settings)],
-) -> StorageAdapter:
-    return S3StorageAdapter(settings=settings)
 
 
 def get_upload_service(

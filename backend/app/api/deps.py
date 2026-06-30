@@ -10,6 +10,8 @@ from app.api.errors import ApiError
 from app.core.config import Settings, get_settings
 from app.core.security import decode_access_token
 from app.db.session import get_db_session
+from app.infrastructure.storage.base import StorageAdapter
+from app.infrastructure.storage.s3 import S3StorageAdapter
 from app.modules.audit.schemas import AuditContext
 from app.modules.auth.models import User
 from app.modules.auth.repository import AuthRepository
@@ -46,3 +48,9 @@ def build_audit_context(request: Request) -> AuditContext:
         ip=client_ip,
         user_agent=user_agent,
     )
+
+
+def get_storage_adapter(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> StorageAdapter:
+    return S3StorageAdapter(settings=settings)

@@ -8,6 +8,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
+from app.api.deps import get_storage_adapter
 from app.core.config import Settings, get_settings
 from app.core.security import hash_password
 from app.db.base import Base
@@ -16,7 +17,6 @@ from app.infrastructure.storage.testing import InMemoryStorageAdapter
 from app.main import create_app
 from app.modules.auth.repository import AuthRepository
 from app.modules.auth.service import AuthService
-from app.modules.upload.router import get_storage_adapter
 
 
 @pytest.fixture

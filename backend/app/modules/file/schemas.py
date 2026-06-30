@@ -51,3 +51,14 @@ class FileListResponse(BaseModel):
 class DeleteNodeResponse(BaseModel):
     node_id: UUID
     deleted_count: int
+
+
+class FileDownloadUrlResponse(BaseModel):
+    node_id: UUID
+    version_id: UUID
+    file_name: str
+    size_bytes: int
+    mime_type: str | None
+    download_url: str
+    expires_at: datetime
+    headers: dict[str, str]

@@ -8,6 +8,7 @@ from app.infrastructure.storage.base import (
     CompletedMultipartUpload,
     CompletedUploadPart,
     MultipartUpload,
+    PresignedDownload,
     PresignedUploadPart,
 )
 
@@ -17,6 +18,7 @@ class InMemoryStorageAdapter:
         self.created_uploads: dict[str, tuple[str, str]] = {}
         self.aborted_uploads: set[str] = set()
         self.completed_uploads: dict[str, list[CompletedUploadPart]] = {}
+        self.presigned_downloads: list[tuple[str, str, str]] = []
 
     async def create_multipart_upload(
         self,
@@ -70,4 +72,19 @@ class InMemoryStorageAdapter:
         return CompletedMultipartUpload(
             etag=f"completed-{provider_upload_id}",
             size_bytes=size_bytes or None,
+        )
+
+    async def presign_download(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        filename: str,
+        expires_in_seconds: int,
+    ) -> PresignedDownload:
+        self.presigned_downloads.append((bucket, storage_key, filename))
+        return PresignedDownload(
+            download_url=f"https://storage.test/{bucket}/{storage_key}?download={filename}",
+            expires_at=utc_now() + timedelta(seconds=expires_in_seconds),
+            headers={},
         )

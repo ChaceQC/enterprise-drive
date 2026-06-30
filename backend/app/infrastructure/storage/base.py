@@ -31,6 +31,13 @@ class CompletedMultipartUpload:
     size_bytes: int | None
 
 
+@dataclass(frozen=True)
+class PresignedDownload:
+    download_url: str
+    expires_at: datetime
+    headers: dict[str, str]
+
+
 class StorageAdapter(Protocol):
     async def create_multipart_upload(
         self,
@@ -70,3 +77,13 @@ class StorageAdapter(Protocol):
         parts: list[CompletedUploadPart],
     ) -> CompletedMultipartUpload:
         """Complete a provider-side multipart upload."""
+
+    async def presign_download(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        filename: str,
+        expires_in_seconds: int,
+    ) -> PresignedDownload:
+        """Create a short-lived URL for downloading one private object."""

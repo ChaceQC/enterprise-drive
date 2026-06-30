@@ -6,7 +6,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.pagination import PageCursor
-from app.modules.file.models import Node
+from app.modules.file.models import FileBlob, FileVersion, Node
 
 
 class FileRepository:
@@ -158,6 +158,28 @@ class FileRepository:
             .limit(limit)
         )
         return list(result.scalars().all())
+
+    async def get_current_version_with_blob(
+        self,
+        *,
+        tenant_id: UUID,
+        node_id: UUID,
+        version_id: UUID,
+    ) -> tuple[FileVersion, FileBlob] | None:
+        result = await self.session.execute(
+            select(FileVersion, FileBlob)
+            .join(FileBlob, FileBlob.id == FileVersion.blob_id)
+            .where(
+                FileVersion.tenant_id == tenant_id,
+                FileVersion.node_id == node_id,
+                FileVersion.id == version_id,
+                FileBlob.tenant_id == tenant_id,
+            )
+        )
+        row = result.one_or_none()
+        if row is None:
+            return None
+        return row[0], row[1]
 
     async def flush(self) -> None:
         await self.session.flush()

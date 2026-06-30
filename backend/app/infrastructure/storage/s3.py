@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import timedelta
 from typing import Any
+from urllib.parse import quote
 
 import boto3  # type: ignore[import-untyped]
 from botocore.config import Config  # type: ignore[import-untyped]
@@ -13,6 +14,7 @@ from app.infrastructure.storage.base import (
     CompletedMultipartUpload,
     CompletedUploadPart,
     MultipartUpload,
+    PresignedDownload,
     PresignedUploadPart,
 )
 
@@ -120,6 +122,37 @@ class S3StorageAdapter:
         return CompletedMultipartUpload(
             etag=str(response.get("ETag")) if response.get("ETag") is not None else None,
             size_bytes=int(head_response["ContentLength"]),
+        )
+
+    async def presign_download(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        filename: str,
+        expires_in_seconds: int,
+    ) -> PresignedDownload:
+        safe_filename = filename.replace("/", "_").replace("\\", "_").replace('"', "_")
+        ascii_filename = safe_filename.encode("ascii", "ignore").decode() or "download"
+        content_disposition = (
+            f'attachment; filename="{ascii_filename}"; '
+            f"filename*=UTF-8''{quote(safe_filename, safe='')}"
+        )
+        download_url = await asyncio.to_thread(
+            self._client.generate_presigned_url,
+            "get_object",
+            Params={
+                "Bucket": bucket,
+                "Key": storage_key,
+                "ResponseContentDisposition": content_disposition,
+            },
+            ExpiresIn=expires_in_seconds,
+            HttpMethod="GET",
+        )
+        return PresignedDownload(
+            download_url=str(download_url),
+            expires_at=utc_now() + timedelta(seconds=expires_in_seconds),
+            headers={},
         )
 
     def _ensure_bucket(self, bucket: str) -> None:

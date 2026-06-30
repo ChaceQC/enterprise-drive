@@ -6,16 +6,19 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import build_audit_context, get_current_user
+from app.api.deps import build_audit_context, get_current_user, get_storage_adapter
 from app.core.config import Settings, get_settings
 from app.db.session import get_db_session
+from app.infrastructure.storage.base import StorageAdapter
 from app.modules.audit.repository import AuditRepository
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
+from app.modules.file.download import FileDownloadService
 from app.modules.file.repository import FileRepository
 from app.modules.file.schemas import (
     CreateFolderRequest,
     DeleteNodeResponse,
+    FileDownloadUrlResponse,
     FileListResponse,
     FileNodeResponse,
     MoveNodeRequest,
@@ -35,6 +38,20 @@ def get_file_service(
     return FileService(
         repository=FileRepository(session),
         space_repository=SpaceRepository(session),
+        settings=settings,
+        audit_service=AuditService(repository=AuditRepository(session)),
+    )
+
+
+def get_file_download_service(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    storage: Annotated[StorageAdapter, Depends(get_storage_adapter)],
+) -> FileDownloadService:
+    return FileDownloadService(
+        repository=FileRepository(session),
+        space_repository=SpaceRepository(session),
+        storage=storage,
         settings=settings,
         audit_service=AuditService(repository=AuditRepository(session)),
     )
@@ -115,6 +132,20 @@ async def delete_node(
     service: Annotated[FileService, Depends(get_file_service)],
 ) -> DeleteNodeResponse:
     return await service.delete_node(
+        current_user=current_user,
+        node_id=node_id,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.get("/{node_id}/download", response_model=FileDownloadUrlResponse)
+async def create_download_url(
+    http_request: Request,
+    node_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[FileDownloadService, Depends(get_file_download_service)],
+) -> FileDownloadUrlResponse:
+    return await service.create_download_url(
         current_user=current_user,
         node_id=node_id,
         audit_context=build_audit_context(http_request),

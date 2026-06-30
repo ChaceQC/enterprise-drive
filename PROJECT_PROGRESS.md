@@ -55,23 +55,47 @@
 - 实现 `/api/v1/uploads/{session_id}/abort`，未完成会话可标记为 `aborted` 并取消对象存储 multipart upload，重复 abort 幂等返回。
 - complete、abort 和失败分支均写入审计日志与 outbox event。
 - 补充上传 complete/abort 测试，覆盖完整上传、幂等 complete、缺片拒绝和取消后的终态限制。
+- 抽出共享 `get_storage_adapter` 依赖，上传和下载模块统一通过 `StorageAdapter` 协议访问对象存储。
+- 扩展 `StorageAdapter`，补充 `presign_download` 能力；S3/MinIO 适配器使用 `get_object` 生成短期下载 URL，并通过 `ResponseContentDisposition` 处理中文文件名。
+- 实现 `GET /api/v1/files/{node_id}/download`，基于 `nodes.current_version_id` 查找当前版本和 blob，返回下载 URL、过期时间、文件名、版本、大小和 MIME。
+- 下载成功写入 `file.downloaded` 审计日志与 outbox event；目录下载、非空间拥有者下载、节点缺失和版本缺失等拒绝分支也写入 `result=denied` 审计。
+- 补充下载接口测试，覆盖成功下载审计、目录拒绝审计和临时空间拥有者边界。
+- 同步更新 README、后端 README、执行计划和完整技术计划书中的下载接口、环境变量、当前限制和下一步说明。
 
 ### 进行中
 
-- Sprint 3 下载预签名 URL、容量账本、hash 校验和上传清理任务设计与实现。
+- Sprint 3 容量账本、服务端 hash 校验、最终对象 key 规整、上传清理任务和上传/下载限流设计与实现。
 
 ### 阻塞与风险
 
 - 当前空间和文件树接口暂以“当前租户 + 空间拥有者”作为访问边界，空间成员、目录 ACL、继承权限和拒绝优先策略尚未接入；该边界已在 README 和后端 README 标为临时实现，后续需要由权限模块替换。
 - 当前目录删除和恢复为同步遍历当前子树，适合 Sprint 2 骨架和普通目录验证；大目录后续需要改为后台任务或引入 `deleted_root_id` 等冗余状态，避免长事务。
 - `conflict_policy` 当前实现为 fail-only，同名冲突返回 `NODE_NAME_EXISTS`；`keep_both` 和 `replace` 后续按上传/版本策略补充。
-- 当前上传接口已完成 init、status、part presign、complete 和 abort；下载预签名 URL、过期会话清理、上传限流和容量账本尚未接入。
-- 当前上传权限仍沿用“当前租户 + 空间拥有者”临时边界，后续需要由 Sprint 4 权限模块替换。
+- 当前上传下载接口已完成 init、status、part presign、complete、abort 和 download presign；过期会话清理、上传/下载限流和容量账本尚未接入。
+- 当前上传和下载权限仍沿用“当前租户 + 空间拥有者”临时边界，后续需要由 Sprint 4 权限模块替换。
 - 当前对象存储上传完成后暂以 `upload_sessions.storage_key` 作为 blob 的 `storage_key`；最终 `objects/{tenant_id}/{hash_prefix}/{content_hash}` key 规整、完成后 hash 校验和生命周期清理策略需在后续步骤落地。
 
 ### 下一步
 
-- 实现下载预签名 URL：基于 `nodes.current_version_id` 查找 blob，生成短期私有对象下载地址，并写入下载审计；随后补容量账本、服务端 hash 校验、最终对象 key 规整和过期上传清理。
+- 实现容量账本初版：在上传完成和秒传创建版本时写入容量流水并更新容量快照，随后补服务端 hash 校验、最终对象 key 规整、过期上传清理和上传/下载限流。
+
+### 涉及文件
+
+- `backend/app/modules/file/download.py`
+- `backend/app/modules/file/router.py`
+- `backend/app/modules/file/repository.py`
+- `backend/app/modules/file/schemas.py`
+- `backend/app/infrastructure/storage/base.py`
+- `backend/app/infrastructure/storage/s3.py`
+- `backend/app/infrastructure/storage/testing.py`
+- `backend/app/api/deps.py`
+- `backend/app/modules/upload/router.py`
+- `backend/tests/test_download.py`
+- `backend/tests/helpers.py`
+- `README.md`
+- `backend/README.md`
+- `PROJECT_PLAN.md`
+- `企业网盘开发者技术计划书.md`
 
 ### 验证
 
@@ -161,3 +185,20 @@
 - 已再次运行 `uv run mypy app`，结果为 no issues found in 63 source files。
 - 已再次运行 `uv run pytest`，结果为 32 passed。
 - 已再次运行 `uv run alembic upgrade head --sql`，确认当前迁移仍可生成 PostgreSQL SQL。
+- 已运行 `uv run ruff format .`，格式化下载接口和测试相关文件。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run pytest tests/test_download.py`，结果为 3 passed。
+- 已运行 `uv run pytest tests/test_download.py tests/test_upload.py`，结果为 9 passed。
+- 已运行 `uv sync --frozen --all-extras --dev`。
+- 已运行 `uv run ruff format --check .`，结果为 79 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 64 source files。
+- 已运行 `uv run pytest`，结果为 35 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认当前迁移仍可生成 PostgreSQL SQL。
+- 已确认启动前 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 未监听。
+- 已启动 Docker Compose 依赖服务 `postgres`、`redis`、`minio`、`opensearch` 并等待健康。
+- 已运行 `uv run alembic upgrade head`，真实 PostgreSQL migration 通过。
+- 已运行 `uv run python -m scripts.seed_admin`，管理员 seed 通过。
+- 已启动本地 API `uv run uvicorn app.main:app --host 127.0.0.1 --port 18080`。
+- 已使用 Python/httpx 真实验证 `/healthz`、`/api/v1/auth/login`、`POST /api/v1/spaces`、`POST /api/v1/uploads/init`、`POST /api/v1/uploads/{session_id}/parts/{part_no}/presign`、直接 PUT 两个分片到 MinIO 预签名 URL、`POST /api/v1/uploads/{session_id}/complete`、`GET /api/v1/files/{node_id}/download` 和直接 GET 下载预签名 URL；下载返回 200，下载字节数 8,392,704，与原始内容一致。
+- 验证完成后已关闭本次启动的 API 和 Docker Compose 服务，并确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 不再监听。

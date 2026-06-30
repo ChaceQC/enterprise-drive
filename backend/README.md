@@ -55,6 +55,8 @@ uv run pytest
 - 秒传分支：命中同租户同 hash、同大小 blob 时直接创建文件节点和版本，并增加 blob 引用计数。
 - multipart complete 成功后写入 `file_blobs`、`nodes`、`file_versions`、`upload_parts` 和上传会话完成结果。
 - 上传初始化、秒传、complete、abort 和失败审计事件。
+- 文件下载预签名 URL 接口，按当前文件版本生成短期私有对象下载地址。
+- 下载成功和拒绝均写入 `file.downloaded` 审计事件与 outbox event。
 - 管理员 seed 脚本。
 
 ## 认证接口
@@ -106,5 +108,14 @@ uv run pytest
 - `DRIVE_UPLOAD_SESSION_TTL_MINUTES`
 - `DRIVE_UPLOAD_PART_SIZE_BYTES`
 - `DRIVE_UPLOAD_PRESIGN_EXPIRES_SECONDS`
+- `DRIVE_DOWNLOAD_PRESIGN_EXPIRES_SECONDS`
 
-当前上传接口沿用临时空间拥有者访问边界。下载预签名 URL、容量账本、服务端 hash 校验、最终对象 key 规整、过期会话清理和上传限流将在 Sprint 3 后续步骤补齐。
+当前上传接口沿用临时空间拥有者访问边界。容量账本、服务端 hash 校验、最终对象 key 规整、过期会话清理和上传限流将在 Sprint 3 后续步骤补齐。
+
+## 下载接口
+
+- `GET /api/v1/files/{node_id}/download`
+
+下载接口基于 `nodes.current_version_id` 查询当前版本和 blob，返回 `download_url`、`expires_at`、`file_name`、`version_id`、`size_bytes`、`mime_type` 和额外 `headers`。S3/MinIO 适配器会使用 `ResponseContentDisposition` 设置下载文件名，并同时提供 ASCII `filename` 和 UTF-8 `filename*`。
+
+当前下载接口沿用临时空间拥有者访问边界：非空间拥有者返回统一的 `NODE_NOT_FOUND`，目录节点返回 `NODE_NOT_FILE`，缺失当前版本返回 `FILE_VERSION_NOT_FOUND`。下载成功与拒绝都会写入 `file.downloaded` 审计事件；后续 Sprint 4 接入空间成员、目录 ACL、继承权限和拒绝优先策略后，将由权限模块替换该临时边界。
