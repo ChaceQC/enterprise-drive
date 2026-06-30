@@ -29,10 +29,13 @@ from app.modules.file.schemas import (
     FileListResponse,
     FileNodeResponse,
     MoveNodeRequest,
+    PurgeNodeResponse,
     RenameNodeRequest,
     RestoreNodeRequest,
 )
 from app.modules.file.service import FileService
+from app.modules.quota.repository import QuotaRepository
+from app.modules.quota.service import QuotaService
 from app.modules.space.repository import SpaceRepository
 
 router = APIRouter()
@@ -45,6 +48,10 @@ def get_file_service(
     return FileService(
         repository=FileRepository(session),
         space_repository=SpaceRepository(session),
+        quota_service=QuotaService(
+            repository=QuotaRepository(session),
+            default_space_limit_bytes=settings.default_space_quota_bytes,
+        ),
         settings=settings,
         audit_service=AuditService(repository=AuditRepository(session)),
     )
@@ -139,6 +146,20 @@ async def delete_node(
     service: Annotated[FileService, Depends(get_file_service)],
 ) -> DeleteNodeResponse:
     return await service.delete_node(
+        current_user=current_user,
+        node_id=node_id,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.delete("/{node_id}/purge", response_model=PurgeNodeResponse)
+async def purge_node(
+    http_request: Request,
+    node_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[FileService, Depends(get_file_service)],
+) -> PurgeNodeResponse:
+    return await service.purge_node(
         current_user=current_user,
         node_id=node_id,
         audit_context=build_audit_context(http_request),

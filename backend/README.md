@@ -47,8 +47,8 @@ uv run pytest
 - `spaces`、`nodes`、`file_blobs`、`file_versions` 基础表和迁移。
 - 空间创建时同步创建空间根目录节点。
 - 文件夹创建、目录子节点列表和签名 cursor pagination。
-- 文件树节点重命名、移动、删除到回收站和恢复。
-- 空间创建、文件夹创建、重命名、移动、删除和恢复审计事件。
+- 文件树节点重命名、移动、删除到回收站、恢复和彻底删除。
+- 空间创建、文件夹创建、重命名、移动、删除、恢复和彻底删除审计事件。
 - `upload_sessions`、`upload_parts` 基础表和迁移。
 - `quota_accounts`、`quota_ledger` 基础表和迁移。
 - 空间创建时同步初始化默认空间容量账户。
@@ -57,6 +57,7 @@ uv run pytest
 - 秒传分支：命中同租户同 hash、同大小 blob 时直接创建文件节点和版本，并增加 blob 引用计数。
 - multipart complete 成功合并后服务端校验 `sha256`，通过后将新对象归档到 `objects/{tenant_id}/{hash_prefix}/{content_hash}`，再写入 `file_blobs`、`nodes`、`file_versions`、`upload_parts` 和上传会话完成结果。
 - 秒传和 multipart complete 创建文件版本时原子增加空间容量快照，并写入 `quota_ledger` 容量流水。
+- 删除到回收站保留空间容量占用；彻底删除回收站节点时释放对应文件版本容量，并写入 `file_purged` 负向容量流水。
 - 上传初始化、秒传、complete、abort 和 hash 不匹配等失败审计事件。
 - `upload.expire_sessions` 维护任务，按租户清理过期上传会话并写入 `upload.expired` 审计事件。
 - Redis 固定窗口基础限流，覆盖上传初始化、分片签名和下载预签名。
@@ -81,13 +82,14 @@ uv run pytest
 - `PATCH /api/v1/files/{node_id}`
 - `POST /api/v1/files/{node_id}/move`
 - `DELETE /api/v1/files/{node_id}`
+- `DELETE /api/v1/files/{node_id}/purge`
 - `POST /api/v1/files/{node_id}/restore`
 
 当前空间和文件树接口使用临时访问边界：只允许当前租户下的空间拥有者访问。空间成员、目录 ACL、继承权限和拒绝优先策略将在 Sprint 4 权限系统中接入。
 
 文件夹名称会进行 Unicode NFC 归一化并去除首尾空白，禁止 `/`、`\`、NUL、控制字符和路径穿越片段。同一目录下未删除节点的名称由数据库唯一索引兜底，根目录由 `tenant_id + space_id` 唯一索引兜底。
 
-根目录不允许重命名、移动或删除。当前目录删除和恢复会同步遍历当前子树，适合 Sprint 2 骨架和普通目录验证；大目录后续需要改为后台任务或引入 `deleted_root_id` 等冗余状态来避免长事务。
+根目录不允许重命名、移动、删除或彻底删除。删除到回收站会同步标记当前活跃子树，不释放容量；恢复只恢复同一批删除的子树，避免误恢复更早单独删除的节点。彻底删除只允许作用于已在回收站的节点，会删除该节点下全部已删除后代的节点元数据和文件版本，扣减相关 blob 引用计数，按版本大小合计释放空间容量并写入 `file.purged` 审计。当前目录删除、恢复和彻底删除仍是同步遍历，适合 Sprint 2/3 骨架和普通目录验证；大目录后续需要改为后台任务或引入 `deleted_root_id` 等冗余状态来避免长事务。
 
 ## 上传接口
 
@@ -127,7 +129,7 @@ uv run pytest
 - `DRIVE_DOWNLOAD_PRESIGN_RATE_LIMIT_COUNT`
 - `DRIVE_DOWNLOAD_PRESIGN_RATE_LIMIT_WINDOW_SECONDS`
 
-当前上传接口沿用临时空间拥有者访问边界。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除释放容量、容量校准和用户/租户维度配额将在后续步骤补齐。
+当前上传接口沿用临时空间拥有者访问边界。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除到回收站不释放容量；彻底删除回收站节点时通过原子 update 扣减 `quota_accounts.used_bytes`，并写入 `reason=file_purged`、`ref_type=node` 的负向容量流水。对象存储最终对象不会在彻底删除接口内同步删除，后续由 blob 垃圾回收和对象生命周期任务处理；容量校准和用户/租户维度配额将在后续步骤补齐。
 
 ## 下载接口
 

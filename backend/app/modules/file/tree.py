@@ -58,6 +58,31 @@ async def collect_subtree(
     return collected
 
 
+async def collect_deleted_subtree(
+    *,
+    repository: FileRepository,
+    node: Node,
+) -> list[Node]:
+    collected = [node]
+    cursor = 0
+    while cursor < len(collected):
+        current = collected[cursor]
+        cursor += 1
+        if current.node_type != "folder":
+            continue
+        children = await repository.list_child_nodes(
+            tenant_id=current.tenant_id,
+            space_id=current.space_id,
+            parent_id=current.id,
+            include_deleted=True,
+        )
+        for child in children:
+            if not child.is_deleted:
+                raise ApiError("NODE_PURGE_CONFLICT", "节点包含未删除子节点", status_code=409)
+            collected.append(child)
+    return collected
+
+
 async def collect_restore_subtree(
     *,
     repository: FileRepository,

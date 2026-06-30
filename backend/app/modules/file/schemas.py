@@ -53,6 +53,12 @@ class DeleteNodeResponse(BaseModel):
     deleted_count: int
 
 
+class PurgeNodeResponse(BaseModel):
+    node_id: UUID
+    purged_count: int
+    released_bytes: int
+
+
 class FileDownloadUrlResponse(BaseModel):
     node_id: UUID
     version_id: UUID

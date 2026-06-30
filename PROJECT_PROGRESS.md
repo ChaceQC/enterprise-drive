@@ -19,22 +19,28 @@
 - 新增限流配置项：`DRIVE_RATE_LIMIT_ENABLED`、`DRIVE_UPLOAD_INIT_RATE_LIMIT_COUNT`、`DRIVE_UPLOAD_INIT_RATE_LIMIT_WINDOW_SECONDS`、`DRIVE_UPLOAD_PART_PRESIGN_RATE_LIMIT_COUNT`、`DRIVE_UPLOAD_PART_PRESIGN_RATE_LIMIT_WINDOW_SECONDS`、`DRIVE_DOWNLOAD_PRESIGN_RATE_LIMIT_COUNT`、`DRIVE_DOWNLOAD_PRESIGN_RATE_LIMIT_WINDOW_SECONDS`。
 - 补充限流测试，覆盖上传初始化、分片签名、分片签名 session 维度隔离和下载预签名的 429 行为。
 - 同步更新 README、后端 README、执行计划和完整技术计划书中的基础限流状态、配置项和下一步说明。
+- 新增 `DELETE /api/v1/files/{node_id}/purge` 彻底删除接口，只允许彻底删除已在回收站的节点。
+- 删除到回收站保持容量占用不变；彻底删除会删除节点元数据和文件版本，按版本大小合计释放空间容量，并写入 `reason=file_purged`、`ref_type=node` 的负向容量流水。
+- 彻底删除会扣减相关 `file_blobs.ref_count`，但不在接口事务中同步删除对象存储最终对象，后续由 blob 垃圾回收和对象生命周期任务处理。
+- 补充彻底删除响应模型 `PurgeNodeResponse`，返回根节点 ID、彻底删除节点数量和释放容量字节数。
+- 补充文件操作测试，覆盖软删不释放容量、彻底删除文件释放容量、彻底删除目录释放后代版本容量、blob 引用计数扣减、审计写入、活跃节点和根目录拒绝彻底删除。
+- 同步更新 README、后端 README、执行计划和完整技术计划书中的彻底删除容量释放策略、接口清单、后续容量校准和对象生命周期边界。
 
 ### 进行中
 
-- Sprint 3 容量释放和容量校准设计与实现。
+- Sprint 3 容量校准任务和对象生命周期清理设计与实现。
 
 ### 阻塞与风险
 
 - 当前空间、文件树、上传和下载接口仍暂以“当前租户 + 空间拥有者”作为访问边界，空间成员、目录 ACL、继承权限和拒绝优先策略尚未接入；该边界已在 README 和后端 README 标为临时实现。
 - 过期上传清理已覆盖数据库会话终态、multipart abort 和 `uploads/...` 临时对象删除；对象复制成功但数据库最终化失败后的 `objects/...` 孤儿对象扫描仍需后续生命周期任务兜底。
-- 当前容量初版仅覆盖空间维度和文件版本创建场景；删除释放容量、历史空间回填、用户/租户维度配额和定期校准任务仍需后续补齐。
+- 当前容量实现已覆盖空间维度的文件版本创建和彻底删除释放；历史空间回填、用户/租户维度配额、定期校准任务和 blob/object 垃圾回收仍需后续补齐。
 - 当前清理任务按批次扫描租户内过期会话，尚未接入定时调度配置、任务监控指标和失败告警。
 - 当前基础限流覆盖上传初始化、分片签名和下载预签名；登录失败、外链访问、搜索和管理接口限流仍需随对应模块接入。
 
 ### 下一步
 
-- 实现文件删除到回收站或彻底删除后的容量释放策略，并补充容量流水、测试和文档。
+- 实现容量账本校准任务：按 PostgreSQL 文件版本事实重算空间用量，对比 `quota_accounts.used_bytes` 与 `quota_ledger`，记录偏差处理策略并补充测试和文档。
 
 ### 涉及文件
 
@@ -52,9 +58,16 @@
 - `backend/app/core/config.py`
 - `backend/app/modules/upload/router.py`
 - `backend/app/modules/file/router.py`
+- `backend/app/modules/file/repository.py`
+- `backend/app/modules/file/schemas.py`
+- `backend/app/modules/file/service.py`
+- `backend/app/modules/file/tree.py`
+- `backend/app/modules/quota/repository.py`
+- `backend/app/modules/quota/service.py`
 - `backend/app/modules/auth/repository.py`
 - `backend/tests/test_upload_cleanup.py`
 - `backend/tests/test_rate_limit.py`
+- `backend/tests/test_file_operations.py`
 - `backend/tests/helpers.py`
 - `README.md`
 - `backend/README.md`
@@ -78,6 +91,13 @@
 - 验证完成后已关闭本次启动的 Docker Compose 服务，并确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 不再监听。
 - 已运行 `uv run pytest tests/test_rate_limit.py`，结果为 4 passed。
 - 已运行 `uv run ruff format .`。
+- 已运行 `uv run pytest tests/test_file_operations.py -q`，结果为 9 passed。
+- 已运行 `uv run ruff format .`，格式化彻底删除容量释放相关文件。
+- 已运行 `uv run ruff format --check .`，结果为 94 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 76 source files。
+- 已运行 `uv run pytest`，结果为 48 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认当前迁移仍可生成 PostgreSQL SQL。
 - 已运行 `uv run ruff format --check .`，结果为 94 files already formatted。
 - 已运行 `uv run ruff check .`，结果为 All checks passed。
 - 已运行 `uv run mypy app`，结果为 no issues found in 76 source files。

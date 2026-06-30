@@ -70,6 +70,35 @@ class QuotaService:
             ref_id=version_id,
         )
 
+    async def release_file_usage(
+        self,
+        *,
+        tenant_id: UUID,
+        space_id: UUID,
+        ref_id: UUID,
+        size_bytes: int,
+    ) -> None:
+        if size_bytes <= 0:
+            return
+        await self.ensure_space_account(tenant_id=tenant_id, space_id=space_id)
+        account_id = await self.repository.subtract_usage(
+            tenant_id=tenant_id,
+            owner_type="space",
+            owner_id=space_id,
+            delta_bytes=size_bytes,
+        )
+        if account_id is None:
+            raise ApiError("QUOTA_RELEASE_FAILED", "容量释放失败", status_code=500)
+        await self.repository.add_ledger(
+            tenant_id=tenant_id,
+            account_id=account_id,
+            account_type="space",
+            delta_bytes=-size_bytes,
+            reason="file_purged",
+            ref_type="node",
+            ref_id=ref_id,
+        )
+
 
 def quota_exceeded_error() -> ApiError:
     return ApiError("QUOTA_EXCEEDED", "容量不足", status_code=422)

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from uuid import UUID
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -7,6 +9,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
 from app.modules.audit.models import AuditLog
+from app.modules.file.models import FileBlob, FileVersion, Node
+from app.modules.quota.models import QuotaAccount, QuotaLedger
 from tests.helpers import (
     client as client,
 )
@@ -25,6 +29,51 @@ from tests.helpers import (
 from tests.helpers import (
     storage_adapter as storage_adapter,
 )
+
+
+async def create_instant_file(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    token: str,
+    *,
+    tenant_id: str,
+    space_id: str,
+    parent_id: str,
+    file_name: str,
+    content_hash: str,
+    size_bytes: int,
+) -> dict[str, object]:
+    async with session_factory() as session:
+        blob = FileBlob(
+            tenant_id=UUID(tenant_id),
+            hash_algo="sha256",
+            content_hash=content_hash,
+            size_bytes=size_bytes,
+            storage_key=f"objects/test/{content_hash[:2]}/{content_hash}",
+            mime_type="text/plain",
+            ref_count=0,
+        )
+        session.add(blob)
+        await session.commit()
+
+    response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "space_id": space_id,
+            "parent_id": parent_id,
+            "file_name": file_name,
+            "size_bytes": size_bytes,
+            "content_hash": content_hash,
+            "hash_algo": "sha256",
+            "mime_type": "text/plain",
+        },
+    )
+
+    assert response.status_code == 201
+    payload = dict(response.json())
+    assert payload["mode"] == "instant"
+    return payload
 
 
 @pytest.mark.asyncio
@@ -219,6 +268,210 @@ async def test_delete_and_restore_folder_subtree(
 
 
 @pytest.mark.asyncio
+async def test_purge_deleted_file_releases_quota_and_removes_metadata(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="purge-file-space")
+    size_bytes = 2048
+    file_payload = await create_instant_file(
+        client,
+        session_factory,
+        token,
+        tenant_id=str(space["tenant_id"]),
+        space_id=str(space["id"]),
+        parent_id=str(space["root_node_id"]),
+        file_name="待彻底删除.txt",
+        content_hash="a" * 64,
+        size_bytes=size_bytes,
+    )
+    node_id = UUID(str(file_payload["node_id"]))
+    version_id = UUID(str(file_payload["version_id"]))
+    blob_id = UUID(str(file_payload["blob_id"]))
+
+    delete_response = await client.delete(
+        f"/api/v1/files/{node_id}",
+        headers={"Authorization": f"Bearer {token}", "X-Request-ID": "req_delete_before_purge"},
+    )
+
+    assert delete_response.status_code == 200
+    async with session_factory() as session:
+        quota_account = (await session.execute(select(QuotaAccount))).scalar_one()
+        ledgers = (await session.execute(select(QuotaLedger))).scalars().all()
+        deleted_node = (await session.execute(select(Node).where(Node.id == node_id))).scalar_one()
+
+    assert quota_account.used_bytes == size_bytes
+    assert [ledger.delta_bytes for ledger in ledgers] == [size_bytes]
+    assert deleted_node.is_deleted is True
+
+    purge_response = await client.delete(
+        f"/api/v1/files/{node_id}/purge",
+        headers={"Authorization": f"Bearer {token}", "X-Request-ID": "req_purge_file"},
+    )
+
+    assert purge_response.status_code == 200
+    assert purge_response.json() == {
+        "node_id": str(node_id),
+        "purged_count": 1,
+        "released_bytes": size_bytes,
+    }
+
+    async with session_factory() as session:
+        quota_account = (await session.execute(select(QuotaAccount))).scalar_one()
+        ledgers = (
+            (await session.execute(select(QuotaLedger).order_by(QuotaLedger.created_at)))
+            .scalars()
+            .all()
+        )
+        node = (await session.execute(select(Node).where(Node.id == node_id))).scalar_one_or_none()
+        version = (
+            await session.execute(select(FileVersion).where(FileVersion.id == version_id))
+        ).scalar_one_or_none()
+        blob = (await session.execute(select(FileBlob).where(FileBlob.id == blob_id))).scalar_one()
+        audit = (
+            await session.execute(select(AuditLog).where(AuditLog.action == "file.purged"))
+        ).scalar_one()
+
+    assert quota_account.used_bytes == 0
+    assert [(ledger.delta_bytes, ledger.reason, ledger.ref_type) for ledger in ledgers] == [
+        (size_bytes, "file_version_created", "file_version"),
+        (-size_bytes, "file_purged", "node"),
+    ]
+    assert ledgers[1].ref_id == node_id
+    assert node is None
+    assert version is None
+    assert blob.ref_count == 0
+    assert audit.request_id == "req_purge_file"
+    assert audit.resource_id == node_id
+    assert audit.metadata_json["released_bytes"] == size_bytes
+
+
+@pytest.mark.asyncio
+async def test_purge_deleted_folder_releases_descendant_versions(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="purge-folder-space")
+    folder = await create_folder(
+        client,
+        token,
+        space_id=str(space["id"]),
+        parent_id=str(space["root_node_id"]),
+        name="待清空目录",
+    )
+    child_folder = await create_folder(
+        client,
+        token,
+        space_id=str(space["id"]),
+        parent_id=str(folder["id"]),
+        name="子目录",
+    )
+    root_file = await create_instant_file(
+        client,
+        session_factory,
+        token,
+        tenant_id=str(space["tenant_id"]),
+        space_id=str(space["id"]),
+        parent_id=str(folder["id"]),
+        file_name="根文件.txt",
+        content_hash="b" * 64,
+        size_bytes=1024,
+    )
+    child_file = await create_instant_file(
+        client,
+        session_factory,
+        token,
+        tenant_id=str(space["tenant_id"]),
+        space_id=str(space["id"]),
+        parent_id=str(child_folder["id"]),
+        file_name="子文件.txt",
+        content_hash="c" * 64,
+        size_bytes=4096,
+    )
+
+    delete_response = await client.delete(
+        f"/api/v1/files/{folder['id']}",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    purge_response = await client.delete(
+        f"/api/v1/files/{folder['id']}/purge",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert delete_response.status_code == 200
+    assert delete_response.json()["deleted_count"] == 4
+    assert purge_response.status_code == 200
+    assert purge_response.json() == {
+        "node_id": folder["id"],
+        "purged_count": 4,
+        "released_bytes": 5120,
+    }
+
+    purged_node_ids = {
+        UUID(str(folder["id"])),
+        UUID(str(child_folder["id"])),
+        UUID(str(root_file["node_id"])),
+        UUID(str(child_file["node_id"])),
+    }
+    purged_version_ids = {
+        UUID(str(root_file["version_id"])),
+        UUID(str(child_file["version_id"])),
+    }
+    async with session_factory() as session:
+        quota_account = (await session.execute(select(QuotaAccount))).scalar_one()
+        remaining_nodes = (
+            (await session.execute(select(Node).where(Node.id.in_(purged_node_ids))))
+            .scalars()
+            .all()
+        )
+        remaining_versions = (
+            (
+                await session.execute(
+                    select(FileVersion).where(FileVersion.id.in_(purged_version_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        blob_ref_counts = (
+            (
+                await session.execute(
+                    select(FileBlob.ref_count).where(
+                        FileBlob.id.in_(
+                            [
+                                UUID(str(root_file["blob_id"])),
+                                UUID(str(child_file["blob_id"])),
+                            ]
+                        )
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        release_ledger = (
+            await session.execute(
+                select(QuotaLedger).where(
+                    QuotaLedger.reason == "file_purged",
+                    QuotaLedger.ref_id == UUID(str(folder["id"])),
+                )
+            )
+        ).scalar_one()
+
+    assert quota_account.used_bytes == 0
+    assert remaining_nodes == []
+    assert remaining_versions == []
+    assert blob_ref_counts == [0, 0]
+    assert release_ledger.delta_bytes == -5120
+
+
+@pytest.mark.asyncio
 async def test_restore_rejects_sibling_name_conflict(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
@@ -283,8 +536,40 @@ async def test_root_folder_is_immutable(
         headers={"Authorization": f"Bearer {token}"},
         json={"name": "new-root"},
     )
+    purge_response = await client.delete(
+        f"/api/v1/files/{space['root_node_id']}/purge",
+        headers={"Authorization": f"Bearer {token}"},
+    )
 
     assert delete_response.status_code == 400
     assert delete_response.json()["code"] == "NODE_ROOT_IMMUTABLE"
     assert rename_response.status_code == 400
     assert rename_response.json()["code"] == "NODE_ROOT_IMMUTABLE"
+    assert purge_response.status_code == 400
+    assert purge_response.json()["code"] == "NODE_ROOT_IMMUTABLE"
+
+
+@pytest.mark.asyncio
+async def test_purge_rejects_active_node(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="purge-active-space")
+    folder = await create_folder(
+        client,
+        token,
+        space_id=str(space["id"]),
+        parent_id=str(space["root_node_id"]),
+        name="仍然活跃",
+    )
+
+    response = await client.delete(
+        f"/api/v1/files/{folder['id']}/purge",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 400
+    assert response.json()["code"] == "NODE_NOT_DELETED"

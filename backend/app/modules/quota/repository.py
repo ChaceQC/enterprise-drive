@@ -72,6 +72,30 @@ class QuotaRepository:
         )
         return result.scalar_one_or_none()
 
+    async def subtract_usage(
+        self,
+        *,
+        tenant_id: UUID,
+        owner_type: str,
+        owner_id: UUID,
+        delta_bytes: int,
+    ) -> UUID | None:
+        result = await self.session.execute(
+            update(QuotaAccount)
+            .where(
+                QuotaAccount.tenant_id == tenant_id,
+                QuotaAccount.owner_type == owner_type,
+                QuotaAccount.owner_id == owner_id,
+                QuotaAccount.used_bytes >= delta_bytes,
+            )
+            .values(
+                used_bytes=QuotaAccount.used_bytes - delta_bytes,
+                updated_at=utc_now(),
+            )
+            .returning(QuotaAccount.id)
+        )
+        return result.scalar_one_or_none()
+
     async def add_ledger(
         self,
         *,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.pagination import PageCursor
@@ -180,6 +180,63 @@ class FileRepository:
         if row is None:
             return None
         return row[0], row[1]
+
+    async def list_versions_for_nodes(
+        self,
+        *,
+        tenant_id: UUID,
+        node_ids: list[UUID],
+    ) -> list[FileVersion]:
+        if not node_ids:
+            return []
+        result = await self.session.execute(
+            select(FileVersion).where(
+                FileVersion.tenant_id == tenant_id,
+                FileVersion.node_id.in_(node_ids),
+            )
+        )
+        return list(result.scalars().all())
+
+    async def decrement_blob_ref_counts(
+        self,
+        *,
+        tenant_id: UUID,
+        blob_counts: dict[UUID, int],
+    ) -> bool:
+        for blob_id, count in blob_counts.items():
+            result = await self.session.execute(
+                update(FileBlob)
+                .where(
+                    FileBlob.tenant_id == tenant_id,
+                    FileBlob.id == blob_id,
+                    FileBlob.ref_count >= count,
+                )
+                .values(ref_count=FileBlob.ref_count - count)
+                .returning(FileBlob.id)
+            )
+            if result.scalar_one_or_none() is None:
+                return False
+        return True
+
+    async def delete_versions_for_nodes(
+        self,
+        *,
+        tenant_id: UUID,
+        node_ids: list[UUID],
+    ) -> None:
+        if not node_ids:
+            return
+        await self.session.execute(
+            delete(FileVersion).where(
+                FileVersion.tenant_id == tenant_id,
+                FileVersion.node_id.in_(node_ids),
+            )
+        )
+
+    async def delete_node(self, *, tenant_id: UUID, node_id: UUID) -> None:
+        await self.session.execute(
+            delete(Node).where(Node.tenant_id == tenant_id, Node.id == node_id)
+        )
 
     async def flush(self) -> None:
         await self.session.flush()
