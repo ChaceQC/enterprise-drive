@@ -42,9 +42,10 @@
 
 ### Sprint 2：空间和文件树
 
-- space、node、file_blob、file_version model 和 migration。
-- 文件夹创建、文件列表、重命名、移动、删除到回收站。
-- 同目录重名策略和 cursor pagination。
+- space、node、file_blob、file_version model 和 migration。（已完成基础骨架）
+- 空间创建、文件夹创建、文件列表。（已完成最小 API）
+- 重命名、移动、删除到回收站。
+- 同目录重名策略和 cursor pagination。（已完成基础约束和签名游标）
 - 基础审计日志。
 
 ### Sprint 3：上传下载
@@ -77,4 +78,4 @@
 
 ## 5. 当前下一步
 
-继续推进 Sprint 2：补充 space、node、file_blob、file_version 基础模型和迁移，先实现空间与文件树的元数据骨架。
+继续推进 Sprint 2：补充文件树重命名、移动、删除到回收站和恢复能力，并将临时“空间拥有者访问”边界逐步替换为 Sprint 4 权限系统前可复用的权限策略入口。

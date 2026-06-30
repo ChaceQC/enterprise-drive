@@ -42,6 +42,10 @@ uv run pytest
 - 登录、刷新令牌和 refresh token 复用检测的认证审计事件。
 - Celery app 基础配置和 `audit.dispatch_outbox` 任务。
 - outbox dispatcher，支持成功发送、失败重试和 dead 状态。
+- `spaces`、`nodes`、`file_blobs`、`file_versions` 基础表和迁移。
+- 空间创建时同步创建空间根目录节点。
+- 文件夹创建、目录子节点列表和签名 cursor pagination。
+- 空间创建和文件夹创建审计事件。
 - 管理员 seed 脚本。
 
 ## 认证接口
@@ -51,3 +55,14 @@ uv run pytest
 - `GET /api/v1/auth/me`
 
 默认管理员由 `.env` 中的 `DRIVE_ADMIN_*` 配置控制。首次本地启动后运行 `uv run python -m scripts.seed_admin` 创建管理员，并在首次登录后尽快修改默认密码。
+
+## 空间和文件树接口
+
+- `POST /api/v1/spaces`
+- `GET /api/v1/spaces`
+- `POST /api/v1/files/folders`
+- `GET /api/v1/files?space_id=...&parent_id=...`
+
+当前空间和文件树接口使用临时访问边界：只允许当前租户下的空间拥有者访问。空间成员、目录 ACL、继承权限和拒绝优先策略将在 Sprint 4 权限系统中接入。
+
+文件夹名称会进行 Unicode NFC 归一化并去除首尾空白，禁止 `/`、`\`、NUL、控制字符和路径穿越片段。同一目录下未删除节点的名称由数据库唯一索引兜底，根目录由 `tenant_id + space_id` 唯一索引兜底。

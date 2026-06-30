@@ -5,11 +5,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import build_audit_context, get_current_user
 from app.core.config import Settings, get_settings
 from app.db.session import get_db_session
 from app.modules.audit.repository import AuditRepository
-from app.modules.audit.schemas import AuditContext
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
 from app.modules.auth.repository import AuthRepository
@@ -32,17 +31,6 @@ def get_auth_service(
         repository=AuthRepository(session),
         settings=settings,
         audit_service=AuditService(repository=AuditRepository(session)),
-    )
-
-
-def build_audit_context(request: Request) -> AuditContext:
-    client_ip = request.client.host if request.client else None
-    user_agent = request.headers.get("User-Agent")
-    request_id = getattr(request.state, "request_id", None)
-    return AuditContext(
-        request_id=str(request_id) if request_id else None,
-        ip=client_ip,
-        user_agent=user_agent,
     )
 
 

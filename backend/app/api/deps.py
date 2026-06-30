@@ -3,13 +3,14 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import Depends, Header
+from fastapi import Depends, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ApiError
 from app.core.config import Settings, get_settings
 from app.core.security import decode_access_token
 from app.db.session import get_db_session
+from app.modules.audit.schemas import AuditContext
 from app.modules.auth.models import User
 from app.modules.auth.repository import AuthRepository
 
@@ -34,3 +35,14 @@ async def get_current_user(
     if user is None or not user.is_active:
         raise ApiError("AUTH_REQUIRED", "认证已失效", status_code=401)
     return user
+
+
+def build_audit_context(request: Request) -> AuditContext:
+    client_ip = request.client.host if request.client else None
+    user_agent = request.headers.get("User-Agent")
+    request_id = getattr(request.state, "request_id", None)
+    return AuditContext(
+        request_id=str(request_id) if request_id else None,
+        ip=client_ip,
+        user_agent=user_agent,
+    )

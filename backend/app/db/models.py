@@ -2,5 +2,7 @@ from __future__ import annotations
 
 from app.modules.audit import models as audit_models
 from app.modules.auth import models as auth_models
+from app.modules.file import models as file_models
+from app.modules.space import models as space_models
 
-__all__ = ["audit_models", "auth_models"]
+__all__ = ["audit_models", "auth_models", "file_models", "space_models"]

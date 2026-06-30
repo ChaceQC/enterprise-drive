@@ -25,18 +25,27 @@
 - 补充 Celery app 基础配置和 `audit.dispatch_outbox` 任务。
 - 实现 outbox dispatcher，支持 pending/failed 到期事件领取、发送成功标记、失败指数退避、超过最大重试进入 dead。
 - 补充 outbox dispatcher 状态流转测试。
+- 补充 `spaces`、`nodes`、`file_blobs`、`file_versions` SQLAlchemy 模型和 Alembic 迁移。
+- 为 `nodes` 增加普通同目录同名唯一索引和空间根目录唯一索引，避免 PostgreSQL 中 `parent_id = null` 导致根节点唯一性失效。
+- 实现签名 cursor pagination 工具。
+- 实现 `/api/v1/spaces` 空间创建与列表接口，创建空间时同步创建根目录节点。
+- 实现 `/api/v1/files/folders` 文件夹创建接口和 `/api/v1/files` 目录子节点列表接口。
+- 文件夹名称执行 Unicode NFC 归一化，禁止路径分隔符、NUL、控制字符和路径穿越片段。
+- 空间创建和文件夹创建写入审计日志与 outbox event。
+- 补充空间和文件树 API 测试，覆盖创建空间、重复空间标识、创建文件夹、重复文件夹名、非法文件夹名和非拥有者访问边界。
+- 同步更新 README、后端 README、执行计划和完整技术计划书中的空间/文件树 API、索引与当前阶段说明。
 
 ### 进行中
 
-- Sprint 2 空间和文件树的前置模型设计。
+- Sprint 2 文件树目录操作完善。
 
 ### 阻塞与风险
 
-- 暂无。
+- 当前空间和文件树接口暂以“当前租户 + 空间拥有者”作为访问边界，空间成员、目录 ACL、继承权限和拒绝优先策略尚未接入；该边界已在 README 和后端 README 标为临时实现，后续需要由权限模块替换。
 
 ### 下一步
 
-- 补充 `spaces`、`nodes`、`file_blobs`、`file_versions` 基础模型和迁移，并实现空间创建与文件列表的最小 API 骨架。
+- 补充文件树重命名、移动、删除到回收站和恢复接口，并预留可替换为权限模块的策略入口。
 
 ### 验证
 
@@ -54,4 +63,16 @@
 - 已运行 `uv run python -m scripts.seed_admin`，管理员 seed 通过。
 - 已启动本地 API `uv run uvicorn app.main:app --host 127.0.0.1 --port 18080`。
 - 已验证 `/healthz`、`/readyz`、`/api/v1/auth/login`、`/api/v1/auth/me`、`/api/v1/auth/refresh`。
+- 验证完成后已关闭本次启动的 API 和 Docker Compose 服务，并确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 不再监听。
+- 已运行 `uv run ruff format .`，格式化本次新增 Python 文件。
+- 已运行 `uv run ruff check .`。
+- 已运行 `uv run mypy app`。
+- 已运行 `uv run pytest`，结果为 20 passed。
+- 已运行 `uv run pytest tests/test_space_file.py`，结果为 6 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认空间和文件树迁移可生成 PostgreSQL SQL。
+- 已启动 Docker Compose 依赖服务 `postgres`、`redis`、`minio`、`opensearch` 并等待健康。
+- 已运行 `uv run alembic upgrade head`，真实 PostgreSQL migration 升级到 `20260630_0003` 通过。
+- 已运行 `uv run python -m scripts.seed_admin`，管理员 seed 通过。
+- 已启动本地 API `uv run uvicorn app.main:app --host 127.0.0.1 --port 18080`。
+- 已真实验证 `/api/v1/auth/login`、`POST /api/v1/spaces`、`POST /api/v1/files/folders`、`GET /api/v1/files`。
 - 验证完成后已关闭本次启动的 API 和 Docker Compose 服务，并确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 不再监听。

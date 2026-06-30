@@ -1,0 +1,197 @@
+from __future__ import annotations
+
+import unicodedata
+from uuid import UUID
+
+from sqlalchemy.exc import IntegrityError
+
+from app.api.errors import ApiError
+from app.core.config import Settings
+from app.core.pagination import decode_page_cursor, encode_page_cursor
+from app.modules.audit.schemas import AuditContext, AuditEvent
+from app.modules.audit.service import AuditService
+from app.modules.auth.models import User
+from app.modules.file.models import Node
+from app.modules.file.repository import FileRepository
+from app.modules.file.schemas import FileListResponse, FileNodeResponse
+from app.modules.space.models import Space
+from app.modules.space.repository import SpaceRepository
+
+
+class FileService:
+    def __init__(
+        self,
+        *,
+        repository: FileRepository,
+        space_repository: SpaceRepository,
+        settings: Settings,
+        audit_service: AuditService | None = None,
+    ) -> None:
+        self.repository = repository
+        self.space_repository = space_repository
+        self.settings = settings
+        self.audit_service = audit_service
+
+    async def create_folder(
+        self,
+        *,
+        current_user: User,
+        space_id: UUID,
+        parent_id: UUID | None,
+        name: str,
+        audit_context: AuditContext | None = None,
+    ) -> FileNodeResponse:
+        space = await self._get_owned_space(current_user=current_user, space_id=space_id)
+        parent_node = await self._get_parent_node(
+            current_user=current_user,
+            space=space,
+            parent_id=parent_id,
+        )
+        normalized_name = normalize_node_name(name)
+
+        existing_sibling = await self.repository.get_sibling_by_name(
+            tenant_id=current_user.tenant_id,
+            space_id=space.id,
+            parent_id=parent_node.id,
+            normalized_name=normalized_name,
+        )
+        if existing_sibling is not None:
+            raise ApiError("NODE_NAME_EXISTS", "同一目录下已存在同名文件或文件夹", status_code=409)
+
+        try:
+            folder = await self.repository.create_node(
+                tenant_id=current_user.tenant_id,
+                space_id=space.id,
+                parent_id=parent_node.id,
+                owner_id=current_user.id,
+                node_type="folder",
+                name=normalized_name,
+                normalized_name=normalized_name,
+            )
+            await self._record_folder_created(
+                current_user=current_user,
+                folder=folder,
+                audit_context=audit_context,
+            )
+            await self.repository.commit()
+        except IntegrityError as exc:
+            await self.repository.rollback()
+            raise ApiError(
+                "NODE_NAME_EXISTS", "同一目录下已存在同名文件或文件夹", status_code=409
+            ) from exc
+
+        return FileNodeResponse.model_validate(folder)
+
+    async def list_children(
+        self,
+        *,
+        current_user: User,
+        space_id: UUID,
+        parent_id: UUID | None,
+        cursor: str | None,
+        page_size: int,
+    ) -> FileListResponse:
+        space = await self._get_owned_space(current_user=current_user, space_id=space_id)
+        parent_node = await self._get_parent_node(
+            current_user=current_user,
+            space=space,
+            parent_id=parent_id,
+        )
+        decoded_cursor = decode_page_cursor(self.settings, cursor)
+        nodes = await self.repository.list_children(
+            tenant_id=current_user.tenant_id,
+            space_id=space.id,
+            parent_id=parent_node.id,
+            limit=page_size + 1,
+            cursor=decoded_cursor,
+        )
+        items = nodes[:page_size]
+        next_cursor = None
+        if len(nodes) > page_size and items:
+            last_item = items[-1]
+            next_cursor = encode_page_cursor(
+                self.settings,
+                created_at=last_item.created_at,
+                item_id=last_item.id,
+            )
+        return FileListResponse(
+            space_id=space.id,
+            parent_id=parent_node.id,
+            items=[FileNodeResponse.model_validate(node) for node in items],
+            next_cursor=next_cursor,
+        )
+
+    async def _get_owned_space(self, *, current_user: User, space_id: UUID) -> Space:
+        space = await self.space_repository.get_owned_active_space(
+            tenant_id=current_user.tenant_id,
+            owner_id=current_user.id,
+            space_id=space_id,
+        )
+        if space is None:
+            raise ApiError("SPACE_NOT_FOUND", "空间不存在或无权访问", status_code=404)
+        return space
+
+    async def _get_parent_node(
+        self,
+        *,
+        current_user: User,
+        space: Space,
+        parent_id: UUID | None,
+    ) -> Node:
+        if parent_id is None:
+            node = await self.repository.get_root_node(
+                tenant_id=current_user.tenant_id,
+                space_id=space.id,
+            )
+        else:
+            node = await self.repository.get_node(
+                tenant_id=current_user.tenant_id,
+                space_id=space.id,
+                node_id=parent_id,
+            )
+
+        if node is None:
+            raise ApiError("PARENT_NOT_FOUND", "父目录不存在或无权访问", status_code=404)
+        if node.node_type != "folder":
+            raise ApiError("PARENT_NOT_FOLDER", "父节点不是文件夹", status_code=400)
+        return node
+
+    async def _record_folder_created(
+        self,
+        *,
+        current_user: User,
+        folder: Node,
+        audit_context: AuditContext | None,
+    ) -> None:
+        if self.audit_service is None:
+            return
+        await self.audit_service.record(
+            event=AuditEvent(
+                tenant_id=current_user.tenant_id,
+                actor_id=current_user.id,
+                action="file.folder.created",
+                resource_type="node",
+                resource_id=folder.id,
+                result="allowed",
+                metadata={
+                    "space_id": str(folder.space_id),
+                    "parent_id": str(folder.parent_id) if folder.parent_id else None,
+                },
+            ),
+            context=audit_context or AuditContext(),
+        )
+
+
+def normalize_node_name(name: str) -> str:
+    normalized_name = unicodedata.normalize("NFC", name).strip()
+    if not normalized_name:
+        raise ApiError("NODE_NAME_INVALID", "文件名不能为空", status_code=422)
+    if normalized_name in {".", ".."} or ".." in normalized_name.split("/"):
+        raise ApiError("NODE_NAME_INVALID", "文件名不能包含路径穿越片段", status_code=422)
+    if any(char in normalized_name for char in {"/", "\\", "\x00"}):
+        raise ApiError("NODE_NAME_INVALID", "文件名不能包含路径分隔符或 NUL 字符", status_code=422)
+    if any(ord(char) < 32 for char in normalized_name):
+        raise ApiError("NODE_NAME_INVALID", "文件名不能包含控制字符", status_code=422)
+    if len(normalized_name) > 255:
+        raise ApiError("NODE_NAME_INVALID", "文件名不能超过 255 个字符", status_code=422)
+    return normalized_name
