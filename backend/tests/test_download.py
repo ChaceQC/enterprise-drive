@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
+from app.infrastructure.storage.testing import InMemoryStorageAdapter
 from app.modules.audit.models import AuditLog, OutboxEvent
 from tests.helpers import (
     client as client,
@@ -25,6 +26,9 @@ from tests.helpers import (
 )
 from tests.helpers import (
     settings as settings,
+)
+from tests.helpers import (
+    storage_adapter as storage_adapter,
 )
 
 
@@ -68,6 +72,7 @@ async def test_create_download_url_records_audit(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
 ) -> None:
     await seed_admin(session_factory, settings)
     token = await login(client)
@@ -93,7 +98,9 @@ async def test_create_download_url_records_audit(
     assert payload["size_bytes"] == 1024
     assert payload["mime_type"] == "text/plain"
     assert payload["download_url"].startswith("https://storage.test/")
+    assert "/objects/" in payload["download_url"]
     assert "download=下载文件.txt" in payload["download_url"]
+    assert storage_adapter.presigned_downloads[0][1].startswith("objects/")
 
     async with session_factory() as session:
         audit = (

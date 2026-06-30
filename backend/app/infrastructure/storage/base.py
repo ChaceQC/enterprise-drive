@@ -96,3 +96,20 @@ class StorageAdapter(Protocol):
         hash_algo: str,
     ) -> str:
         """Calculate a content hash for one completed private object."""
+
+    async def copy_object(
+        self,
+        *,
+        bucket: str,
+        source_key: str,
+        destination_key: str,
+    ) -> None:
+        """Copy one private object within the same bucket."""
+
+    async def delete_object(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+    ) -> None:
+        """Delete one private object if it exists."""

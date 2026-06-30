@@ -33,6 +33,11 @@ def settings() -> Settings:
     )
 
 
+@pytest.fixture
+def storage_adapter() -> InMemoryStorageAdapter:
+    return InMemoryStorageAdapter()
+
+
 @pytest_asyncio.fixture
 async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     engine = create_async_engine(
@@ -52,6 +57,7 @@ async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
 async def client(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
 ) -> AsyncIterator[AsyncClient]:
     app = create_app(settings)
 
@@ -61,7 +67,8 @@ async def client(
 
     app.dependency_overrides[get_db_session] = override_get_db_session
     app.dependency_overrides[get_settings] = lambda: settings
-    app.dependency_overrides[get_storage_adapter] = lambda: InMemoryStorageAdapter()
+    app.dependency_overrides[get_storage_adapter] = lambda: storage_adapter
+    app.state.storage_adapter = storage_adapter
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as test_client:

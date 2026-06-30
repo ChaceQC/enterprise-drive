@@ -29,6 +29,7 @@ from app.modules.upload.schemas import (
     CompleteUploadPartRequest,
     CompleteUploadResponse,
 )
+from app.modules.upload.storage_keys import build_object_storage_key
 
 
 class UploadLifecycleService:
@@ -57,6 +58,8 @@ class UploadLifecycleService:
         parts: list[CompleteUploadPartRequest],
         audit_context: AuditContext | None = None,
     ) -> CompleteUploadResponse:
+        tenant_id = current_user.tenant_id
+        user_id = current_user.id
         upload_session = await self._get_upload_session_for_update(
             current_user=current_user,
             session_id=session_id,
@@ -74,7 +77,7 @@ class UploadLifecycleService:
         )
         await self._ensure_name_available(current_user=current_user, upload_session=upload_session)
         await self.quota_service.ensure_space_capacity(
-            tenant_id=current_user.tenant_id,
+            tenant_id=tenant_id,
             space_id=upload_session.space_id,
             size_bytes=upload_session.size_bytes,
         )
@@ -120,6 +123,15 @@ class UploadLifecycleService:
             upload_session=upload_session,
             audit_context=audit_context,
         )
+        storage_bucket = upload_session.storage_bucket
+        temp_storage_key = upload_session.storage_key
+        final_storage_key = await self._prepare_final_object(
+            current_user=current_user,
+            tenant_id=tenant_id,
+            upload_session=upload_session,
+            audit_context=audit_context,
+        )
+        should_delete_temp_object = final_storage_key != temp_storage_key
 
         upload_session = await self._get_upload_session_for_update(
             current_user=current_user,
@@ -130,53 +142,53 @@ class UploadLifecycleService:
         try:
             now = utc_now()
             await self.repository.record_uploaded_parts(
-                tenant_id=current_user.tenant_id,
+                tenant_id=tenant_id,
                 upload_session_id=upload_session.id,
                 parts=[(part.part_no, part.etag, part.size_bytes) for part in parts],
                 uploaded_at=now,
             )
             existing_blob = await self.repository.get_blob_by_hash(
-                tenant_id=current_user.tenant_id,
+                tenant_id=tenant_id,
                 hash_algo=upload_session.hash_algo,
                 content_hash=upload_session.content_hash,
                 size_bytes=upload_session.size_bytes,
             )
             if existing_blob is None:
                 blob = await self.repository.create_file_blob(
-                    tenant_id=current_user.tenant_id,
+                    tenant_id=tenant_id,
                     hash_algo=upload_session.hash_algo,
                     content_hash=upload_session.content_hash,
                     size_bytes=upload_session.size_bytes,
-                    storage_key=upload_session.storage_key,
+                    storage_key=final_storage_key,
                     mime_type=upload_session.mime_type,
                     ref_count=1,
                 )
             else:
                 blob = existing_blob
                 await self.repository.increment_blob_ref_count(
-                    tenant_id=current_user.tenant_id,
+                    tenant_id=tenant_id,
                     blob_id=blob.id,
                 )
             node = await self.repository.create_file_node(
-                tenant_id=current_user.tenant_id,
+                tenant_id=tenant_id,
                 space_id=upload_session.space_id,
                 parent_id=upload_session.parent_id,
-                owner_id=current_user.id,
+                owner_id=user_id,
                 name=upload_session.file_name,
                 normalized_name=upload_session.normalized_name,
             )
             version = await self.repository.create_file_version(
-                tenant_id=current_user.tenant_id,
+                tenant_id=tenant_id,
                 node_id=node.id,
                 blob_id=blob.id,
                 version_no=1,
                 size_bytes=upload_session.size_bytes,
                 mime_type=upload_session.mime_type,
-                created_by=current_user.id,
+                created_by=user_id,
             )
             node.current_version_id = version.id
             await self.quota_service.reserve_file_version(
-                tenant_id=current_user.tenant_id,
+                tenant_id=tenant_id,
                 space_id=upload_session.space_id,
                 version_id=version.id,
                 size_bytes=upload_session.size_bytes,
@@ -200,8 +212,18 @@ class UploadLifecycleService:
                 ),
             )
             await self.repository.commit()
+            if should_delete_temp_object:
+                await self._delete_temp_object(
+                    bucket=storage_bucket,
+                    storage_key=temp_storage_key,
+                )
         except ApiError as exc:
             await self.repository.rollback()
+            if should_delete_temp_object:
+                await self._delete_temp_object(
+                    bucket=storage_bucket,
+                    storage_key=temp_storage_key,
+                )
             if exc.code == "QUOTA_EXCEEDED":
                 await self._mark_failed(
                     current_user=current_user,
@@ -212,6 +234,11 @@ class UploadLifecycleService:
             raise
         except IntegrityError as exc:
             await self.repository.rollback()
+            if should_delete_temp_object:
+                await self._delete_temp_object(
+                    bucket=storage_bucket,
+                    storage_key=temp_storage_key,
+                )
             await self._mark_failed(
                 current_user=current_user,
                 session_id=session_id,
@@ -352,6 +379,58 @@ class UploadLifecycleService:
                 audit_context=audit_context,
             )
             raise ApiError("UPLOAD_HASH_MISMATCH", "上传文件 hash 不匹配", status_code=422)
+
+    async def _prepare_final_object(
+        self,
+        *,
+        current_user: User,
+        tenant_id: UUID,
+        upload_session: UploadSession,
+        audit_context: AuditContext | None,
+    ) -> str:
+        upload_session_id = upload_session.id
+        hash_algo = upload_session.hash_algo
+        content_hash = upload_session.content_hash
+        size_bytes = upload_session.size_bytes
+        storage_bucket = upload_session.storage_bucket
+        source_key = upload_session.storage_key
+        existing_blob = await self.repository.get_blob_by_hash(
+            tenant_id=tenant_id,
+            hash_algo=hash_algo,
+            content_hash=content_hash,
+            size_bytes=size_bytes,
+        )
+        if existing_blob is not None:
+            return existing_blob.storage_key
+        await self.repository.commit()
+
+        destination_key = build_object_storage_key(
+            tenant_id=tenant_id,
+            content_hash=content_hash,
+        )
+        try:
+            await self.storage.copy_object(
+                bucket=storage_bucket,
+                source_key=source_key,
+                destination_key=destination_key,
+            )
+        except Exception as exc:
+            await self._mark_failed(
+                current_user=current_user,
+                session_id=upload_session_id,
+                reason="object_finalize_failed",
+                audit_context=audit_context,
+            )
+            raise ApiError(
+                "UPLOAD_OBJECT_FINALIZE_FAILED", "上传对象归档失败", status_code=502
+            ) from exc
+        return destination_key
+
+    async def _delete_temp_object(self, *, bucket: str, storage_key: str) -> None:
+        try:
+            await self.storage.delete_object(bucket=bucket, storage_key=storage_key)
+        except Exception:
+            return
 
     async def _get_upload_session_for_update(
         self,

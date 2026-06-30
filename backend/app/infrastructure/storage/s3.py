@@ -167,6 +167,32 @@ class S3StorageAdapter:
             raise ValueError(f"unsupported hash algorithm: {hash_algo}")
         return await asyncio.to_thread(self._calculate_sha256, bucket, storage_key)
 
+    async def copy_object(
+        self,
+        *,
+        bucket: str,
+        source_key: str,
+        destination_key: str,
+    ) -> None:
+        await asyncio.to_thread(
+            self._client.copy_object,
+            Bucket=bucket,
+            Key=destination_key,
+            CopySource={"Bucket": bucket, "Key": source_key},
+        )
+
+    async def delete_object(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+    ) -> None:
+        await asyncio.to_thread(
+            self._client.delete_object,
+            Bucket=bucket,
+            Key=storage_key,
+        )
+
     def _ensure_bucket(self, bucket: str) -> None:
         try:
             self._client.head_bucket(Bucket=bucket)

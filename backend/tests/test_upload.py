@@ -9,6 +9,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
+from app.infrastructure.storage.testing import InMemoryStorageAdapter
 from app.modules.audit.models import AuditLog, OutboxEvent
 from app.modules.file.models import FileBlob, FileVersion, Node
 from app.modules.quota.models import QuotaAccount, QuotaLedger
@@ -27,6 +28,9 @@ from tests.helpers import (
 )
 from tests.helpers import (
     settings as settings,
+)
+from tests.helpers import (
+    storage_adapter as storage_adapter,
 )
 
 
@@ -243,6 +247,7 @@ async def test_complete_multipart_upload_creates_file_version_and_is_idempotent(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
 ) -> None:
     await seed_admin(session_factory, settings)
     token = await login(client)
@@ -331,7 +336,11 @@ async def test_complete_multipart_upload_creates_file_version_and_is_idempotent(
     assert upload_session.content_hash == content_hash
     assert blob.content_hash == content_hash
     assert blob.ref_count == 1
-    assert blob.storage_key.startswith(f"uploads/{space['tenant_id']}/")
+    assert blob.storage_key == f"objects/{space['tenant_id']}/{content_hash[:2]}/{content_hash}"
+    assert storage_adapter.copied_objects == [
+        (settings.s3_bucket, upload_session.storage_key, blob.storage_key)
+    ]
+    assert storage_adapter.deleted_objects == [(settings.s3_bucket, upload_session.storage_key)]
     assert node.name == "完整上传.bin"
     assert node.current_version_id == version.id
     assert version.blob_id == blob.id
@@ -417,6 +426,76 @@ async def test_complete_upload_rejects_hash_mismatch_without_creating_version(
     assert audit.request_id == "req_upload_hash_mismatch"
     assert audit.result == "denied"
     assert audit.metadata_json["reason"] == "hash_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_complete_upload_reuses_existing_blob_without_copying_final_object(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="reuse-existing-blob-space")
+    tenant_id = UUID(str(space["tenant_id"]))
+    size_bytes = 1024
+    content_hash = zero_bytes_sha256(size_bytes)
+    existing_storage_key = f"objects/{tenant_id}/{content_hash[:2]}/{content_hash}"
+
+    init_response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"Authorization": f"Bearer {token}"},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "file_name": "复用已有对象.bin",
+            "size_bytes": size_bytes,
+            "content_hash": content_hash,
+            "hash_algo": "sha256",
+            "mime_type": "application/octet-stream",
+        },
+    )
+
+    assert init_response.status_code == 201
+    assert init_response.json()["mode"] == "multipart"
+    session_id = init_response.json()["session_id"]
+
+    blob_id: UUID
+    async with session_factory() as session:
+        blob = FileBlob(
+            tenant_id=tenant_id,
+            hash_algo="sha256",
+            content_hash=content_hash,
+            size_bytes=size_bytes,
+            storage_key=existing_storage_key,
+            mime_type="application/octet-stream",
+            ref_count=0,
+        )
+        session.add(blob)
+        await session.commit()
+        blob_id = blob.id
+
+    complete_response = await client.post(
+        f"/api/v1/uploads/{session_id}/complete",
+        headers={"Authorization": f"Bearer {token}"},
+        json={"parts": [{"part_no": 1, "etag": "etag-1", "size_bytes": size_bytes}]},
+    )
+
+    assert complete_response.status_code == 200
+    assert complete_response.json()["blob_id"] == str(blob_id)
+
+    async with session_factory() as session:
+        upload_session = (
+            await session.execute(select(UploadSession).where(UploadSession.id == UUID(session_id)))
+        ).scalar_one()
+        blob = (await session.execute(select(FileBlob).where(FileBlob.id == blob_id))).scalar_one()
+
+    assert upload_session.completed_blob_id == blob_id
+    assert blob.ref_count == 1
+    assert blob.storage_key == existing_storage_key
+    assert storage_adapter.copied_objects == []
+    assert storage_adapter.deleted_objects == [(settings.s3_bucket, upload_session.storage_key)]
 
 
 @pytest.mark.asyncio

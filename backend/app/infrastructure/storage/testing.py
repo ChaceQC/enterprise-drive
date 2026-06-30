@@ -20,6 +20,8 @@ class InMemoryStorageAdapter:
         self.aborted_uploads: set[str] = set()
         self.completed_uploads: dict[str, list[CompletedUploadPart]] = {}
         self.object_contents: dict[tuple[str, str], bytes] = {}
+        self.copied_objects: list[tuple[str, str, str]] = []
+        self.deleted_objects: list[tuple[str, str]] = []
         self.presigned_downloads: list[tuple[str, str, str]] = []
 
     async def create_multipart_upload(
@@ -110,6 +112,31 @@ class InMemoryStorageAdapter:
             digest.update(b"\x00" * (part.size_bytes or 0))
         return digest.hexdigest()
 
+    async def copy_object(
+        self,
+        *,
+        bucket: str,
+        source_key: str,
+        destination_key: str,
+    ) -> None:
+        self.copied_objects.append((bucket, source_key, destination_key))
+        content = self.object_contents.get((bucket, source_key))
+        if content is None:
+            content = self._object_content_from_completed_parts(
+                bucket=bucket,
+                storage_key=source_key,
+            )
+        self.object_contents[(bucket, destination_key)] = content
+
+    async def delete_object(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+    ) -> None:
+        self.deleted_objects.append((bucket, storage_key))
+        self.object_contents.pop((bucket, storage_key), None)
+
     def _completed_parts_for(
         self,
         *,
@@ -120,3 +147,12 @@ class InMemoryStorageAdapter:
             if location == (bucket, storage_key):
                 return self.completed_uploads.get(provider_upload_id, [])
         return []
+
+    def _object_content_from_completed_parts(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+    ) -> bytes:
+        parts = self._completed_parts_for(bucket=bucket, storage_key=storage_key)
+        return b"".join(b"\x00" * (part.size_bytes or 0) for part in parts)

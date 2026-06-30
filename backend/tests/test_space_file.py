@@ -24,6 +24,9 @@ from tests.helpers import (
 from tests.helpers import (
     settings as settings,
 )
+from tests.helpers import (
+    storage_adapter as storage_adapter,
+)
 
 
 @pytest.mark.asyncio

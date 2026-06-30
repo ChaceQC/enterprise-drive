@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from datetime import timedelta
-from uuid import UUID, uuid4
+from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
 
@@ -33,6 +33,7 @@ from app.modules.upload.schemas import (
     UploadPartUrlResponse,
     UploadSessionStatusResponse,
 )
+from app.modules.upload.storage_keys import build_upload_storage_key
 
 
 class UploadService:
@@ -367,8 +368,3 @@ class UploadService:
         if upload_session is None:
             raise ApiError("UPLOAD_SESSION_NOT_FOUND", "上传会话不存在或无权访问", status_code=404)
         return upload_session
-
-
-def build_upload_storage_key(*, tenant_id: UUID, upload_session_hint: str) -> str:
-    safe_hint = upload_session_hint.lower().replace(":", "-")[:48]
-    return f"uploads/{tenant_id}/{safe_hint}/{uuid4()}"
