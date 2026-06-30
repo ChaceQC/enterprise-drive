@@ -51,9 +51,10 @@ uv run pytest
 - 空间创建、文件夹创建、重命名、移动、删除和恢复审计事件。
 - `upload_sessions`、`upload_parts` 基础表和迁移。
 - S3/MinIO 对象存储适配器，业务层通过 `StorageAdapter` 协议隔离具体 SDK。
-- 上传初始化、上传状态查询和分片预签名 URL 接口。
+- 上传初始化、上传状态查询、分片预签名 URL、multipart complete 和 abort 接口。
 - 秒传分支：命中同租户同 hash、同大小 blob 时直接创建文件节点和版本，并增加 blob 引用计数。
-- 上传初始化和秒传审计事件。
+- multipart complete 成功后写入 `file_blobs`、`nodes`、`file_versions`、`upload_parts` 和上传会话完成结果。
+- 上传初始化、秒传、complete、abort 和失败审计事件。
 - 管理员 seed 脚本。
 
 ## 认证接口
@@ -86,10 +87,14 @@ uv run pytest
 - `POST /api/v1/uploads/init`
 - `GET /api/v1/uploads/{session_id}`
 - `POST /api/v1/uploads/{session_id}/parts/{part_no}/presign`
+- `POST /api/v1/uploads/{session_id}/complete`
+- `POST /api/v1/uploads/{session_id}/abort`
 
 上传初始化请求包含 `space_id`、`parent_id`、`file_name`、`size_bytes`、`content_hash`、`hash_algo`、`mime_type` 和 `conflict_policy`。当前 `conflict_policy` 仅支持 `fail`，同目录同名返回 `NODE_NAME_EXISTS`。
 
 当 `file_blobs` 已存在同租户、同 hash 算法、同内容 hash、同大小的对象时，初始化接口返回 `mode=instant`，并直接创建文件节点和首个版本。当未命中秒传时，接口创建对象存储 multipart upload 和数据库上传会话，返回 `mode=multipart`、`session_id`、`part_size_bytes`、`total_parts` 和 `expires_at`。
+
+完成 multipart 上传时，客户端提交全部分片的 `part_no`、`etag` 和可选 `size_bytes`。服务端先将会话推进到 `completing`，再调用对象存储合并分片，合并成功后写入 blob、文件节点、版本、分片记录和上传完成审计。重复调用已完成的 complete 会返回同一完成结果。abort 会将未完成会话标记为 `aborted`，并调用对象存储取消 multipart upload。
 
 对象存储和上传策略由以下环境变量控制：
 
@@ -102,4 +107,4 @@ uv run pytest
 - `DRIVE_UPLOAD_PART_SIZE_BYTES`
 - `DRIVE_UPLOAD_PRESIGN_EXPIRES_SECONDS`
 
-当前上传接口沿用临时空间拥有者访问边界。multipart complete、abort、下载预签名 URL、容量账本、过期会话清理和上传限流将在 Sprint 3 后续步骤补齐。
+当前上传接口沿用临时空间拥有者访问边界。下载预签名 URL、容量账本、服务端 hash 校验、最终对象 key 规整、过期会话清理和上传限流将在 Sprint 3 后续步骤补齐。

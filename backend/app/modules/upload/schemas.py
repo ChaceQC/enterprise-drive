@@ -53,4 +53,27 @@ class UploadSessionStatusResponse(BaseModel):
     completed_version_id: UUID | None
 
 
+class CompleteUploadPartRequest(BaseModel):
+    part_no: int = Field(ge=1)
+    etag: str = Field(min_length=1, max_length=255)
+    size_bytes: int | None = Field(default=None, ge=1)
+
+
+class CompleteUploadRequest(BaseModel):
+    parts: list[CompleteUploadPartRequest] = Field(min_length=1)
+
+
+class CompleteUploadResponse(BaseModel):
+    session_id: UUID
+    status: Literal["completed"] = "completed"
+    node_id: UUID
+    version_id: UUID
+    blob_id: UUID
+
+
+class AbortUploadResponse(BaseModel):
+    session_id: UUID
+    status: Literal["aborted"] = "aborted"
+
+
 InitUploadResponse = InstantUploadResponse | MultipartUploadResponse

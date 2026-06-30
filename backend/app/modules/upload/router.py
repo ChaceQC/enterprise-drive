@@ -16,8 +16,12 @@ from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
 from app.modules.file.repository import FileRepository
 from app.modules.space.repository import SpaceRepository
+from app.modules.upload.lifecycle import UploadLifecycleService
 from app.modules.upload.repository import UploadRepository
 from app.modules.upload.schemas import (
+    AbortUploadResponse,
+    CompleteUploadRequest,
+    CompleteUploadResponse,
     InitUploadRequest,
     InitUploadResponse,
     UploadPartUrlResponse,
@@ -45,6 +49,19 @@ def get_upload_service(
         space_repository=SpaceRepository(session),
         storage=storage,
         settings=settings,
+        audit_service=AuditService(repository=AuditRepository(session)),
+    )
+
+
+def get_upload_lifecycle_service(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    storage: Annotated[StorageAdapter, Depends(get_storage_adapter)],
+) -> UploadLifecycleService:
+    return UploadLifecycleService(
+        repository=UploadRepository(session),
+        file_repository=FileRepository(session),
+        space_repository=SpaceRepository(session),
+        storage=storage,
         audit_service=AuditService(repository=AuditRepository(session)),
     )
 
@@ -92,4 +109,34 @@ async def presign_upload_part(
         current_user=current_user,
         session_id=session_id,
         part_no=part_no,
+    )
+
+
+@router.post("/{session_id}/complete", response_model=CompleteUploadResponse)
+async def complete_upload(
+    http_request: Request,
+    session_id: UUID,
+    request: CompleteUploadRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[UploadLifecycleService, Depends(get_upload_lifecycle_service)],
+) -> CompleteUploadResponse:
+    return await service.complete_upload(
+        current_user=current_user,
+        session_id=session_id,
+        parts=request.parts,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.post("/{session_id}/abort", response_model=AbortUploadResponse)
+async def abort_upload(
+    http_request: Request,
+    session_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[UploadLifecycleService, Depends(get_upload_lifecycle_service)],
+) -> AbortUploadResponse:
+    return await service.abort_upload(
+        current_user=current_user,
+        session_id=session_id,
+        audit_context=build_audit_context(http_request),
     )

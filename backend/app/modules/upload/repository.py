@@ -86,6 +86,30 @@ class UploadRepository:
             .values(ref_count=FileBlob.ref_count + 1)
         )
 
+    async def create_file_blob(
+        self,
+        *,
+        tenant_id: UUID,
+        hash_algo: str,
+        content_hash: str,
+        size_bytes: int,
+        storage_key: str,
+        mime_type: str | None,
+        ref_count: int,
+    ) -> FileBlob:
+        blob = FileBlob(
+            tenant_id=tenant_id,
+            hash_algo=hash_algo,
+            content_hash=content_hash,
+            size_bytes=size_bytes,
+            storage_key=storage_key,
+            mime_type=mime_type,
+            ref_count=ref_count,
+        )
+        self.session.add(blob)
+        await self.session.flush()
+        return blob
+
     async def create_upload_session(
         self,
         *,
@@ -145,6 +169,24 @@ class UploadRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_upload_session_for_update(
+        self,
+        *,
+        tenant_id: UUID,
+        uploader_id: UUID,
+        session_id: UUID,
+    ) -> UploadSession | None:
+        result = await self.session.execute(
+            select(UploadSession)
+            .where(
+                UploadSession.tenant_id == tenant_id,
+                UploadSession.uploader_id == uploader_id,
+                UploadSession.id == session_id,
+            )
+            .with_for_update()
+        )
+        return result.scalar_one_or_none()
+
     async def list_uploaded_part_numbers(
         self,
         *,
@@ -161,6 +203,43 @@ class UploadRepository:
             .order_by(UploadPart.part_no)
         )
         return [int(part_no) for part_no in result.scalars().all()]
+
+    async def record_uploaded_parts(
+        self,
+        *,
+        tenant_id: UUID,
+        upload_session_id: UUID,
+        parts: list[tuple[int, str, int | None]],
+        uploaded_at: datetime,
+    ) -> None:
+        part_numbers = [part_no for part_no, _, _ in parts]
+        existing_result = await self.session.execute(
+            select(UploadPart).where(
+                UploadPart.tenant_id == tenant_id,
+                UploadPart.upload_session_id == upload_session_id,
+                UploadPart.part_no.in_(part_numbers),
+            )
+        )
+        existing_parts = {part.part_no: part for part in existing_result.scalars().all()}
+
+        for part_no, etag, size_bytes in parts:
+            upload_part = existing_parts.get(part_no)
+            if upload_part is None:
+                self.session.add(
+                    UploadPart(
+                        tenant_id=tenant_id,
+                        upload_session_id=upload_session_id,
+                        part_no=part_no,
+                        size_bytes=size_bytes,
+                        etag=etag,
+                        uploaded_at=uploaded_at,
+                    )
+                )
+                continue
+            upload_part.size_bytes = size_bytes
+            upload_part.etag = etag
+            upload_part.uploaded_at = uploaded_at
+        await self.session.flush()
 
     async def flush(self) -> None:
         await self.session.flush()

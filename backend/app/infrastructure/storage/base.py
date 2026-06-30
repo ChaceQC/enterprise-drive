@@ -18,6 +18,19 @@ class PresignedUploadPart:
     headers: dict[str, str]
 
 
+@dataclass(frozen=True)
+class CompletedUploadPart:
+    part_no: int
+    etag: str
+    size_bytes: int | None = None
+
+
+@dataclass(frozen=True)
+class CompletedMultipartUpload:
+    etag: str | None
+    size_bytes: int | None
+
+
 class StorageAdapter(Protocol):
     async def create_multipart_upload(
         self,
@@ -47,3 +60,13 @@ class StorageAdapter(Protocol):
         provider_upload_id: str,
     ) -> None:
         """Abort a provider-side multipart upload."""
+
+    async def complete_multipart_upload(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        provider_upload_id: str,
+        parts: list[CompletedUploadPart],
+    ) -> CompletedMultipartUpload:
+        """Complete a provider-side multipart upload."""

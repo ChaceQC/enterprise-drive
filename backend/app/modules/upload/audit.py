@@ -5,7 +5,7 @@ from uuid import UUID
 from app.modules.audit.schemas import AuditContext, AuditEvent
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
-from app.modules.file.models import Node
+from app.modules.file.models import FileBlob, FileVersion, Node
 from app.modules.upload.models import UploadSession
 
 
@@ -52,4 +52,43 @@ def multipart_upload_metadata(*, upload_session: UploadSession) -> dict[str, obj
         "parent_id": str(upload_session.parent_id),
         "size_bytes": upload_session.size_bytes,
         "total_parts": upload_session.total_parts,
+    }
+
+
+def completed_upload_metadata(
+    *,
+    upload_session: UploadSession,
+    node: Node,
+    version: FileVersion,
+    blob: FileBlob,
+) -> dict[str, object]:
+    return {
+        "mode": "multipart",
+        "space_id": str(upload_session.space_id),
+        "parent_id": str(upload_session.parent_id),
+        "node_id": str(node.id),
+        "version_id": str(version.id),
+        "blob_id": str(blob.id),
+        "size_bytes": upload_session.size_bytes,
+        "total_parts": upload_session.total_parts,
+    }
+
+
+def aborted_upload_metadata(*, upload_session: UploadSession) -> dict[str, object]:
+    return {
+        "mode": "multipart",
+        "space_id": str(upload_session.space_id),
+        "parent_id": str(upload_session.parent_id),
+        "status": upload_session.status,
+        "total_parts": upload_session.total_parts,
+    }
+
+
+def failed_upload_metadata(*, upload_session: UploadSession, reason: str) -> dict[str, object]:
+    return {
+        "mode": "multipart",
+        "space_id": str(upload_session.space_id),
+        "parent_id": str(upload_session.parent_id),
+        "status": upload_session.status,
+        "reason": reason,
     }

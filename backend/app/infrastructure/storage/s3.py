@@ -5,10 +5,16 @@ from datetime import timedelta
 from typing import Any
 
 import boto3  # type: ignore[import-untyped]
+from botocore.config import Config  # type: ignore[import-untyped]
 
 from app.core.config import Settings
 from app.core.security import utc_now
-from app.infrastructure.storage.base import MultipartUpload, PresignedUploadPart
+from app.infrastructure.storage.base import (
+    CompletedMultipartUpload,
+    CompletedUploadPart,
+    MultipartUpload,
+    PresignedUploadPart,
+)
 
 
 class S3StorageAdapter:
@@ -20,6 +26,10 @@ class S3StorageAdapter:
             aws_access_key_id=settings.s3_access_key_id,
             aws_secret_access_key=settings.s3_secret_access_key,
             region_name=settings.s3_region,
+            config=Config(
+                signature_version="s3v4",
+                s3={"addressing_style": "path"},
+            ),
         )
 
     async def create_multipart_upload(
@@ -80,6 +90,36 @@ class S3StorageAdapter:
             Bucket=bucket,
             Key=storage_key,
             UploadId=provider_upload_id,
+        )
+
+    async def complete_multipart_upload(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        provider_upload_id: str,
+        parts: list[CompletedUploadPart],
+    ) -> CompletedMultipartUpload:
+        response = await asyncio.to_thread(
+            self._client.complete_multipart_upload,
+            Bucket=bucket,
+            Key=storage_key,
+            UploadId=provider_upload_id,
+            MultipartUpload={
+                "Parts": [
+                    {"PartNumber": part.part_no, "ETag": part.etag}
+                    for part in sorted(parts, key=lambda item: item.part_no)
+                ]
+            },
+        )
+        head_response = await asyncio.to_thread(
+            self._client.head_object,
+            Bucket=bucket,
+            Key=storage_key,
+        )
+        return CompletedMultipartUpload(
+            etag=str(response.get("ETag")) if response.get("ETag") is not None else None,
+            size_bytes=int(head_response["ContentLength"]),
         )
 
     def _ensure_bucket(self, bucket: str) -> None:
