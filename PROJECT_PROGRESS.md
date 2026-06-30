@@ -25,7 +25,8 @@
 - 补充彻底删除响应模型 `PurgeNodeResponse`，返回根节点 ID、彻底删除节点数量和释放容量字节数。
 - 补充文件操作测试，覆盖软删不释放容量、彻底删除文件释放容量、彻底删除目录释放后代版本容量、blob 引用计数扣减、审计写入、活跃节点和根目录拒绝彻底删除。
 - 同步更新 README、后端 README、执行计划和完整技术计划书中的彻底删除容量释放策略、接口清单、后续容量校准和对象生命周期边界。
-- 按新的开发约束暂停容量校准推进，先在 `AGENT.md` 补充“优先复用成熟库、标准工具、云服务 SDK、框架能力或可信开源实现；实验功能在鲁棒性、可扩展性和可维护性前提下保持简洁”的规则，并要求轻量自研实现记录原因、范围、限制和替换触发条件。
+- 按新的开发约束暂停容量校准推进，先在 `AGENT.md` 补充“优先复用成熟库、标准工具、开放协议、框架能力或可信开源实现；实验功能在鲁棒性、可扩展性和可维护性前提下保持简洁”的规则，并要求轻量自研实现记录原因、范围、限制和替换触发条件。
+- 根据补充要求修正 `AGENT.md`：不默认引入或直接依赖云厂商专有 SDK，外部能力优先使用开放协议、兼容接口、标准客户端或可替换的开源适配器；确需临时使用 SDK 时必须封装在 infrastructure 适配层并记录替换计划。
 
 ### 进行中
 
@@ -102,6 +103,7 @@
 - 已运行 `uv run alembic upgrade head --sql`，确认当前迁移仍可生成 PostgreSQL SQL。
 - 已暂停未完成的容量校准草稿并保存到 Git stash：`stash@{0}`，说明为 `paused quota reconciliation draft`。
 - 本次规则更新为 Markdown 文档改动，已检查 `AGENT.md` 和 `PROJECT_PROGRESS.md` 写入内容。
+- 已再次修正 `AGENT.md`，移除“云服务 SDK”优先项并补充“不要默认引入或直接依赖云厂商专有 SDK”的约束。
 - 已运行 `uv run ruff format --check .`，结果为 94 files already formatted。
 - 已运行 `uv run ruff check .`，结果为 All checks passed。
 - 已运行 `uv run mypy app`，结果为 no issues found in 76 source files。
