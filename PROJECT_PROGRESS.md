@@ -72,16 +72,19 @@
 - 新增 Redis 权限缓存失效适配器，统一权限缓存 key 规则为 `permission:{tenant}:user:{user}:space:{space}:node:{node}:action:{action}:v:{permission_version}`。
 - 新增 `permission.invalidate_cache` Celery 任务并路由到 `permission` 队列，消费 `permission.changed` outbox event 后删除匹配 Redis 权限缓存 key；节点 ACL 变更当前按受影响用户保守失效租户内节点权限缓存，后续有路径/closure 数据后可收窄。
 - outbox dispatcher 支持按事件类型或前缀 claim；`audit.dispatch_outbox` 已限定只消费 `audit.*`，避免抢占 `permission.changed`。
+- 新增 org 模块基础事实表：`departments`、`department_members`、`user_groups`、`user_group_members`，支持部门树、用户组和成员关系。
+- 新增 `OrgRepository`，提供部门、用户组、成员关系创建，以及按用户列出活跃部门 ID 和用户组 ID，为后续 ACL 主体展开提供稳定接口。
+- 新增 Alembic migration `20260701_0008_org_base.py` 和 org repository 测试，覆盖活跃主体过滤和重复成员关系唯一约束。
 
 ### 进行中
 
-- Sprint 4 权限系统已开始；空间成员事实表、owner 成员自动写入、空间级成员角色检查、空间成员管理 API、用户维度节点 ACL 基础闭环、文件列表批量权限评估、`permission.changed` outbox 事件写入和 Redis 权限缓存失效 worker 已完成，下一步随 org/search 模块扩展部门、用户组 ACL 主体和搜索 ACL。
+- Sprint 4 权限系统已开始；空间成员事实表、owner 成员自动写入、空间级成员角色检查、空间成员管理 API、用户维度节点 ACL 基础闭环、文件列表批量权限评估、`permission.changed` outbox 事件写入、Redis 权限缓存失效 worker 和 org 部门/用户组基础事实表已完成，下一步接部门/用户组 ACL 主体。
 
 ### 阻塞与风险
 
 - MinIO Python SDK 的 multipart create/complete/abort 在当前适配中需要调用客户端私有方法，已限定在 `infrastructure` 适配层；若后续出现兼容性、升级稳定性或批量吞吐问题，应评估更完整的开源 S3 兼容客户端或标准 HTTP/SigV4 实现。
 - 当前 Redis 限流仍是固定窗口策略，适用于上传初始化、分片签名和下载预签名的基础保护；若后续需要滑动窗口、令牌桶、多层级动态规则或管理端配置，应切换成熟限流库。
-- 当前空间、文件树、上传、下载、空间成员管理和节点 ACL 管理接口已接入权限检查；文件列表已返回当前页子节点的批量权限评估结果；权限变更 outbox 事件已接入 Redis 缓存失效 worker，部门/用户组 ACL 主体和搜索 ACL 更新仍未接入。
+- 当前空间、文件树、上传、下载、空间成员管理和节点 ACL 管理接口已接入权限检查；文件列表已返回当前页子节点的批量权限评估结果；权限变更 outbox 事件已接入 Redis 缓存失效 worker；org 部门/用户组事实表已完成，但 ACL 主体和搜索 ACL 更新仍未接入。
 - 当前 Redis 权限缓存已完成失效 worker，但权限判断读路径尚未启用 Redis 缓存；接入读缓存时必须保持数据库为事实来源，高危动作继续二次查库。
 - 当前节点 ACL 路径加载采用逐级父节点查询并限制最大深度 64，适合一期目录深度可控场景；若后续目录深度、列表批量权限展示或搜索过滤压力升高，应引入递归 CTE、closure table 或批量权限评估缓存。
 - 过期上传清理已覆盖数据库会话终态、multipart abort 和 `uploads/...` 临时对象删除；对象复制成功但数据库最终化失败后的 `objects/...` 孤儿对象扫描仍需后续生命周期任务兜底。
@@ -92,7 +95,7 @@
 
 ### 下一步
 
-- 完成本轮 Redis 权限缓存失效 worker 的全量验证、提交和推送后，推进 org 模块的部门/用户组基础模型，并为 ACL 主体扩展做好事实表。
+- 完成本轮 org 基础事实表的全量验证、提交和推送后，扩展 `acl_entries.subject_type` 支持 `department` / `group`，并在权限判断中展开用户部门和用户组主体。
 
 ### 涉及文件
 
@@ -127,6 +130,8 @@
 - `backend/app/modules/file/router.py`
 - `backend/app/modules/file/service.py`
 - `backend/app/modules/file/tree.py`
+- `backend/app/modules/org/models.py`
+- `backend/app/modules/org/repository.py`
 - `backend/app/modules/quota/repository.py`
 - `backend/app/modules/quota/service.py`
 - `backend/app/modules/quota/reconciliation.py`
@@ -162,6 +167,7 @@
 - `backend/migrations/versions/20260630_0001_auth_base.py`
 - `backend/migrations/versions/20260701_0006_permission_base.py`
 - `backend/migrations/versions/20260701_0007_acl_entries.py`
+- `backend/migrations/versions/20260701_0008_org_base.py`
 - `backend/tests/test_upload_cleanup.py`
 - `backend/tests/test_rate_limit.py`
 - `backend/tests/test_file_operations.py`
@@ -169,6 +175,7 @@
 - `backend/tests/test_space_file.py`
 - `backend/tests/test_space_members.py`
 - `backend/tests/test_node_acl.py`
+- `backend/tests/test_org_repository.py`
 - `backend/tests/test_permission_cache.py`
 - `backend/tests/test_quota_reconciliation.py`
 - `backend/tests/test_blob_cleanup.py`
@@ -254,6 +261,15 @@
 - 已运行 `uv run pytest`，结果为 68 passed。
 - 已运行 `git diff --check`，未发现空白错误。
 - 本轮没有数据库结构变更，未新增 Alembic migration；未启动 API、Worker 或 Docker Compose 服务。
+- 已运行 `uv run pytest tests/test_org_repository.py -q`，结果为 2 passed，覆盖部门/用户组成员关系、活跃主体过滤和唯一约束。
+- 已运行 `uv run ruff format app/modules/org tests/test_org_repository.py app/db/models.py migrations/versions/20260701_0008_org_base.py`，格式化本轮涉及的 Python 文件和迁移文件。
+- 已运行 `uv run ruff format --check .`，结果为 126 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 99 source files。
+- 已运行 `uv run pytest`，结果为 70 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认 `departments`、`department_members`、`user_groups`、`user_group_members` 表、索引和约束可生成 PostgreSQL SQL。
+- 已运行 `git diff --check`，未发现空白错误。
+- 本轮未启动 API、Worker 或 Docker Compose 服务。
 - 已运行 `uv run pytest tests/test_node_acl.py tests/test_space_file.py -q`，结果为 10 passed，覆盖文件列表批量权限字段和节点 ACL 继承 deny 行为。
 - 已运行 `uv run ruff format app/modules/permission/service.py app/modules/file/service.py app/modules/file/schemas.py tests/test_node_acl.py`，格式化本轮涉及的 Python 文件。
 - 已运行 `uv run ruff format --check .`，结果为 118 files already formatted。

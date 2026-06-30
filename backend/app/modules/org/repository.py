@@ -1,0 +1,125 @@
+from __future__ import annotations
+
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.modules.org.models import Department, DepartmentMember, UserGroup, UserGroupMember
+
+
+class OrgRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self.session = session
+
+    async def create_department(
+        self,
+        *,
+        tenant_id: UUID,
+        name: str,
+        path: str,
+        parent_id: UUID | None = None,
+        sort_order: int = 0,
+    ) -> Department:
+        department = Department(
+            tenant_id=tenant_id,
+            parent_id=parent_id,
+            name=name,
+            path=path,
+            sort_order=sort_order,
+        )
+        self.session.add(department)
+        await self.session.flush()
+        return department
+
+    async def create_user_group(
+        self,
+        *,
+        tenant_id: UUID,
+        slug: str,
+        name: str,
+    ) -> UserGroup:
+        group = UserGroup(
+            tenant_id=tenant_id,
+            slug=slug,
+            name=name,
+        )
+        self.session.add(group)
+        await self.session.flush()
+        return group
+
+    async def add_department_member(
+        self,
+        *,
+        tenant_id: UUID,
+        department_id: UUID,
+        user_id: UUID,
+    ) -> DepartmentMember:
+        member = DepartmentMember(
+            tenant_id=tenant_id,
+            department_id=department_id,
+            user_id=user_id,
+        )
+        self.session.add(member)
+        await self.session.flush()
+        return member
+
+    async def add_user_group_member(
+        self,
+        *,
+        tenant_id: UUID,
+        group_id: UUID,
+        user_id: UUID,
+    ) -> UserGroupMember:
+        member = UserGroupMember(
+            tenant_id=tenant_id,
+            group_id=group_id,
+            user_id=user_id,
+        )
+        self.session.add(member)
+        await self.session.flush()
+        return member
+
+    async def list_user_department_ids(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+    ) -> list[UUID]:
+        result = await self.session.execute(
+            select(Department.id)
+            .join(DepartmentMember, DepartmentMember.department_id == Department.id)
+            .where(
+                Department.tenant_id == tenant_id,
+                Department.status == "active",
+                DepartmentMember.tenant_id == tenant_id,
+                DepartmentMember.user_id == user_id,
+            )
+            .order_by(Department.path, Department.id)
+        )
+        return list(result.scalars().all())
+
+    async def list_user_group_ids(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+    ) -> list[UUID]:
+        result = await self.session.execute(
+            select(UserGroup.id)
+            .join(UserGroupMember, UserGroupMember.group_id == UserGroup.id)
+            .where(
+                UserGroup.tenant_id == tenant_id,
+                UserGroup.status == "active",
+                UserGroupMember.tenant_id == tenant_id,
+                UserGroupMember.user_id == user_id,
+            )
+            .order_by(UserGroup.slug, UserGroup.id)
+        )
+        return list(result.scalars().all())
+
+    async def commit(self) -> None:
+        await self.session.commit()
+
+    async def rollback(self) -> None:
+        await self.session.rollback()

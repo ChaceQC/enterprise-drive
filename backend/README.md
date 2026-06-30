@@ -38,6 +38,7 @@ uv run pytest
 - `/healthz` 和 `/readyz` 健康检查。
 - `/api/v1/ping` 基础 API 连通性检查。
 - `tenants`、`users`、`auth_sessions` 基础表和 Alembic 初始迁移。
+- `departments`、`department_members`、`user_groups`、`user_group_members` 组织基础表和迁移。
 - 本地账号登录、BFF + HttpOnly Cookie Session、CSRF 校验和会话轮换。
 - 旧 session 复用检测与 session family 吊销。
 - `audit_logs`、`outbox_events` 基础表和迁移。
@@ -48,7 +49,7 @@ uv run pytest
 - 空间创建时同步创建空间根目录节点。
 - `space_members` 基础表和迁移，空间创建时同步写入创建者的 `owner` 角色成员关系。
 - 空间成员管理 API，支持 owner/admin 添加、查看、调整和移除成员，并保护最后一个 owner。
-- `acl_entries` 基础表和迁移，支持用户维度节点 ACL、allow/deny、继承开关和 deny 优先。
+- `acl_entries` 基础表和迁移，当前支持用户维度节点 ACL、allow/deny、继承开关和 deny 优先；部门/用户组主体扩展已有 org 事实表底座。
 - 文件夹创建、目录子节点列表和签名 cursor pagination。
 - 文件树节点重命名、移动、删除到回收站、恢复和彻底删除。
 - 空间创建、文件夹创建、重命名、移动、删除、恢复和彻底删除审计事件。
@@ -102,7 +103,7 @@ uv run pytest
 - `DELETE /api/v1/files/{node_id}/purge`
 - `POST /api/v1/files/{node_id}/restore`
 
-当前空间和文件树接口已使用 `PermissionService` 的空间级成员角色和节点 ACL 检查：空间列表按 `space_members` 成员关系返回；成员管理需要 `manage`/`grant`，文件列表需要 `list`，创建文件夹和上传需要 `upload`，重命名和移动需要 `update`，删除和彻底删除需要 `delete`，恢复需要 `restore`。文件列表会复用已校验的父路径，为当前页子节点批量评估 `list`、`read_meta`、`preview`、`download`、`upload`、`update`、`delete`、`restore`、`share`、`grant`、`manage` 常用动作，并在每个节点的 `permissions` 字段返回结果；高危操作仍在对应接口二次调用权限引擎确认。成员变更会递增 `spaces.permission_version` 并写入 `permission.space_member.*` 审计事件；节点 ACL 变更会递增 `nodes.permission_version` 并写入 `permission.node_acl.*` 审计事件；两类权限变更都会写入 `permission.changed` outbox event，payload 包含 scope、resource_id、permission_version、reason 和 affected_user_id。`permission.invalidate_cache` 会消费该事件并删除匹配的 Redis 权限缓存 key；缓存只用于加速，不作为权限事实来源。当前 ACL 主体先支持用户，部门/用户组和搜索 ACL 更新将在后续步骤接入。
+当前空间和文件树接口已使用 `PermissionService` 的空间级成员角色和节点 ACL 检查：空间列表按 `space_members` 成员关系返回；成员管理需要 `manage`/`grant`，文件列表需要 `list`，创建文件夹和上传需要 `upload`，重命名和移动需要 `update`，删除和彻底删除需要 `delete`，恢复需要 `restore`。文件列表会复用已校验的父路径，为当前页子节点批量评估 `list`、`read_meta`、`preview`、`download`、`upload`、`update`、`delete`、`restore`、`share`、`grant`、`manage` 常用动作，并在每个节点的 `permissions` 字段返回结果；高危操作仍在对应接口二次调用权限引擎确认。成员变更会递增 `spaces.permission_version` 并写入 `permission.space_member.*` 审计事件；节点 ACL 变更会递增 `nodes.permission_version` 并写入 `permission.node_acl.*` 审计事件；两类权限变更都会写入 `permission.changed` outbox event，payload 包含 scope、resource_id、permission_version、reason 和 affected_user_id。`permission.invalidate_cache` 会消费该事件并删除匹配的 Redis 权限缓存 key；缓存只用于加速，不作为权限事实来源。当前 ACL 主体先支持用户，org 模块已提供部门和用户组事实表，主体接入和搜索 ACL 更新将在后续步骤接入。
 
 文件夹名称会进行 Unicode NFC 归一化并去除首尾空白，禁止 `/`、`\`、NUL、控制字符和路径穿越片段。同一目录下未删除节点的名称由数据库唯一索引兜底，根目录由 `tenant_id + space_id` 唯一索引兜底。
 
