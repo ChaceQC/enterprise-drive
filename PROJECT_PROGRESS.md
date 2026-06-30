@@ -25,10 +25,11 @@
 - 补充彻底删除响应模型 `PurgeNodeResponse`，返回根节点 ID、彻底删除节点数量和释放容量字节数。
 - 补充文件操作测试，覆盖软删不释放容量、彻底删除文件释放容量、彻底删除目录释放后代版本容量、blob 引用计数扣减、审计写入、活跃节点和根目录拒绝彻底删除。
 - 同步更新 README、后端 README、执行计划和完整技术计划书中的彻底删除容量释放策略、接口清单、后续容量校准和对象生命周期边界。
+- 按新的开发约束暂停容量校准推进，先在 `AGENT.md` 补充“优先复用成熟库、标准工具、云服务 SDK、框架能力或可信开源实现；实验功能在鲁棒性、可扩展性和可维护性前提下保持简洁”的规则，并要求轻量自研实现记录原因、范围、限制和替换触发条件。
 
 ### 进行中
 
-- Sprint 3 容量校准任务和对象生命周期清理设计与实现。
+- 代码审计：检查现有自研能力是否可替换为成熟库或开源方案，并评估后续容量校准任务是否应基于现有库/框架能力保持简洁实现。
 
 ### 阻塞与风险
 
@@ -40,7 +41,7 @@
 
 ### 下一步
 
-- 实现容量账本校准任务：按 PostgreSQL 文件版本事实重算空间用量，对比 `quota_accounts.used_bytes` 与 `quota_ledger`，记录偏差处理策略并补充测试和文档。
+- 完成代码审计清单，标出必须优先复用成熟库或开源方案的模块，以及允许保留轻量自研实现的原因和替换触发条件。
 
 ### 涉及文件
 
@@ -71,6 +72,7 @@
 - `backend/tests/helpers.py`
 - `README.md`
 - `backend/README.md`
+- `AGENT.md`
 - `PROJECT_PLAN.md`
 - `企业网盘开发者技术计划书.md`
 
@@ -98,6 +100,8 @@
 - 已运行 `uv run mypy app`，结果为 no issues found in 76 source files。
 - 已运行 `uv run pytest`，结果为 48 passed。
 - 已运行 `uv run alembic upgrade head --sql`，确认当前迁移仍可生成 PostgreSQL SQL。
+- 已暂停未完成的容量校准草稿并保存到 Git stash：`stash@{0}`，说明为 `paused quota reconciliation draft`。
+- 本次规则更新为 Markdown 文档改动，已检查 `AGENT.md` 和 `PROJECT_PROGRESS.md` 写入内容。
 - 已运行 `uv run ruff format --check .`，结果为 94 files already formatted。
 - 已运行 `uv run ruff check .`，结果为 All checks passed。
 - 已运行 `uv run mypy app`，结果为 no issues found in 76 source files。
