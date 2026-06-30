@@ -13,6 +13,7 @@ celery_app = Celery(
     include=[
         "app.workers.audit_tasks",
         "app.workers.file_tasks",
+        "app.workers.permission_tasks",
         "app.workers.upload_tasks",
         "app.workers.quota_tasks",
     ],
@@ -22,6 +23,7 @@ celery_app.conf.update(
     task_default_queue="maintenance",
     task_routes={
         "audit.dispatch_outbox": {"queue": "audit"},
+        "permission.invalidate_cache": {"queue": "permission"},
         "file.cleanup_unreferenced_blobs": {"queue": "maintenance"},
         "upload.expire_sessions": {"queue": "maintenance"},
         "quota.reconcile_space_usage": {"queue": "maintenance"},

@@ -69,16 +69,20 @@
 - 补充权限变更事件测试，覆盖空间成员 add/update/remove 和节点 ACL create/update/remove 均写入 `permission.changed`，并校验 scope、reason、permission_version 和 affected_user_id。
 - `PermissionService` 新增 `batch_check_nodes`，文件列表复用父路径为当前页子节点批量评估常用动作权限，并在 `FileNodeResponse.permissions` 返回结果，避免列表页 N+1 权限查询。
 - 补充节点 ACL 测试，覆盖 editor 被继承 deny 后文件列表中子节点 `upload=false`，关闭继承后列表权限恢复为 `upload=true`。
+- 新增 Redis 权限缓存失效适配器，统一权限缓存 key 规则为 `permission:{tenant}:user:{user}:space:{space}:node:{node}:action:{action}:v:{permission_version}`。
+- 新增 `permission.invalidate_cache` Celery 任务并路由到 `permission` 队列，消费 `permission.changed` outbox event 后删除匹配 Redis 权限缓存 key；节点 ACL 变更当前按受影响用户保守失效租户内节点权限缓存，后续有路径/closure 数据后可收窄。
+- outbox dispatcher 支持按事件类型或前缀 claim；`audit.dispatch_outbox` 已限定只消费 `audit.*`，避免抢占 `permission.changed`。
 
 ### 进行中
 
-- Sprint 4 权限系统已开始；空间成员事实表、owner 成员自动写入、空间级成员角色检查、空间成员管理 API、用户维度节点 ACL 基础闭环、文件列表批量权限评估和 `permission.changed` outbox 事件写入已完成，下一步接 Redis 权限缓存消费。
+- Sprint 4 权限系统已开始；空间成员事实表、owner 成员自动写入、空间级成员角色检查、空间成员管理 API、用户维度节点 ACL 基础闭环、文件列表批量权限评估、`permission.changed` outbox 事件写入和 Redis 权限缓存失效 worker 已完成，下一步随 org/search 模块扩展部门、用户组 ACL 主体和搜索 ACL。
 
 ### 阻塞与风险
 
 - MinIO Python SDK 的 multipart create/complete/abort 在当前适配中需要调用客户端私有方法，已限定在 `infrastructure` 适配层；若后续出现兼容性、升级稳定性或批量吞吐问题，应评估更完整的开源 S3 兼容客户端或标准 HTTP/SigV4 实现。
 - 当前 Redis 限流仍是固定窗口策略，适用于上传初始化、分片签名和下载预签名的基础保护；若后续需要滑动窗口、令牌桶、多层级动态规则或管理端配置，应切换成熟限流库。
-- 当前空间、文件树、上传、下载、空间成员管理和节点 ACL 管理接口已接入权限检查；文件列表已返回当前页子节点的批量权限评估结果；权限变更 outbox 事件已写入但尚未接入 Redis 缓存消费 worker，部门/用户组 ACL 主体和搜索 ACL 更新仍未接入。
+- 当前空间、文件树、上传、下载、空间成员管理和节点 ACL 管理接口已接入权限检查；文件列表已返回当前页子节点的批量权限评估结果；权限变更 outbox 事件已接入 Redis 缓存失效 worker，部门/用户组 ACL 主体和搜索 ACL 更新仍未接入。
+- 当前 Redis 权限缓存已完成失效 worker，但权限判断读路径尚未启用 Redis 缓存；接入读缓存时必须保持数据库为事实来源，高危动作继续二次查库。
 - 当前节点 ACL 路径加载采用逐级父节点查询并限制最大深度 64，适合一期目录深度可控场景；若后续目录深度、列表批量权限展示或搜索过滤压力升高，应引入递归 CTE、closure table 或批量权限评估缓存。
 - 过期上传清理已覆盖数据库会话终态、multipart abort 和 `uploads/...` 临时对象删除；对象复制成功但数据库最终化失败后的 `objects/...` 孤儿对象扫描仍需后续生命周期任务兜底。
 - 当前容量实现已覆盖空间维度的文件版本创建、彻底删除释放、空间容量校准和 DB 驱动的 blob/object 清理；用户/租户维度配额、定时调度配置和监控告警仍需后续补齐。
@@ -88,7 +92,7 @@
 
 ### 下一步
 
-- 完成本轮文件列表批量权限评估的全量验证、提交和推送后，实现消费 `permission.changed` 的 Redis 权限缓存失效 worker。
+- 完成本轮 Redis 权限缓存失效 worker 的全量验证、提交和推送后，推进 org 模块的部门/用户组基础模型，并为 ACL 主体扩展做好事实表。
 
 ### 涉及文件
 
@@ -128,6 +132,7 @@
 - `backend/app/modules/quota/reconciliation.py`
 - `backend/app/modules/permission/constants.py`
 - `backend/app/modules/permission/actions.py`
+- `backend/app/modules/permission/cache.py`
 - `backend/app/modules/permission/models.py`
 - `backend/app/modules/permission/events.py`
 - `backend/app/modules/permission/repository.py`
@@ -141,6 +146,10 @@
 - `backend/app/modules/upload/lifecycle.py`
 - `backend/app/db/models.py`
 - `backend/app/api/v1/router.py`
+- `backend/app/modules/audit/dispatcher.py`
+- `backend/app/modules/audit/repository.py`
+- `backend/app/workers/audit_tasks.py`
+- `backend/app/workers/permission_tasks.py`
 - `backend/app/workers/quota_tasks.py`
 - `backend/app/workers/file_tasks.py`
 - `backend/app/modules/auth/repository.py`
@@ -160,6 +169,7 @@
 - `backend/tests/test_space_file.py`
 - `backend/tests/test_space_members.py`
 - `backend/tests/test_node_acl.py`
+- `backend/tests/test_permission_cache.py`
 - `backend/tests/test_quota_reconciliation.py`
 - `backend/tests/test_blob_cleanup.py`
 - `backend/tests/helpers.py`
@@ -234,6 +244,14 @@
 - 已运行 `uv run ruff check .`，结果为 All checks passed。
 - 已运行 `uv run mypy app`，结果为 no issues found in 94 source files。
 - 已运行 `uv run pytest`，结果为 65 passed。
+- 已运行 `git diff --check`，未发现空白错误。
+- 本轮没有数据库结构变更，未新增 Alembic migration；未启动 API、Worker 或 Docker Compose 服务。
+- 已运行 `uv run pytest tests/test_permission_cache.py tests/test_outbox_dispatcher.py -q`，结果为 7 passed，覆盖 Redis 权限缓存失效范围、`permission.changed` worker 消费和审计 dispatcher 跳过权限事件。
+- 已运行 `uv run ruff format app/modules/audit/repository.py app/modules/audit/dispatcher.py app/workers/audit_tasks.py app/modules/permission/cache.py app/workers/permission_tasks.py app/infrastructure/queue/celery_app.py tests/test_permission_cache.py`，格式化本轮涉及的 Python 文件。
+- 已运行 `uv run ruff format --check .`，结果为 121 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed；本机 `.ruff_cache` 写入出现 Windows 权限警告，但检查已完成。
+- 已运行 `uv run mypy app`，结果为 no issues found in 96 source files。
+- 已运行 `uv run pytest`，结果为 68 passed。
 - 已运行 `git diff --check`，未发现空白错误。
 - 本轮没有数据库结构变更，未新增 Alembic migration；未启动 API、Worker 或 Docker Compose 服务。
 - 已运行 `uv run pytest tests/test_node_acl.py tests/test_space_file.py -q`，结果为 10 passed，覆盖文件列表批量权限字段和节点 ACL 继承 deny 行为。

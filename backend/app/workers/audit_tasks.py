@@ -26,7 +26,8 @@ async def _dispatch_outbox(batch_size: int | None = None) -> dict[str, int]:
             max_retries=settings.outbox_max_retries,
         )
         result = await dispatcher.dispatch_pending(
-            batch_size=batch_size or settings.outbox_batch_size
+            batch_size=batch_size or settings.outbox_batch_size,
+            event_type_prefixes=["audit."],
         )
         await session.commit()
         return result.to_dict()

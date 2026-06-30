@@ -14,7 +14,7 @@ docker compose up -d postgres redis minio opensearch
 uv run alembic upgrade head
 uv run python -m scripts.seed_admin
 uv run fastapi dev app/main.py --host 127.0.0.1 --port 18080
-uv run celery -A app.infrastructure.queue.celery_app worker -Q audit -l info
+uv run celery -A app.infrastructure.queue.celery_app worker -Q audit,permission,maintenance -l info
 ```
 
 生产环境的 Nginx 使用宿主机安装和管理，不放入 Docker Compose；本目录的 Compose 只用于本地依赖服务。
@@ -42,8 +42,8 @@ uv run pytest
 - 旧 session 复用检测与 session family 吊销。
 - `audit_logs`、`outbox_events` 基础表和迁移。
 - 登录、会话轮换、登出和 session 复用检测的认证审计事件。
-- Celery app 基础配置和 `audit.dispatch_outbox` 任务。
-- outbox dispatcher，支持成功发送、失败重试和 dead 状态。
+- Celery app 基础配置和 `audit.dispatch_outbox`、`permission.invalidate_cache` 任务。
+- outbox dispatcher，支持按事件类型 claim、成功发送、失败重试和 dead 状态。
 - `spaces`、`nodes`、`file_blobs`、`file_versions` 基础表和迁移。
 - 空间创建时同步创建空间根目录节点。
 - `space_members` 基础表和迁移，空间创建时同步写入创建者的 `owner` 角色成员关系。
@@ -66,6 +66,7 @@ uv run pytest
 - Redis Lua 原子固定窗口基础限流，覆盖上传初始化、分片签名和下载预签名。
 - `quota.reconcile_space_usage` 维护任务，支持空间容量只读报告和修复模式。
 - `file.cleanup_unreferenced_blobs` 维护任务，清理 ref_count 为 0 且无版本引用的最终对象和 blob 元数据。
+- `permission.invalidate_cache` 任务，消费 `permission.changed` outbox event 并失效 Redis 权限缓存 key；审计 dispatcher 只消费 `audit.*`，避免抢占权限事件。
 - 文件下载预签名 URL 接口，按当前文件版本生成短期私有对象下载地址。
 - 下载成功和拒绝均写入 `file.downloaded` 审计事件与 outbox event。
 - 管理员 seed 脚本。
@@ -101,7 +102,7 @@ uv run pytest
 - `DELETE /api/v1/files/{node_id}/purge`
 - `POST /api/v1/files/{node_id}/restore`
 
-当前空间和文件树接口已使用 `PermissionService` 的空间级成员角色和节点 ACL 检查：空间列表按 `space_members` 成员关系返回；成员管理需要 `manage`/`grant`，文件列表需要 `list`，创建文件夹和上传需要 `upload`，重命名和移动需要 `update`，删除和彻底删除需要 `delete`，恢复需要 `restore`。文件列表会复用已校验的父路径，为当前页子节点批量评估 `list`、`read_meta`、`preview`、`download`、`upload`、`update`、`delete`、`restore`、`share`、`grant`、`manage` 常用动作，并在每个节点的 `permissions` 字段返回结果；高危操作仍在对应接口二次调用权限引擎确认。成员变更会递增 `spaces.permission_version` 并写入 `permission.space_member.*` 审计事件；节点 ACL 变更会递增 `nodes.permission_version` 并写入 `permission.node_acl.*` 审计事件；两类权限变更都会写入 `permission.changed` outbox event，payload 包含 scope、resource_id、permission_version、reason 和 affected_user_id，为后续 Redis 权限缓存失效和搜索 ACL 重建提供输入。当前 ACL 主体先支持用户，部门/用户组、权限缓存消费 worker 和搜索 ACL 更新将在后续步骤接入。
+当前空间和文件树接口已使用 `PermissionService` 的空间级成员角色和节点 ACL 检查：空间列表按 `space_members` 成员关系返回；成员管理需要 `manage`/`grant`，文件列表需要 `list`，创建文件夹和上传需要 `upload`，重命名和移动需要 `update`，删除和彻底删除需要 `delete`，恢复需要 `restore`。文件列表会复用已校验的父路径，为当前页子节点批量评估 `list`、`read_meta`、`preview`、`download`、`upload`、`update`、`delete`、`restore`、`share`、`grant`、`manage` 常用动作，并在每个节点的 `permissions` 字段返回结果；高危操作仍在对应接口二次调用权限引擎确认。成员变更会递增 `spaces.permission_version` 并写入 `permission.space_member.*` 审计事件；节点 ACL 变更会递增 `nodes.permission_version` 并写入 `permission.node_acl.*` 审计事件；两类权限变更都会写入 `permission.changed` outbox event，payload 包含 scope、resource_id、permission_version、reason 和 affected_user_id。`permission.invalidate_cache` 会消费该事件并删除匹配的 Redis 权限缓存 key；缓存只用于加速，不作为权限事实来源。当前 ACL 主体先支持用户，部门/用户组和搜索 ACL 更新将在后续步骤接入。
 
 文件夹名称会进行 Unicode NFC 归一化并去除首尾空白，禁止 `/`、`\`、NUL、控制字符和路径穿越片段。同一目录下未删除节点的名称由数据库唯一索引兜底，根目录由 `tenant_id + space_id` 唯一索引兜底。
 
@@ -151,6 +152,7 @@ uv run pytest
 
 - `quota.reconcile_space_usage(tenant_id=None, limit=100, repair=False, request_id=None, scan_all=True)`
 - `file.cleanup_unreferenced_blobs(tenant_id=None, limit=100, request_id=None)`
+- `permission.invalidate_cache(batch_size=None)`
 
 ## 下载接口
 

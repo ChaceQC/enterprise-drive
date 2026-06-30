@@ -56,8 +56,18 @@ class OutboxDispatcher:
         self.publisher = publisher
         self.max_retries = max_retries
 
-    async def dispatch_pending(self, *, batch_size: int) -> OutboxDispatchResult:
-        events = await self.repository.claim_due_outbox_events(limit=batch_size)
+    async def dispatch_pending(
+        self,
+        *,
+        batch_size: int,
+        event_types: list[str] | None = None,
+        event_type_prefixes: list[str] | None = None,
+    ) -> OutboxDispatchResult:
+        events = await self.repository.claim_due_outbox_events(
+            limit=batch_size,
+            event_types=event_types,
+            event_type_prefixes=event_type_prefixes,
+        )
         sent = 0
         failed = 0
         dead = 0

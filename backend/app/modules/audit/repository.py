@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import utc_now
@@ -59,14 +59,27 @@ class AuditRepository:
         *,
         limit: int,
         now: datetime | None = None,
+        event_types: list[str] | None = None,
+        event_type_prefixes: list[str] | None = None,
     ) -> list[OutboxEvent]:
         claimed_at = now or utc_now()
+        conditions = [
+            OutboxEvent.status.in_(["pending", "failed"]),
+            OutboxEvent.next_retry_at <= claimed_at,
+        ]
+        event_type_conditions = []
+        if event_types:
+            event_type_conditions.append(OutboxEvent.event_type.in_(event_types))
+        if event_type_prefixes:
+            event_type_conditions.extend(
+                OutboxEvent.event_type.like(f"{prefix}%") for prefix in event_type_prefixes
+            )
+        if event_type_conditions:
+            conditions.append(or_(*event_type_conditions))
+
         result = await self.session.execute(
             select(OutboxEvent)
-            .where(
-                OutboxEvent.status.in_(["pending", "failed"]),
-                OutboxEvent.next_retry_at <= claimed_at,
-            )
+            .where(*conditions)
             .order_by(OutboxEvent.created_at)
             .limit(limit)
             .with_for_update(skip_locked=True)
