@@ -15,6 +15,8 @@ from app.modules.permission.actions import (
     PERMISSION_ACTIONS,
 )
 from app.modules.permission.constants import (
+    ACL_EFFECT_ALLOW,
+    ACL_EFFECT_DENY,
     SPACE_ROLE_ADMIN,
     SPACE_ROLE_EDITOR,
     SPACE_ROLE_OWNER,
@@ -71,3 +73,40 @@ class PermissionService:
         if member is None:
             return False
         return action in SPACE_ROLE_ACTIONS.get(member.role, frozenset())
+
+    async def can_access_node(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        space_id: UUID,
+        action: str,
+        node_path_ids: list[UUID],
+    ) -> bool:
+        if action not in PERMISSION_ACTIONS:
+            raise ValueError(f"unsupported permission action: {action}")
+        member = await self.repository.get_space_member(
+            tenant_id=tenant_id,
+            space_id=space_id,
+            user_id=user_id,
+        )
+        if member is None:
+            return False
+
+        role_allows = action in SPACE_ROLE_ACTIONS.get(member.role, frozenset())
+        acl_entries = await self.repository.list_user_acl_entries_for_nodes(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            node_ids=node_path_ids,
+        )
+        target_node_id = node_path_ids[-1] if node_path_ids else None
+        matched_effects = {
+            entry.effect
+            for entry in acl_entries
+            if action in entry.actions and (entry.node_id == target_node_id or entry.inherit)
+        }
+        if ACL_EFFECT_DENY in matched_effects:
+            return False
+        if ACL_EFFECT_ALLOW in matched_effects:
+            return True
+        return role_allows

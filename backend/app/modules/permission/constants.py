@@ -13,3 +13,10 @@ SPACE_ROLES = frozenset(
         SPACE_ROLE_VIEWER,
     }
 )
+
+ACL_SUBJECT_USER = "user"
+ACL_SUBJECT_TYPES = frozenset({ACL_SUBJECT_USER})
+
+ACL_EFFECT_ALLOW = "allow"
+ACL_EFFECT_DENY = "deny"
+ACL_EFFECTS = frozenset({ACL_EFFECT_ALLOW, ACL_EFFECT_DENY})

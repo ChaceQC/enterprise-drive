@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.pagination import PageCursor
+from app.core.security import utc_now
 from app.modules.file.models import FileBlob, FileVersion, Node
 
 
@@ -84,6 +85,42 @@ class FileRepository:
 
         result = await self.session.execute(select(Node).where(*conditions))
         return result.scalar_one_or_none()
+
+    async def get_node_path_ids(
+        self,
+        *,
+        tenant_id: UUID,
+        space_id: UUID,
+        node_id: UUID,
+        include_deleted: bool = False,
+    ) -> list[UUID] | None:
+        node = await self.get_node(
+            tenant_id=tenant_id,
+            space_id=space_id,
+            node_id=node_id,
+            include_deleted=include_deleted,
+        )
+        if node is None:
+            return None
+
+        path_ids = [node.id]
+        seen = {node.id}
+        parent_id = node.parent_id
+        while parent_id is not None:
+            if len(path_ids) >= 64 or parent_id in seen:
+                return None
+            parent = await self.get_node(
+                tenant_id=tenant_id,
+                space_id=space_id,
+                node_id=parent_id,
+                include_deleted=include_deleted,
+            )
+            if parent is None:
+                return None
+            path_ids.append(parent.id)
+            seen.add(parent.id)
+            parent_id = parent.parent_id
+        return list(reversed(path_ids))
 
     async def get_sibling_by_name(
         self,
@@ -331,6 +368,14 @@ class FileRepository:
         await self.session.execute(
             delete(Node).where(Node.tenant_id == tenant_id, Node.id == node_id)
         )
+
+    async def bump_node_permission_version(self, *, tenant_id: UUID, node_id: UUID) -> None:
+        await self.session.execute(
+            update(Node)
+            .where(Node.tenant_id == tenant_id, Node.id == node_id)
+            .values(permission_version=Node.permission_version + 1, updated_at=utc_now())
+        )
+        await self.session.flush()
 
     async def flush(self) -> None:
         await self.session.flush()

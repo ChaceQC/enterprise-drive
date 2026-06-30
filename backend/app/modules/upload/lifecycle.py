@@ -528,12 +528,7 @@ class UploadLifecycleService:
             tenant_id=current_user.tenant_id,
             space_id=upload_session.space_id,
         )
-        if space is None or not await self.permission_service.can_access_space(
-            tenant_id=current_user.tenant_id,
-            user_id=current_user.id,
-            space_id=upload_session.space_id,
-            action=ACTION_UPLOAD,
-        ):
+        if space is None:
             raise ApiError("SPACE_NOT_FOUND", "空间不存在或无权访问", status_code=404)
         parent = await self.file_repository.get_node(
             tenant_id=current_user.tenant_id,
@@ -544,6 +539,20 @@ class UploadLifecycleService:
             raise ApiError("PARENT_NOT_FOUND", "父目录不存在或无权访问", status_code=404)
         if parent.node_type != "folder":
             raise ApiError("PARENT_NOT_FOLDER", "父节点不是文件夹", status_code=400)
+        node_path_ids = await self.file_repository.get_node_path_ids(
+            tenant_id=current_user.tenant_id,
+            space_id=upload_session.space_id,
+            node_id=parent.id,
+        )
+        allowed = node_path_ids is not None and await self.permission_service.can_access_node(
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+            space_id=upload_session.space_id,
+            action=ACTION_UPLOAD,
+            node_path_ids=node_path_ids,
+        )
+        if not allowed:
+            raise ApiError("SPACE_NOT_FOUND", "空间不存在或无权访问", status_code=404)
         return parent
 
     async def _ensure_name_available(

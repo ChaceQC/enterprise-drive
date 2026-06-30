@@ -48,6 +48,7 @@ uv run pytest
 - 空间创建时同步创建空间根目录节点。
 - `space_members` 基础表和迁移，空间创建时同步写入创建者的 `owner` 角色成员关系。
 - 空间成员管理 API，支持 owner/admin 添加、查看、调整和移除成员，并保护最后一个 owner。
+- `acl_entries` 基础表和迁移，支持用户维度节点 ACL、allow/deny、继承开关和 deny 优先。
 - 文件夹创建、目录子节点列表和签名 cursor pagination。
 - 文件树节点重命名、移动、删除到回收站、恢复和彻底删除。
 - 空间创建、文件夹创建、重命名、移动、删除、恢复和彻底删除审计事件。
@@ -88,6 +89,10 @@ uv run pytest
 - `POST /api/v1/spaces/{space_id}/members`
 - `PATCH /api/v1/spaces/{space_id}/members/{user_id}`
 - `DELETE /api/v1/spaces/{space_id}/members/{user_id}`
+- `GET /api/v1/files/{node_id}/acl`
+- `POST /api/v1/files/{node_id}/acl`
+- `PATCH /api/v1/files/{node_id}/acl/{entry_id}`
+- `DELETE /api/v1/files/{node_id}/acl/{entry_id}`
 - `POST /api/v1/files/folders`
 - `GET /api/v1/files?space_id=...&parent_id=...`
 - `PATCH /api/v1/files/{node_id}`
@@ -96,7 +101,7 @@ uv run pytest
 - `DELETE /api/v1/files/{node_id}/purge`
 - `POST /api/v1/files/{node_id}/restore`
 
-当前空间和文件树接口已使用 `PermissionService` 的空间级成员角色检查：空间列表按 `space_members` 成员关系返回；成员管理需要 `manage`/`grant`，文件列表需要 `list`，创建文件夹需要 `upload`，重命名和移动需要 `update`，删除和彻底删除需要 `delete`，恢复需要 `restore`。成员变更会递增 `spaces.permission_version` 并写入 `permission.space_member.*` 审计事件；目录 ACL、继承权限和拒绝优先策略将在后续步骤接入。
+当前空间和文件树接口已使用 `PermissionService` 的空间级成员角色和节点 ACL 检查：空间列表按 `space_members` 成员关系返回；成员管理需要 `manage`/`grant`，文件列表需要 `list`，创建文件夹和上传需要 `upload`，重命名和移动需要 `update`，删除和彻底删除需要 `delete`，恢复需要 `restore`。成员变更会递增 `spaces.permission_version` 并写入 `permission.space_member.*` 审计事件；节点 ACL 变更会递增 `nodes.permission_version` 并写入 `permission.node_acl.*` 审计事件。当前 ACL 主体先支持用户，部门/用户组、权限缓存失效事件和搜索 ACL 更新将在后续步骤接入。
 
 文件夹名称会进行 Unicode NFC 归一化并去除首尾空白，禁止 `/`、`\`、NUL、控制字符和路径穿越片段。同一目录下未删除节点的名称由数据库唯一索引兜底，根目录由 `tenant_id + space_id` 唯一索引兜底。
 
@@ -140,7 +145,7 @@ uv run pytest
 - `DRIVE_DOWNLOAD_PRESIGN_RATE_LIMIT_COUNT`
 - `DRIVE_DOWNLOAD_PRESIGN_RATE_LIMIT_WINDOW_SECONDS`
 
-当前上传接口已通过 `PermissionService` 校验空间级 `upload` 权限。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除到回收站不释放容量；彻底删除回收站节点时通过原子 update 扣减 `quota_accounts.used_bytes`，并写入 `reason=file_purged`、`ref_type=node` 的负向容量流水。容量校准任务 `quota.reconcile_space_usage` 使用 PostgreSQL 中的文件版本记录作为事实来源，默认只报告空间容量快照和账本漂移，传入 `repair=true` 时会修复缺失的空间容量账户、校准 `quota_accounts.used_bytes`，并用 `reason=quota_reconciled` 写入账本差额和 `quota.reconciled` 系统审计。彻底删除接口不在用户请求事务中同步删除最终对象；`file.cleanup_unreferenced_blobs` 会扫描 active、`ref_count=0` 且无 `file_versions` 引用的 blob，先标记为 `deleting`，再删除对象存储内容和 DB 元数据。对象存储删除失败会恢复为 `active` 并计入 `storage_errors`；对象存储中没有 DB 元数据的孤儿对象扫描仍需后续治理任务补齐。用户/租户维度配额将在后续步骤补齐。
+当前上传接口已通过 `PermissionService` 校验父目录节点级 `upload` 权限；初始化和 multipart complete 都会重新检查，避免会话创建后权限收紧仍可完成上传。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除到回收站不释放容量；彻底删除回收站节点时通过原子 update 扣减 `quota_accounts.used_bytes`，并写入 `reason=file_purged`、`ref_type=node` 的负向容量流水。容量校准任务 `quota.reconcile_space_usage` 使用 PostgreSQL 中的文件版本记录作为事实来源，默认只报告空间容量快照和账本漂移，传入 `repair=true` 时会修复缺失的空间容量账户、校准 `quota_accounts.used_bytes`，并用 `reason=quota_reconciled` 写入账本差额和 `quota.reconciled` 系统审计。彻底删除接口不在用户请求事务中同步删除最终对象；`file.cleanup_unreferenced_blobs` 会扫描 active、`ref_count=0` 且无 `file_versions` 引用的 blob，先标记为 `deleting`，再删除对象存储内容和 DB 元数据。对象存储删除失败会恢复为 `active` 并计入 `storage_errors`；对象存储中没有 DB 元数据的孤儿对象扫描仍需后续治理任务补齐。用户/租户维度配额将在后续步骤补齐。
 
 维护任务可通过 Celery 任务调用：
 
@@ -155,4 +160,4 @@ uv run pytest
 
 下载预签名已接入基础限流，按 `tenant + user + node + IP` 维度计数。触发限流时返回 HTTP 429，错误码为 `RATE_LIMITED`。
 
-当前下载接口已通过 `PermissionService` 校验空间级 `download` 权限：非空间成员或无下载权限返回统一的 `NODE_NOT_FOUND`，目录节点返回 `NODE_NOT_FILE`，缺失当前版本返回 `FILE_VERSION_NOT_FOUND`。下载成功与拒绝都会写入 `file.downloaded` 审计事件；后续 Sprint 4 接入目录 ACL、继承权限和拒绝优先策略后，会在空间角色基础上继续收紧节点级判断。
+当前下载接口已通过 `PermissionService` 校验节点级 `download` 权限：非空间成员、空间角色不足或节点 ACL deny 均返回统一的 `NODE_NOT_FOUND`，目录节点返回 `NODE_NOT_FILE`，缺失当前版本返回 `FILE_VERSION_NOT_FOUND`。下载成功与拒绝都会写入 `file.downloaded` 审计事件；后续会把部门/用户组主体、权限缓存和搜索 ACL 更新接入同一权限事实。

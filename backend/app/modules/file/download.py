@@ -152,12 +152,22 @@ class FileDownloadService:
             tenant_id=current_user.tenant_id,
             space_id=node.space_id,
         )
-        if space is None or not await self.permission_service.can_access_space(
+        node_path_ids = await self.repository.get_node_path_ids(
             tenant_id=current_user.tenant_id,
-            user_id=current_user.id,
             space_id=node.space_id,
-            action=ACTION_DOWNLOAD,
-        ):
+            node_id=node.id,
+        )
+        if space is None or node_path_ids is None:
+            allowed = False
+        else:
+            allowed = await self.permission_service.can_access_node(
+                tenant_id=current_user.tenant_id,
+                user_id=current_user.id,
+                space_id=node.space_id,
+                action=ACTION_DOWNLOAD,
+                node_path_ids=node_path_ids,
+            )
+        if not allowed:
             await self._record_denied_download(
                 current_user=current_user,
                 resource_id=node.id,

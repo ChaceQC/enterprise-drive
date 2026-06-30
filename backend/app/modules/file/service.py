@@ -68,15 +68,17 @@ class FileService:
         name: str,
         audit_context: AuditContext | None = None,
     ) -> FileNodeResponse:
-        space = await self._get_accessible_space(
-            current_user=current_user,
-            space_id=space_id,
-            action=ACTION_UPLOAD,
-        )
+        space = await self._get_active_space(current_user=current_user, space_id=space_id)
         parent_node = await self._get_parent_node(
             current_user=current_user,
             space=space,
             parent_id=parent_id,
+        )
+        await self._ensure_node_access(
+            current_user=current_user,
+            node=parent_node,
+            action=ACTION_UPLOAD,
+            error_code="SPACE_NOT_FOUND",
         )
         normalized_name = normalize_node_name(name)
 
@@ -121,15 +123,17 @@ class FileService:
         cursor: str | None,
         page_size: int,
     ) -> FileListResponse:
-        space = await self._get_accessible_space(
-            current_user=current_user,
-            space_id=space_id,
-            action=ACTION_LIST,
-        )
+        space = await self._get_active_space(current_user=current_user, space_id=space_id)
         parent_node = await self._get_parent_node(
             current_user=current_user,
             space=space,
             parent_id=parent_id,
+        )
+        await self._ensure_node_access(
+            current_user=current_user,
+            node=parent_node,
+            action=ACTION_LIST,
+            error_code="SPACE_NOT_FOUND",
         )
         decoded_cursor = decode_page_cursor(self.settings, cursor)
         nodes = await self.repository.list_children(
@@ -431,23 +435,17 @@ class FileService:
 
         return FileNodeResponse.model_validate(node)
 
-    async def _get_accessible_space(
+    async def _get_active_space(
         self,
         *,
         current_user: User,
         space_id: UUID,
-        action: str,
     ) -> Space:
         space = await self.space_repository.get_active_space(
             tenant_id=current_user.tenant_id,
             space_id=space_id,
         )
-        if space is None or not await self.permission_service.can_access_space(
-            tenant_id=current_user.tenant_id,
-            user_id=current_user.id,
-            space_id=space_id,
-            action=action,
-        ):
+        if space is None:
             raise ApiError("SPACE_NOT_FOUND", "空间不存在或无权访问", status_code=404)
         return space
 
@@ -491,10 +489,16 @@ class FileService:
         )
         if node is None:
             raise ApiError("NODE_NOT_FOUND", "节点不存在或无权访问", status_code=404)
-        await self._get_accessible_space(
+        await self._get_active_space(
             current_user=current_user,
             space_id=node.space_id,
+        )
+        await self._ensure_node_access(
+            current_user=current_user,
+            node=node,
             action=action,
+            error_code="NODE_NOT_FOUND",
+            include_deleted=include_deleted,
         )
         return node
 
@@ -505,15 +509,22 @@ class FileService:
         space_id: UUID,
         node_id: UUID,
     ) -> Node:
-        return await self._get_parent_node(
+        space = await self._get_active_space(
             current_user=current_user,
-            space=await self._get_accessible_space(
-                current_user=current_user,
-                space_id=space_id,
-                action=ACTION_UPDATE,
-            ),
+            space_id=space_id,
+        )
+        folder = await self._get_parent_node(
+            current_user=current_user,
+            space=space,
             parent_id=node_id,
         )
+        await self._ensure_node_access(
+            current_user=current_user,
+            node=folder,
+            action=ACTION_UPDATE,
+            error_code="PARENT_NOT_FOUND",
+        )
+        return folder
 
     async def _resolve_restore_parent(
         self,
@@ -530,6 +541,35 @@ class FileService:
             space_id=node.space_id,
             node_id=parent_id,
         )
+
+    async def _ensure_node_access(
+        self,
+        *,
+        current_user: User,
+        node: Node,
+        action: str,
+        error_code: str,
+        include_deleted: bool = False,
+    ) -> None:
+        node_path_ids = await self.repository.get_node_path_ids(
+            tenant_id=current_user.tenant_id,
+            space_id=node.space_id,
+            node_id=node.id,
+            include_deleted=include_deleted,
+        )
+        allowed = node_path_ids is not None and await self.permission_service.can_access_node(
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+            space_id=node.space_id,
+            action=action,
+            node_path_ids=node_path_ids,
+        )
+        if not allowed:
+            if error_code == "PARENT_NOT_FOUND":
+                raise ApiError(error_code, "父目录不存在或无权访问", status_code=404)
+            if error_code == "NODE_NOT_FOUND":
+                raise ApiError(error_code, "节点不存在或无权访问", status_code=404)
+            raise ApiError(error_code, "空间不存在或无权访问", status_code=404)
 
     async def _ensure_name_available(
         self,
