@@ -40,10 +40,10 @@
 - 同步更新 `AGENT.md`、README、后端 README、执行计划、完整技术计划书和代码审计记录中的认证、对象存储与限流说明。
 - 已按要求恢复 `stash@{0}: paused quota reconciliation draft` 中的容量校准草稿，并按 AGENT 规则整理为基于现有 SQLAlchemy、Celery 和 PostgreSQL 事实表的维护任务，没有引入新的外部依赖或自研调度框架。
 - 新增 `QuotaReconciliationService`，以 `file_versions` 和 `nodes.space_id` 汇总实际空间容量，支持 `repair=false` 只读报告模式和 `repair=true` 修复模式。
-- 容量校准修复模式会补建缺失的空间容量账户、校准 `quota_accounts.used_bytes`，并用 `reason=quota_reconciled` 写入账本差额；修复时写入 `quota.reconciled` 系统审计和 outbox event。
-- 新增 Celery 维护任务 `quota.reconcile_space_usage` 并路由到 `maintenance` 队列，支持 `tenant_id`、`limit`、`repair`、`request_id` 和 `scan_all` 参数。
+- 容量校准修复模式会补建缺失的空间容量账户；已有账户修复前使用数据库行锁并重新聚合实际用量和账本合计，再校准 `quota_accounts.used_bytes`，并只按最新差额写入 `reason=quota_reconciled` 的账本流水，重复执行不会追加无差额修复流水；修复时写入 `quota.reconciled` 系统审计和 outbox event。
+- 新增 Celery 维护任务 `quota.reconcile_space_usage` 并路由到 `maintenance` 队列，支持 `tenant_id`、`limit`、`repair`、`request_id`、`scan_all` 和 `max_items` 参数；统计始终完整，返回明细超过 `max_items` 时用 `items_truncated=true` 标记。
 - 按 AGENT 的鲁棒性和可扩展性要求修正容量校准扫描边界：`limit` 作为单批大小，worker 默认通过 cursor 分批扫完整个租户，避免定期任务长期只校准第一批空间。
-- 补充容量校准测试，覆盖只读报告不落库、修复快照和账本漂移、补建缺失空间容量账户、系统审计写入和 worker 聚合入口。
+- 补充容量校准测试，覆盖只读报告不落库、修复快照和账本漂移、重复修复幂等、补建缺失空间容量账户、系统审计写入、worker 聚合入口和返回明细截断。
 - 新增 `file_blobs.status`，用 `active` / `deleting` 区分可复用内容对象和正在清理的内容对象；上传秒传和 multipart complete 只复用 active blob，同 hash blob 正在清理时返回 `BLOB_DELETING`。
 - 新增 `BlobCleanupService`，按租户扫描 `ref_count=0`、`status=active` 且无 `file_versions` 引用的 blob，先标记为 `deleting`，再在数据库事务外删除对象存储内容，最后删除 blob 元数据。
 - 对象存储删除失败时会恢复 blob 为 `active`，计入 `storage_errors`，并写入 `file.blob.cleanup_failed` 系统审计；删除成功会写入 `file.blob.cleaned` 系统审计和 outbox event。
@@ -95,7 +95,7 @@
 
 ### 下一步
 
-- 完成本轮 org 基础事实表的全量验证、提交和推送后，扩展 `acl_entries.subject_type` 支持 `department` / `group`，并在权限判断中展开用户部门和用户组主体。
+- 扩展 `acl_entries.subject_type` 支持 `department` / `group`，并在权限判断中展开用户部门和用户组主体。
 
 ### 涉及文件
 
@@ -269,6 +269,15 @@
 - 已运行 `uv run pytest`，结果为 70 passed。
 - 已运行 `uv run alembic upgrade head --sql`，确认 `departments`、`department_members`、`user_groups`、`user_group_members` 表、索引和约束可生成 PostgreSQL SQL。
 - 已运行 `git diff --check`，未发现空白错误。
+- 本轮未启动 API、Worker 或 Docker Compose 服务。
+- 已重新定位掉出 `refs/stash` 的 `paused quota reconciliation draft`，确认草稿有效实现已在当前代码中吸收，并继续按 AGENT 规则修正容量校准修复幂等和 worker 返回体量。
+- 已运行 `uv run pytest tests/test_quota_reconciliation.py -q`，结果为 4 passed，覆盖重复修复不追加账本差额和 worker 明细截断。
+- 已运行 `uv run ruff format app/modules/quota/repository.py app/modules/quota/reconciliation.py app/workers/quota_tasks.py tests/test_quota_reconciliation.py`，格式化本轮涉及的 Python 文件。
+- 已运行 `uv run ruff format --check .`，结果为 126 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 99 source files。
+- 已运行 `uv run pytest`，结果为 70 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认当前迁移仍可生成 PostgreSQL SQL。
 - 本轮未启动 API、Worker 或 Docker Compose 服务。
 - 已运行 `uv run pytest tests/test_node_acl.py tests/test_space_file.py -q`，结果为 10 passed，覆盖文件列表批量权限字段和节点 ACL 继承 deny 行为。
 - 已运行 `uv run ruff format app/modules/permission/service.py app/modules/file/service.py app/modules/file/schemas.py tests/test_node_acl.py`，格式化本轮涉及的 Python 文件。

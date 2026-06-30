@@ -218,6 +218,26 @@ async def test_reconcile_space_usage_repairs_snapshot_and_writes_ledger_delta(
     assert audit.metadata_json["ledger_entries"] == 1
     assert outbox_event.aggregate_type == "audit_log"
 
+    async with session_factory() as session:
+        service = QuotaReconciliationService(
+            repository=QuotaRepository(session),
+            default_space_limit_bytes=settings.default_space_quota_bytes,
+        )
+        second_result = await service.reconcile_space_usage(
+            tenant_id=UUID(str(space["tenant_id"])),
+            repair=True,
+        )
+
+    assert second_result.snapshot_drifts == 0
+    assert second_result.ledger_drifts == 0
+    assert second_result.repaired_accounts == 0
+    assert second_result.ledger_entries == 0
+
+    async with session_factory() as session:
+        ledgers = (await session.execute(select(QuotaLedger))).scalars().all()
+
+    assert len(ledgers) == 1
+
 
 @pytest.mark.asyncio
 async def test_reconcile_space_usage_repairs_missing_space_account(
@@ -331,16 +351,16 @@ async def test_quota_reconcile_worker_aggregates_tenant_results(
         limit=1,
         repair=True,
         request_id="req_quota_worker",
+        max_items=1,
     )
 
     assert result["scanned"] == 2
     assert result["snapshot_drifts"] == 2
     assert result["repaired_accounts"] == 2
     assert isinstance(result["items"], list)
-    assert {item["space_id"] for item in result["items"]} == {
-        str(space["id"]),
-        str(other_space["id"]),
-    }
+    assert len(result["items"]) == 1
+    assert result["items_truncated"] is True
+    assert result["items"][0]["space_id"] in {str(space["id"]), str(other_space["id"])}
 
     async with session_factory() as session:
         quota_accounts = (await session.execute(select(QuotaAccount))).scalars().all()

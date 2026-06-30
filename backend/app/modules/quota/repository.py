@@ -133,6 +133,54 @@ class QuotaRepository:
         await self.session.flush()
         return ledger
 
+    async def get_account_by_id_for_update(
+        self,
+        *,
+        tenant_id: UUID,
+        account_id: UUID,
+    ) -> QuotaAccount | None:
+        result = await self.session.execute(
+            select(QuotaAccount)
+            .where(
+                QuotaAccount.tenant_id == tenant_id,
+                QuotaAccount.id == account_id,
+            )
+            .with_for_update()
+        )
+        return result.scalar_one_or_none()
+
+    async def sum_space_actual_bytes(self, *, tenant_id: UUID, space_id: UUID) -> int:
+        result = await self.session.execute(
+            select(func.coalesce(func.sum(FileVersion.size_bytes), 0))
+            .select_from(Node)
+            .join(
+                FileVersion,
+                and_(
+                    FileVersion.tenant_id == Node.tenant_id,
+                    FileVersion.node_id == Node.id,
+                ),
+            )
+            .where(
+                Node.tenant_id == tenant_id,
+                Node.space_id == space_id,
+            )
+        )
+        return int(result.scalar_one())
+
+    async def sum_account_ledger_bytes(
+        self,
+        *,
+        tenant_id: UUID,
+        account_id: UUID,
+    ) -> int:
+        result = await self.session.execute(
+            select(func.coalesce(func.sum(QuotaLedger.delta_bytes), 0)).where(
+                QuotaLedger.tenant_id == tenant_id,
+                QuotaLedger.account_id == account_id,
+            )
+        )
+        return int(result.scalar_one())
+
     async def list_space_usage_snapshots(
         self,
         *,

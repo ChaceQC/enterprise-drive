@@ -144,13 +144,29 @@ class QuotaReconciliationService:
         missing_account = account_id is None
         original_used_bytes = used_bytes
         if missing_account and repair:
-            account = await self.repository.create_account(
+            created_account = await self.repository.create_account(
                 tenant_id=tenant_id,
                 owner_type="space",
                 owner_id=space_id,
                 limit_bytes=self.default_space_limit_bytes,
             )
-            account_id = account.id
+            account_id = created_account.id
+        elif repair and account_id is not None:
+            locked_account = await self.repository.get_account_by_id_for_update(
+                tenant_id=tenant_id,
+                account_id=account_id,
+            )
+            if locked_account is None:
+                raise ApiError("QUOTA_RECONCILE_FAILED", "容量校准失败", status_code=500)
+            actual_bytes = await self.repository.sum_space_actual_bytes(
+                tenant_id=tenant_id,
+                space_id=space_id,
+            )
+            ledger_bytes = await self.repository.sum_account_ledger_bytes(
+                tenant_id=tenant_id,
+                account_id=account_id,
+            )
+            original_used_bytes = locked_account.used_bytes
 
         snapshot_delta = None if original_used_bytes is None else actual_bytes - original_used_bytes
         ledger_delta = None if account_id is None else actual_bytes - ledger_bytes

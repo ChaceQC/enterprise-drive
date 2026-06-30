@@ -29,6 +29,7 @@ def reconcile_space_usage(
     repair: bool = False,
     request_id: str | None = None,
     scan_all: bool = True,
+    max_items: int = 1000,
 ) -> dict[str, object]:
     return asyncio.run(
         _reconcile_space_usage(
@@ -37,6 +38,7 @@ def reconcile_space_usage(
             repair=repair,
             request_id=request_id,
             scan_all=scan_all,
+            max_items=max_items,
         )
     )
 
@@ -51,6 +53,7 @@ async def _reconcile_space_usage(
     repair: bool,
     request_id: str | None,
     scan_all: bool = True,
+    max_items: int = 1000,
 ) -> dict[str, object]:
     settings = get_settings()
     session_factory = get_session_factory()
@@ -64,6 +67,7 @@ async def _reconcile_space_usage(
             "repaired_accounts": 0,
             "ledger_entries": 0,
             "items": [],
+            "items_truncated": False,
         }
         if limit <= 0:
             return total
@@ -89,7 +93,10 @@ async def _reconcile_space_usage(
                 payload_items = payload["items"]
                 assert isinstance(total_items, list)
                 assert isinstance(payload_items, list)
-                total_items.extend(payload_items)
+                remaining_items = max(max_items - len(total_items), 0)
+                total_items.extend(payload_items[:remaining_items])
+                if len(payload_items) > remaining_items:
+                    total["items_truncated"] = True
                 if not scan_all or result.next_space_id is None:
                     break
                 after_space_id = result.next_space_id
