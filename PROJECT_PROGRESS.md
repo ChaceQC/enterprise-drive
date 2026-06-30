@@ -40,20 +40,33 @@
 - 删除目录时同步标记当前子树进入回收站；恢复目录时仅恢复同一批删除的子树，避免误恢复更早单独删除的节点。
 - 将文件树服务拆分为 `audit`、`tree`、`validators` 辅助模块，避免 `FileService` 职责膨胀。
 - 将测试公共夹具抽到 `tests/helpers.py`，并拆分空间/基础文件树测试与文件操作测试。
+- 补充 S3/MinIO 对象存储适配器，业务层通过 `StorageAdapter` 协议隔离 boto3 SDK，并用 `asyncio.to_thread` 避免阻塞 async endpoint。
+- 补充 `upload_sessions`、`upload_parts` SQLAlchemy 模型和 Alembic 迁移。
+- 补充上传相关配置：S3 access key、region、上传会话 TTL、分片大小和分片预签名有效期。
+- 实现 `/api/v1/uploads/init` 上传初始化接口，未命中秒传时创建 provider multipart upload 和数据库上传会话。
+- 实现 `/api/v1/uploads/{session_id}` 上传状态查询接口。
+- 实现 `/api/v1/uploads/{session_id}/parts/{part_no}/presign` 分片上传预签名接口，首次签名时将会话推进为 `uploading`。
+- 实现秒传分支：命中同租户、同 hash、同大小 blob 时直接创建文件节点和首个版本，更新 `node.current_version_id` 并递增 `file_blobs.ref_count`。
+- 上传初始化和秒传均写入审计日志与 outbox event。
+- 测试客户端默认覆盖上传存储依赖为 `InMemoryStorageAdapter`，避免单元测试依赖真实对象存储。
+- 同步更新 README、后端 README、执行计划和完整技术计划书中的上传接口、环境变量、当前限制和下一步说明。
 
 ### 进行中
 
-- Sprint 3 上传下载前置模型和接口设计。
+- Sprint 3 multipart complete、abort 和下载预签名 URL 设计与实现。
 
 ### 阻塞与风险
 
 - 当前空间和文件树接口暂以“当前租户 + 空间拥有者”作为访问边界，空间成员、目录 ACL、继承权限和拒绝优先策略尚未接入；该边界已在 README 和后端 README 标为临时实现，后续需要由权限模块替换。
 - 当前目录删除和恢复为同步遍历当前子树，适合 Sprint 2 骨架和普通目录验证；大目录后续需要改为后台任务或引入 `deleted_root_id` 等冗余状态，避免长事务。
 - `conflict_policy` 当前实现为 fail-only，同名冲突返回 `NODE_NAME_EXISTS`；`keep_both` 和 `replace` 后续按上传/版本策略补充。
+- 当前上传接口只完成 init、status 和 part presign；multipart complete、abort、下载预签名 URL、过期会话清理、上传限流和容量账本尚未接入。
+- 当前上传权限仍沿用“当前租户 + 空间拥有者”临时边界，后续需要由 Sprint 4 权限模块替换。
+- 当前对象存储临时上传 key 为 `uploads/{tenant_id}/{hash_hint}/{uuid}`，最终对象 key、完成后 hash 校验和生命周期清理策略需在 complete/cleanup 步骤落地。
 
 ### 下一步
 
-- 补充上传会话、对象存储适配、秒传和 multipart presign 的前置模型与接口骨架。
+- 实现 multipart complete 与 abort：记录分片结果、合并对象存储 multipart、写入 file_blob/file_version/node、处理幂等 complete、失败 abort 补偿和上传完成审计。
 
 ### 验证
 
@@ -88,6 +101,12 @@
 - 已运行 `uv run ruff check .`。
 - 已运行 `uv run mypy app`。
 - 已运行 `uv run pytest tests/test_space_file.py tests/test_file_operations.py`，结果为 12 passed。
+- 已运行 `uv run pytest tests/test_upload.py`，结果为 3 passed。
+- 已运行 `uv run ruff format .`，格式化上传接口相关文件。
+- 已运行 `uv run ruff format --check .`。
+- 已运行 `uv run ruff check .`。
+- 已运行 `uv run mypy app`。
+- 已再次运行 `uv run pytest tests/test_upload.py`，结果为 3 passed。
 - 已运行 `uv sync --frozen --all-extras --dev`。
 - 已运行 `uv run ruff format --check .`。
 - 已运行 `uv run ruff check .`。
@@ -99,4 +118,17 @@
 - 已运行 `uv run python -m scripts.seed_admin`，管理员 seed 通过。
 - 已启动本地 API `uv run uvicorn app.main:app --host 127.0.0.1 --port 18080`。
 - 已真实验证 `/api/v1/auth/login`、`POST /api/v1/spaces`、`POST /api/v1/files/folders`、`PATCH /api/v1/files/{node_id}`、`POST /api/v1/files/{node_id}/move`、`DELETE /api/v1/files/{node_id}`、`POST /api/v1/files/{node_id}/restore`、`GET /api/v1/files`。
+- 验证完成后已关闭本次启动的 API 和 Docker Compose 服务，并确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 不再监听。
+- 已运行 `uv sync --frozen --all-extras --dev`。
+- 已运行 `uv run ruff format --check .`，结果为 72 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 62 source files。
+- 已运行 `uv run pytest`，结果为 29 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认上传迁移 `20260630_0004` 可生成 PostgreSQL SQL。
+- 已确认启动前 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 未监听。
+- 已启动 Docker Compose 依赖服务 `postgres`、`redis`、`minio`、`opensearch` 并等待健康。
+- 已运行 `uv run alembic upgrade head`，真实 PostgreSQL migration 升级到 `20260630_0004` 通过。
+- 已运行 `uv run python -m scripts.seed_admin`，管理员 seed 通过。
+- 已启动本地 API `uv run uvicorn app.main:app --host 127.0.0.1 --port 18080`。
+- 已真实验证 `/healthz`、`/api/v1/auth/login`、`POST /api/v1/spaces`、`POST /api/v1/uploads/init`、`GET /api/v1/uploads/{session_id}`、`POST /api/v1/uploads/{session_id}/parts/{part_no}/presign`；multipart 初始化返回 2 个分片，分片签名后状态由 `initiated` 变为 `uploading`，MinIO 预签名 URL 包含 upload id。
 - 验证完成后已关闭本次启动的 API 和 Docker Compose 服务，并确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 不再监听。

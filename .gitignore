@@ -29,13 +29,20 @@ build/
 *.egg-info/
 
 # Local service data
-data/
-storage/
-uploads/
-minio-data/
-postgres-data/
-redis-data/
-opensearch-data/
+/data/
+/storage/
+/uploads/
+/minio-data/
+/postgres-data/
+/redis-data/
+/opensearch-data/
+backend/data/
+backend/storage/
+backend/uploads/
+backend/minio-data/
+backend/postgres-data/
+backend/redis-data/
+backend/opensearch-data/
 
 # Logs and temporary files
 *.log

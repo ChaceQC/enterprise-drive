@@ -1,0 +1,49 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Protocol
+
+
+@dataclass(frozen=True)
+class MultipartUpload:
+    provider_upload_id: str
+
+
+@dataclass(frozen=True)
+class PresignedUploadPart:
+    part_no: int
+    upload_url: str
+    expires_at: datetime
+    headers: dict[str, str]
+
+
+class StorageAdapter(Protocol):
+    async def create_multipart_upload(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        content_type: str | None,
+    ) -> MultipartUpload:
+        """Create a provider-side multipart upload and return its provider id."""
+
+    async def presign_upload_part(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        provider_upload_id: str,
+        part_no: int,
+        expires_in_seconds: int,
+    ) -> PresignedUploadPart:
+        """Create a short-lived URL for one multipart upload part."""
+
+    async def abort_multipart_upload(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        provider_upload_id: str,
+    ) -> None:
+        """Abort a provider-side multipart upload."""

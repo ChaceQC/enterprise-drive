@@ -50,10 +50,10 @@
 
 ### Sprint 3：上传下载
 
-- upload_session、multipart presign、complete、abort。
-- 秒传、对象存储适配、容量初版。
+- upload_session、multipart presign、complete、abort。（已完成会话初始化、状态查询和分片 presign）
+- 秒传、对象存储适配、容量初版。（已完成 StorageAdapter 和秒传创建首版本；容量账本待补充）
 - 下载预签名 URL。
-- 上传下载审计。
+- 上传下载审计。（已完成上传初始化和秒传审计）
 
 ### Sprint 4：权限系统
 
@@ -78,4 +78,4 @@
 
 ## 5. 当前下一步
 
-继续推进 Sprint 3：补充上传会话、对象存储适配、秒传和 multipart presign 的前置模型与接口骨架，并在实现前保留当前文件树接口的临时权限边界说明。
+继续推进 Sprint 3：实现 multipart complete 与 abort，补齐上传分片记录、对象存储合并、文件 blob/version/node 写入、幂等 complete、容量账本和过期清理边界。

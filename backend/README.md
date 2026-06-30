@@ -4,6 +4,8 @@
 
 ## 本地准备
 
+若本机缺少 `uv`、Python 3.12、Docker、GitHub CLI 或后端依赖包等必要工具，可按命令提示自行安装或补齐；确因权限、网络或平台限制无法安装时，需记录到项目进度。
+
 ```bash
 uv python install 3.12
 uv sync --all-extras --dev
@@ -47,6 +49,11 @@ uv run pytest
 - 文件夹创建、目录子节点列表和签名 cursor pagination。
 - 文件树节点重命名、移动、删除到回收站和恢复。
 - 空间创建、文件夹创建、重命名、移动、删除和恢复审计事件。
+- `upload_sessions`、`upload_parts` 基础表和迁移。
+- S3/MinIO 对象存储适配器，业务层通过 `StorageAdapter` 协议隔离具体 SDK。
+- 上传初始化、上传状态查询和分片预签名 URL 接口。
+- 秒传分支：命中同租户同 hash、同大小 blob 时直接创建文件节点和版本，并增加 blob 引用计数。
+- 上传初始化和秒传审计事件。
 - 管理员 seed 脚本。
 
 ## 认证接口
@@ -73,3 +80,26 @@ uv run pytest
 文件夹名称会进行 Unicode NFC 归一化并去除首尾空白，禁止 `/`、`\`、NUL、控制字符和路径穿越片段。同一目录下未删除节点的名称由数据库唯一索引兜底，根目录由 `tenant_id + space_id` 唯一索引兜底。
 
 根目录不允许重命名、移动或删除。当前目录删除和恢复会同步遍历当前子树，适合 Sprint 2 骨架和普通目录验证；大目录后续需要改为后台任务或引入 `deleted_root_id` 等冗余状态来避免长事务。
+
+## 上传接口
+
+- `POST /api/v1/uploads/init`
+- `GET /api/v1/uploads/{session_id}`
+- `POST /api/v1/uploads/{session_id}/parts/{part_no}/presign`
+
+上传初始化请求包含 `space_id`、`parent_id`、`file_name`、`size_bytes`、`content_hash`、`hash_algo`、`mime_type` 和 `conflict_policy`。当前 `conflict_policy` 仅支持 `fail`，同目录同名返回 `NODE_NAME_EXISTS`。
+
+当 `file_blobs` 已存在同租户、同 hash 算法、同内容 hash、同大小的对象时，初始化接口返回 `mode=instant`，并直接创建文件节点和首个版本。当未命中秒传时，接口创建对象存储 multipart upload 和数据库上传会话，返回 `mode=multipart`、`session_id`、`part_size_bytes`、`total_parts` 和 `expires_at`。
+
+对象存储和上传策略由以下环境变量控制：
+
+- `DRIVE_S3_ENDPOINT_URL`
+- `DRIVE_S3_BUCKET`
+- `DRIVE_S3_ACCESS_KEY_ID`
+- `DRIVE_S3_SECRET_ACCESS_KEY`
+- `DRIVE_S3_REGION`
+- `DRIVE_UPLOAD_SESSION_TTL_MINUTES`
+- `DRIVE_UPLOAD_PART_SIZE_BYTES`
+- `DRIVE_UPLOAD_PRESIGN_EXPIRES_SECONDS`
+
+当前上传接口沿用临时空间拥有者访问边界。multipart complete、abort、下载预签名 URL、容量账本、过期会话清理和上传限流将在 Sprint 3 后续步骤补齐。

@@ -12,9 +12,11 @@ from app.core.config import Settings, get_settings
 from app.core.security import hash_password
 from app.db.base import Base
 from app.db.session import get_db_session
+from app.infrastructure.storage.testing import InMemoryStorageAdapter
 from app.main import create_app
 from app.modules.auth.repository import AuthRepository
 from app.modules.auth.service import AuthService
+from app.modules.upload.router import get_storage_adapter
 
 
 @pytest.fixture
@@ -59,6 +61,7 @@ async def client(
 
     app.dependency_overrides[get_db_session] = override_get_db_session
     app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_storage_adapter] = lambda: InMemoryStorageAdapter()
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://testserver") as test_client:

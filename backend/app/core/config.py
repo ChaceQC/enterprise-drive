@@ -39,11 +39,17 @@ class Settings(BaseSettings):
     redis_url: str = "redis://127.0.0.1:16379/0"
     s3_endpoint_url: str = "http://127.0.0.1:19000"
     s3_bucket: str = "enterprise-drive-local"
+    s3_access_key_id: str = "drive-dev"
+    s3_secret_access_key: str = "drive-dev-password"
+    s3_region: str = "us-east-1"
     opensearch_url: str = "http://127.0.0.1:19200"
     celery_broker_url: str = "redis://127.0.0.1:16379/1"
     celery_result_backend: str = "redis://127.0.0.1:16379/2"
     outbox_batch_size: int = 100
     outbox_max_retries: int = 8
+    upload_session_ttl_minutes: int = 1440
+    upload_part_size_bytes: int = 8 * 1024 * 1024
+    upload_presign_expires_seconds: int = 900
 
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 15
