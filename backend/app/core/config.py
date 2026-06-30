@@ -60,9 +60,13 @@ class Settings(BaseSettings):
     download_presign_rate_limit_count: int = 120
     download_presign_rate_limit_window_seconds: int = 60
 
-    jwt_algorithm: str = "HS256"
-    access_token_minutes: int = 15
-    refresh_token_days: int = 30
+    session_cookie_name: str = "drive_session"
+    csrf_cookie_name: str = "drive_csrf"
+    csrf_header_name: str = "X-CSRF-Token"
+    session_cookie_path: str = "/"
+    session_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
+    session_cookie_secure: bool = False
+    session_days: int = 30
 
     admin_tenant_slug: str = "default"
     admin_tenant_name: str = "默认企业"

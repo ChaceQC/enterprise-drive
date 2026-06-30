@@ -58,7 +58,7 @@ async def create_instant_file(
 
     response = await client.post(
         "/api/v1/uploads/init",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={
             "space_id": space_id,
             "parent_id": parent_id,
@@ -95,7 +95,7 @@ async def test_rename_folder_updates_node_and_audit(
 
     response = await client.patch(
         f"/api/v1/files/{folder['id']}",
-        headers={"Authorization": f"Bearer {token}", "X-Request-ID": "req_rename"},
+        headers={"X-CSRF-Token": token, "X-Request-ID": "req_rename"},
         json={"name": " 新名称 "},
     )
 
@@ -137,7 +137,7 @@ async def test_move_folder_to_new_parent_with_new_name(
 
     response = await client.post(
         f"/api/v1/files/{source['id']}/move",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={"target_parent_id": target["id"], "new_name": "移动后"},
     )
 
@@ -147,12 +147,12 @@ async def test_move_folder_to_new_parent_with_new_name(
 
     old_parent_response = await client.get(
         "/api/v1/files",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         params={"space_id": space["id"], "parent_id": space["root_node_id"]},
     )
     target_response = await client.get(
         "/api/v1/files",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         params={"space_id": space["id"], "parent_id": target["id"]},
     )
 
@@ -186,7 +186,7 @@ async def test_move_folder_to_own_descendant_is_rejected(
 
     response = await client.post(
         f"/api/v1/files/{parent['id']}/move",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={"target_parent_id": child["id"]},
     )
 
@@ -220,26 +220,26 @@ async def test_delete_and_restore_folder_subtree(
 
     delete_response = await client.delete(
         f"/api/v1/files/{parent['id']}",
-        headers={"Authorization": f"Bearer {token}", "X-Request-ID": "req_delete"},
+        headers={"X-CSRF-Token": token, "X-Request-ID": "req_delete"},
     )
     root_after_delete = await client.get(
         "/api/v1/files",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         params={"space_id": space["id"], "parent_id": space["root_node_id"]},
     )
     deleted_parent_list = await client.get(
         "/api/v1/files",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         params={"space_id": space["id"], "parent_id": parent["id"]},
     )
     restore_response = await client.post(
         f"/api/v1/files/{parent['id']}/restore",
-        headers={"Authorization": f"Bearer {token}", "X-Request-ID": "req_restore"},
+        headers={"X-CSRF-Token": token, "X-Request-ID": "req_restore"},
         json={},
     )
     restored_children = await client.get(
         "/api/v1/files",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         params={"space_id": space["id"], "parent_id": parent["id"]},
     )
 
@@ -294,7 +294,7 @@ async def test_purge_deleted_file_releases_quota_and_removes_metadata(
 
     delete_response = await client.delete(
         f"/api/v1/files/{node_id}",
-        headers={"Authorization": f"Bearer {token}", "X-Request-ID": "req_delete_before_purge"},
+        headers={"X-CSRF-Token": token, "X-Request-ID": "req_delete_before_purge"},
     )
 
     assert delete_response.status_code == 200
@@ -309,7 +309,7 @@ async def test_purge_deleted_file_releases_quota_and_removes_metadata(
 
     purge_response = await client.delete(
         f"/api/v1/files/{node_id}/purge",
-        headers={"Authorization": f"Bearer {token}", "X-Request-ID": "req_purge_file"},
+        headers={"X-CSRF-Token": token, "X-Request-ID": "req_purge_file"},
     )
 
     assert purge_response.status_code == 200
@@ -397,11 +397,11 @@ async def test_purge_deleted_folder_releases_descendant_versions(
 
     delete_response = await client.delete(
         f"/api/v1/files/{folder['id']}",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
     )
     purge_response = await client.delete(
         f"/api/v1/files/{folder['id']}/purge",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
     )
 
     assert delete_response.status_code == 200
@@ -489,7 +489,7 @@ async def test_restore_rejects_sibling_name_conflict(
     )
     delete_response = await client.delete(
         f"/api/v1/files/{deleted_folder['id']}",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
     )
     assert delete_response.status_code == 200
     await create_folder(
@@ -502,12 +502,12 @@ async def test_restore_rejects_sibling_name_conflict(
 
     conflict_response = await client.post(
         f"/api/v1/files/{deleted_folder['id']}/restore",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={},
     )
     renamed_response = await client.post(
         f"/api/v1/files/{deleted_folder['id']}/restore",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={"new_name": "恢复后的目录"},
     )
 
@@ -529,16 +529,16 @@ async def test_root_folder_is_immutable(
 
     delete_response = await client.delete(
         f"/api/v1/files/{space['root_node_id']}",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
     )
     rename_response = await client.patch(
         f"/api/v1/files/{space['root_node_id']}",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={"name": "new-root"},
     )
     purge_response = await client.delete(
         f"/api/v1/files/{space['root_node_id']}/purge",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
     )
 
     assert delete_response.status_code == 400
@@ -568,7 +568,7 @@ async def test_purge_rejects_active_node(
 
     response = await client.delete(
         f"/api/v1/files/{folder['id']}/purge",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
     )
 
     assert response.status_code == 400

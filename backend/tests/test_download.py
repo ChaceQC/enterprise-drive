@@ -46,7 +46,7 @@ async def complete_small_file(
 ) -> dict[str, str]:
     init_response = await client.post(
         "/api/v1/uploads/init",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={
             "space_id": space_id,
             "parent_id": parent_id,
@@ -60,7 +60,7 @@ async def complete_small_file(
     assert init_response.status_code == 201
     complete_response = await client.post(
         f"/api/v1/uploads/{init_response.json()['session_id']}/complete",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={"parts": [{"part_no": 1, "etag": "etag-1", "size_bytes": 1024}]},
     )
     assert complete_response.status_code == 200
@@ -87,7 +87,7 @@ async def test_create_download_url_records_audit(
 
     response = await client.get(
         f"/api/v1/files/{completed['node_id']}/download",
-        headers={"Authorization": f"Bearer {token}", "X-Request-ID": "req_download"},
+        headers={"X-CSRF-Token": token, "X-Request-ID": "req_download"},
     )
 
     assert response.status_code == 200
@@ -138,7 +138,7 @@ async def test_download_rejects_folder(
 
     response = await client.get(
         f"/api/v1/files/{folder['id']}/download",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
     )
 
     assert response.status_code == 400
@@ -175,7 +175,7 @@ async def test_download_uses_owner_boundary_until_permission_module(
 
     response = await client.get(
         f"/api/v1/files/{completed['node_id']}/download",
-        headers={"Authorization": f"Bearer {member_token}"},
+        headers={"X-CSRF-Token": member_token},
     )
 
     assert response.status_code == 404

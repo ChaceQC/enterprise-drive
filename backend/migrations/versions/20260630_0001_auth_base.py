@@ -51,12 +51,13 @@ def upgrade() -> None:
         "where email is not null"
     )
     op.create_table(
-        "refresh_tokens",
+        "auth_sessions",
         sa.Column("id", sa.Uuid(), nullable=False),
         sa.Column("tenant_id", sa.Uuid(), nullable=False),
         sa.Column("user_id", sa.Uuid(), nullable=False),
         sa.Column("family_id", sa.Uuid(), nullable=False),
         sa.Column("token_hash", sa.String(length=64), nullable=False),
+        sa.Column("csrf_token_hash", sa.String(length=64), nullable=False),
         sa.Column("replaced_by_id", sa.Uuid(), nullable=True),
         sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("revoked_reason", sa.String(length=64), nullable=True),
@@ -67,22 +68,27 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_refresh_tokens_tenant_id", "refresh_tokens", ["tenant_id"])
-    op.create_index("ix_refresh_tokens_user_id", "refresh_tokens", ["user_id"])
+    op.create_index("ix_auth_sessions_tenant_id", "auth_sessions", ["tenant_id"])
+    op.create_index("ix_auth_sessions_user_id", "auth_sessions", ["user_id"])
     op.create_index(
-        "idx_refresh_tokens_family",
-        "refresh_tokens",
+        "idx_auth_sessions_family",
+        "auth_sessions",
         ["tenant_id", "family_id"],
     )
-    op.create_index("uq_refresh_tokens_hash", "refresh_tokens", ["token_hash"], unique=True)
+    op.create_index(
+        "uq_auth_sessions_token_hash",
+        "auth_sessions",
+        ["token_hash"],
+        unique=True,
+    )
 
 
 def downgrade() -> None:
-    op.drop_index("uq_refresh_tokens_hash", table_name="refresh_tokens")
-    op.drop_index("idx_refresh_tokens_family", table_name="refresh_tokens")
-    op.drop_index("ix_refresh_tokens_user_id", table_name="refresh_tokens")
-    op.drop_index("ix_refresh_tokens_tenant_id", table_name="refresh_tokens")
-    op.drop_table("refresh_tokens")
+    op.drop_index("uq_auth_sessions_token_hash", table_name="auth_sessions")
+    op.drop_index("idx_auth_sessions_family", table_name="auth_sessions")
+    op.drop_index("ix_auth_sessions_user_id", table_name="auth_sessions")
+    op.drop_index("ix_auth_sessions_tenant_id", table_name="auth_sessions")
+    op.drop_table("auth_sessions")
     op.execute("drop index uq_users_email")
     op.execute("drop index uq_users_username")
     op.drop_index("ix_users_tenant_id", table_name="users")

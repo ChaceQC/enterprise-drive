@@ -40,7 +40,7 @@ async def test_create_space_creates_root_node_and_audit(
 
     response = await client.post(
         "/api/v1/spaces",
-        headers={"Authorization": f"Bearer {token}", "X-Request-ID": "req_space_create"},
+        headers={"X-CSRF-Token": token, "X-Request-ID": "req_space_create"},
         json={"slug": "team-docs", "name": "团队资料", "space_type": "team"},
     )
 
@@ -76,6 +76,30 @@ async def test_create_space_creates_root_node_and_audit(
 
 
 @pytest.mark.asyncio
+async def test_space_mutation_requires_csrf_header(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    request_payload = {"slug": "csrf-check", "name": "CSRF 检查", "space_type": "team"}
+
+    missing_csrf_response = await client.post("/api/v1/spaces", json=request_payload)
+
+    assert missing_csrf_response.status_code == 403
+    assert missing_csrf_response.json()["code"] == "CSRF_TOKEN_INVALID"
+
+    success_response = await client.post(
+        "/api/v1/spaces",
+        headers={"X-CSRF-Token": token},
+        json=request_payload,
+    )
+
+    assert success_response.status_code == 201
+
+
+@pytest.mark.asyncio
 async def test_duplicate_space_slug_returns_conflict(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
@@ -87,12 +111,12 @@ async def test_duplicate_space_slug_returns_conflict(
 
     first_response = await client.post(
         "/api/v1/spaces",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json=request_payload,
     )
     second_response = await client.post(
         "/api/v1/spaces",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json=request_payload,
     )
 
@@ -111,14 +135,14 @@ async def test_create_folder_and_list_children(
     token = await login(client)
     space_response = await client.post(
         "/api/v1/spaces",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={"slug": "product", "name": "产品文档", "space_type": "team"},
     )
     space_payload = space_response.json()
 
     folder_response = await client.post(
         "/api/v1/files/folders",
-        headers={"Authorization": f"Bearer {token}", "X-Request-ID": "req_folder_create"},
+        headers={"X-CSRF-Token": token, "X-Request-ID": "req_folder_create"},
         json={
             "space_id": space_payload["id"],
             "parent_id": space_payload["root_node_id"],
@@ -127,7 +151,7 @@ async def test_create_folder_and_list_children(
     )
     list_response = await client.get(
         "/api/v1/files",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         params={"space_id": space_payload["id"], "parent_id": space_payload["root_node_id"]},
     )
 
@@ -154,7 +178,7 @@ async def test_duplicate_folder_name_returns_conflict(
     token = await login(client)
     space_response = await client.post(
         "/api/v1/spaces",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={"slug": "design", "name": "设计文档", "space_type": "team"},
     )
     space_payload = space_response.json()
@@ -166,12 +190,12 @@ async def test_duplicate_folder_name_returns_conflict(
 
     first_response = await client.post(
         "/api/v1/files/folders",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json=request_payload,
     )
     second_response = await client.post(
         "/api/v1/files/folders",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json=request_payload,
     )
 
@@ -190,14 +214,14 @@ async def test_invalid_folder_name_is_rejected(
     token = await login(client)
     space_response = await client.post(
         "/api/v1/spaces",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={"slug": "security", "name": "安全文档", "space_type": "team"},
     )
     space_payload = space_response.json()
 
     response = await client.post(
         "/api/v1/files/folders",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={
             "space_id": space_payload["id"],
             "parent_id": space_payload["root_node_id"],
@@ -219,7 +243,7 @@ async def test_file_list_uses_owner_boundary_until_permission_module(
     admin_token = await login(client)
     space_response = await client.post(
         "/api/v1/spaces",
-        headers={"Authorization": f"Bearer {admin_token}"},
+        headers={"X-CSRF-Token": admin_token},
         json={"slug": "private", "name": "私有空间", "space_type": "team"},
     )
     await create_second_user(session_factory)
@@ -227,7 +251,7 @@ async def test_file_list_uses_owner_boundary_until_permission_module(
 
     response = await client.get(
         "/api/v1/files",
-        headers={"Authorization": f"Bearer {member_token}"},
+        headers={"X-CSRF-Token": member_token},
         params={"space_id": space_response.json()["id"]},
     )
 

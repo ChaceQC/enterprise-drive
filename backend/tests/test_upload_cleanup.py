@@ -48,7 +48,7 @@ async def create_upload_session(
 ) -> UUID:
     response = await client.post(
         "/api/v1/uploads/init",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={
             "space_id": space_id,
             "parent_id": parent_id,

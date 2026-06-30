@@ -19,7 +19,7 @@ from app.modules.audit.models import AuditLog, OutboxEvent
 from app.modules.audit.repository import AuditRepository
 from app.modules.audit.schemas import AuditContext
 from app.modules.audit.service import AuditService
-from app.modules.auth.models import RefreshToken
+from app.modules.auth.models import AuthSession
 from app.modules.auth.repository import AuthRepository
 from app.modules.auth.service import AuthService
 
@@ -33,8 +33,7 @@ def auth_settings() -> Settings:
         cors_origins=[],
         database_url="sqlite+aiosqlite:///:memory:",
         admin_password="admin-password",
-        access_token_minutes=15,
-        refresh_token_days=30,
+        session_days=30,
     )
 
 
@@ -101,7 +100,7 @@ async def test_seed_admin_is_idempotent(auth_service: AuthService) -> None:
 
 
 @pytest.mark.asyncio
-async def test_login_and_refresh_rotate_token(auth_service: AuthService) -> None:
+async def test_login_and_rotate_session(auth_service: AuthService) -> None:
     await auth_service.seed_admin()
     login_response = await auth_service.login(
         tenant_slug="default",
@@ -110,18 +109,21 @@ async def test_login_and_refresh_rotate_token(auth_service: AuthService) -> None
         audit_context=AuditContext(request_id="req_login"),
     )
 
-    refresh_response = await auth_service.refresh(
-        refresh_token=login_response.refresh_token,
-        audit_context=AuditContext(request_id="req_refresh"),
+    rotate_response = await auth_service.rotate_session(
+        session_token=login_response.session_token,
+        csrf_token=login_response.csrf_token,
+        audit_context=AuditContext(request_id="req_rotate"),
     )
 
-    assert login_response.access_token
-    assert refresh_response.access_token
-    assert refresh_response.refresh_token != login_response.refresh_token
+    assert login_response.session_token
+    assert login_response.csrf_token
+    assert login_response.response.user.username == "admin"
+    assert rotate_response.session_token != login_response.session_token
+    assert rotate_response.csrf_token != login_response.csrf_token
 
 
 @pytest.mark.asyncio
-async def test_reusing_rotated_refresh_token_revokes_family(
+async def test_reusing_rotated_session_revokes_family(
     auth_service: AuthService,
     session: AsyncSession,
 ) -> None:
@@ -131,16 +133,22 @@ async def test_reusing_rotated_refresh_token_revokes_family(
         username="admin",
         password="admin-password",
     )
-    refresh_response = await auth_service.refresh(refresh_token=login_response.refresh_token)
+    rotate_response = await auth_service.rotate_session(
+        session_token=login_response.session_token,
+        csrf_token=login_response.csrf_token,
+    )
 
     with pytest.raises(ApiError) as exc_info:
-        await auth_service.refresh(refresh_token=login_response.refresh_token)
+        await auth_service.rotate_session(
+            session_token=login_response.session_token,
+            csrf_token=login_response.csrf_token,
+        )
 
-    assert exc_info.value.code == "REFRESH_TOKEN_REUSED"
+    assert exc_info.value.code == "SESSION_REUSED"
 
-    new_token_hash = hash_token(refresh_response.refresh_token)
-    stored_new_token = await AuthRepository(session).get_refresh_token_by_hash(new_token_hash)
-    assert isinstance(stored_new_token, RefreshToken)
+    new_token_hash = hash_token(rotate_response.session_token)
+    stored_new_token = await AuthRepository(session).get_auth_session_by_token_hash(new_token_hash)
+    assert isinstance(stored_new_token, AuthSession)
     assert stored_new_token.revoked_reason == "reuse_detected"
 
 
@@ -156,9 +164,10 @@ async def test_auth_events_write_audit_log_and_outbox(
         password="admin-password",
         audit_context=AuditContext(request_id="req_audit", ip="127.0.0.1"),
     )
-    await auth_service.refresh(
-        refresh_token=login_response.refresh_token,
-        audit_context=AuditContext(request_id="req_refresh"),
+    await auth_service.rotate_session(
+        session_token=login_response.session_token,
+        csrf_token=login_response.csrf_token,
+        audit_context=AuditContext(request_id="req_rotate"),
     )
 
     audit_logs = (
@@ -168,13 +177,13 @@ async def test_auth_events_write_audit_log_and_outbox(
     )
     outbox_events = (await session.execute(select(OutboxEvent))).scalars().all()
 
-    assert [log.action for log in audit_logs] == ["auth.login", "auth.refresh"]
+    assert [log.action for log in audit_logs] == ["auth.login", "auth.session.rotated"]
     assert [log.result for log in audit_logs] == ["allowed", "allowed"]
     assert audit_logs[0].request_id == "req_audit"
     assert len(outbox_events) == 2
     assert {event.event_type for event in outbox_events} == {
         "audit.auth.login",
-        "audit.auth.refresh",
+        "audit.auth.session.rotated",
     }
 
 
@@ -204,7 +213,7 @@ async def test_failed_login_writes_denied_audit(
 
 
 @pytest.mark.asyncio
-async def test_auth_api_login_refresh_and_me(
+async def test_auth_api_login_rotate_me_and_logout_with_cookie_session(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     auth_settings: Settings,
@@ -227,17 +236,43 @@ async def test_auth_api_login_refresh_and_me(
     )
     assert login_response.status_code == 200
     login_payload = login_response.json()
-
-    me_response = await client.get(
-        "/api/v1/auth/me",
-        headers={"Authorization": f"Bearer {login_payload['access_token']}"},
+    assert login_payload["authenticated"] is True
+    assert login_payload["user"]["username"] == "admin"
+    assert "access_token" not in login_payload
+    assert "session_token" not in login_payload
+    assert client.cookies.get("drive_session") is not None
+    csrf_token = client.cookies.get("drive_csrf")
+    assert csrf_token is not None
+    set_cookie_headers = login_response.headers.get_list("set-cookie")
+    assert any("drive_session=" in header and "HttpOnly" in header for header in set_cookie_headers)
+    assert any(
+        "drive_csrf=" in header and "HttpOnly" not in header for header in set_cookie_headers
     )
+
+    me_response = await client.get("/api/v1/auth/me")
     assert me_response.status_code == 200
     assert me_response.json()["username"] == "admin"
 
-    refresh_response = await client.post(
-        "/api/v1/auth/refresh",
-        json={"refresh_token": login_payload["refresh_token"]},
+    missing_csrf_response = await client.post("/api/v1/auth/session/rotate")
+    assert missing_csrf_response.status_code == 403
+    assert missing_csrf_response.json()["code"] == "CSRF_TOKEN_INVALID"
+
+    rotate_response = await client.post(
+        "/api/v1/auth/session/rotate",
+        headers={"X-CSRF-Token": csrf_token},
     )
-    assert refresh_response.status_code == 200
-    assert refresh_response.json()["refresh_token"] != login_payload["refresh_token"]
+    assert rotate_response.status_code == 200
+    assert rotate_response.json()["authenticated"] is True
+    rotated_csrf_token = client.cookies.get("drive_csrf")
+    assert rotated_csrf_token is not None
+    assert rotated_csrf_token != csrf_token
+
+    logout_response = await client.post(
+        "/api/v1/auth/logout",
+        headers={"X-CSRF-Token": rotated_csrf_token},
+    )
+    assert logout_response.status_code == 200
+    assert logout_response.json() == {"authenticated": False}
+
+    logged_out_response = await client.get("/api/v1/auth/me")
+    assert logged_out_response.status_code == 401

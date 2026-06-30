@@ -7,8 +7,8 @@ from uuid import UUID, uuid4
 from app.api.errors import ApiError
 from app.core.config import Settings
 from app.core.security import (
-    create_access_token,
-    create_refresh_token,
+    create_csrf_token,
+    create_session_token,
     ensure_utc,
     hash_password,
     hash_token,
@@ -17,9 +17,9 @@ from app.core.security import (
 )
 from app.modules.audit.schemas import AuditContext, AuditEvent
 from app.modules.audit.service import AuditService
-from app.modules.auth.models import User
+from app.modules.auth.models import AuthSession, User
 from app.modules.auth.repository import AuthRepository
-from app.modules.auth.schemas import TokenResponse
+from app.modules.auth.schemas import SessionResponse, UserProfileResponse
 
 
 @dataclass(frozen=True)
@@ -28,6 +28,13 @@ class SeedAdminResult:
     user_created: bool
     username: str
     tenant_slug: str
+
+
+@dataclass(frozen=True)
+class IssuedSession:
+    session_token: str
+    csrf_token: str
+    response: SessionResponse
 
 
 class AuthService:
@@ -49,7 +56,7 @@ class AuthService:
         username: str,
         password: str,
         audit_context: AuditContext | None = None,
-    ) -> TokenResponse:
+    ) -> IssuedSession:
         tenant = await self.repository.get_tenant_by_slug(tenant_slug)
         if tenant is None:
             raise self._invalid_credentials()
@@ -89,7 +96,7 @@ class AuthService:
             await self.repository.commit()
             raise self._invalid_credentials()
 
-        token_response = await self._issue_token_pair(user=user, family_id=uuid4())
+        issued_session = await self._issue_session(user=user, family_id=uuid4())
         await self._record_auth_event(
             AuditEvent(
                 tenant_id=tenant.id,
@@ -103,23 +110,24 @@ class AuthService:
             audit_context=audit_context,
         )
         await self.repository.commit()
-        return token_response
+        return issued_session
 
-    async def refresh(
+    async def rotate_session(
         self,
         *,
-        refresh_token: str,
+        session_token: str,
+        csrf_token: str | None,
         audit_context: AuditContext | None = None,
-    ) -> TokenResponse:
-        token_hash = hash_token(refresh_token)
-        stored_token = await self.repository.get_refresh_token_by_hash(token_hash)
+    ) -> IssuedSession:
+        stored_token = await self._get_session_token(session_token)
         now = utc_now()
 
         if stored_token is None:
-            raise ApiError("TOKEN_INVALID", "刷新令牌无效", status_code=401)
+            raise ApiError("SESSION_INVALID", "登录会话无效", status_code=401)
+        self._ensure_csrf_token(stored_token=stored_token, csrf_token=csrf_token)
 
         if stored_token.revoked_at is not None or stored_token.replaced_by_id is not None:
-            await self.repository.revoke_refresh_family(
+            await self.repository.revoke_auth_session_family(
                 family_id=stored_token.family_id,
                 revoked_at=now,
                 reason="reuse_detected",
@@ -128,8 +136,8 @@ class AuthService:
                 AuditEvent(
                     tenant_id=stored_token.tenant_id,
                     actor_id=stored_token.user_id,
-                    action="auth.refresh.reused",
-                    resource_type="refresh_token",
+                    action="auth.session.reused",
+                    resource_type="auth_session",
                     resource_id=stored_token.id,
                     result="denied",
                     risk_level="high",
@@ -141,10 +149,10 @@ class AuthService:
                 audit_context=audit_context,
             )
             await self.repository.commit()
-            raise ApiError("REFRESH_TOKEN_REUSED", "刷新令牌已失效", status_code=401)
+            raise ApiError("SESSION_REUSED", "登录会话已失效", status_code=401)
 
         if ensure_utc(stored_token.expires_at) <= now:
-            await self.repository.revoke_refresh_family(
+            await self.repository.revoke_auth_session_family(
                 family_id=stored_token.family_id,
                 revoked_at=now,
                 reason="expired",
@@ -153,8 +161,8 @@ class AuthService:
                 AuditEvent(
                     tenant_id=stored_token.tenant_id,
                     actor_id=stored_token.user_id,
-                    action="auth.refresh",
-                    resource_type="refresh_token",
+                    action="auth.session.rotated",
+                    resource_type="auth_session",
                     resource_id=stored_token.id,
                     result="denied",
                     risk_level="medium",
@@ -163,14 +171,14 @@ class AuthService:
                 audit_context=audit_context,
             )
             await self.repository.commit()
-            raise ApiError("TOKEN_EXPIRED", "刷新令牌已过期", status_code=401)
+            raise ApiError("SESSION_EXPIRED", "登录会话已过期", status_code=401)
 
         user = await self.repository.get_user_by_id(
             tenant_id=stored_token.tenant_id,
             user_id=stored_token.user_id,
         )
         if user is None or not user.is_active:
-            await self.repository.revoke_refresh_family(
+            await self.repository.revoke_auth_session_family(
                 family_id=stored_token.family_id,
                 revoked_at=now,
                 reason="user_inactive",
@@ -179,8 +187,8 @@ class AuthService:
                 AuditEvent(
                     tenant_id=stored_token.tenant_id,
                     actor_id=stored_token.user_id,
-                    action="auth.refresh",
-                    resource_type="refresh_token",
+                    action="auth.session.rotated",
+                    resource_type="auth_session",
                     resource_id=stored_token.id,
                     result="denied",
                     risk_level="medium",
@@ -194,24 +202,24 @@ class AuthService:
             await self.repository.commit()
             raise ApiError("AUTH_REQUIRED", "认证已失效", status_code=401)
 
-        token_response = await self._issue_token_pair(user=user, family_id=stored_token.family_id)
-        new_stored_token = await self.repository.get_refresh_token_by_hash(
-            hash_token(token_response.refresh_token)
+        issued_session = await self._issue_session(user=user, family_id=stored_token.family_id)
+        new_stored_session = await self.repository.get_auth_session_by_token_hash(
+            hash_token(issued_session.session_token)
         )
-        if new_stored_token is None:
-            raise ApiError("TOKEN_INVALID", "刷新令牌创建失败", status_code=500)
+        if new_stored_session is None:
+            raise ApiError("SESSION_INVALID", "登录会话创建失败", status_code=500)
 
-        await self.repository.mark_refresh_token_rotated(
-            old_token_id=stored_token.id,
-            new_token_id=new_stored_token.id,
+        await self.repository.mark_auth_session_rotated(
+            old_session_id=stored_token.id,
+            new_session_id=new_stored_session.id,
             used_at=now,
         )
         await self._record_auth_event(
             AuditEvent(
                 tenant_id=stored_token.tenant_id,
                 actor_id=stored_token.user_id,
-                action="auth.refresh",
-                resource_type="refresh_token",
+                action="auth.session.rotated",
+                resource_type="auth_session",
                 resource_id=stored_token.id,
                 result="allowed",
                 metadata={"family_id": str(stored_token.family_id)},
@@ -219,7 +227,66 @@ class AuthService:
             audit_context=audit_context,
         )
         await self.repository.commit()
-        return token_response
+        return issued_session
+
+    async def authenticate_session(
+        self,
+        *,
+        session_token: str,
+        csrf_token: str | None = None,
+        require_csrf: bool = False,
+    ) -> User:
+        stored_token = await self._get_session_token(session_token)
+        if stored_token is None:
+            raise ApiError("AUTH_REQUIRED", "请先登录", status_code=401)
+        if require_csrf:
+            self._ensure_csrf_token(stored_token=stored_token, csrf_token=csrf_token)
+        if (
+            stored_token.revoked_at is not None
+            or stored_token.replaced_by_id is not None
+            or ensure_utc(stored_token.expires_at) <= utc_now()
+        ):
+            raise ApiError("AUTH_REQUIRED", "认证已失效", status_code=401)
+
+        user = await self.repository.get_user_by_id(
+            tenant_id=stored_token.tenant_id,
+            user_id=stored_token.user_id,
+        )
+        if user is None or not user.is_active:
+            raise ApiError("AUTH_REQUIRED", "认证已失效", status_code=401)
+        return user
+
+    async def logout(
+        self,
+        *,
+        session_token: str,
+        csrf_token: str | None,
+        audit_context: AuditContext | None = None,
+    ) -> None:
+        stored_token = await self._get_session_token(session_token)
+        if stored_token is None:
+            return
+        self._ensure_csrf_token(stored_token=stored_token, csrf_token=csrf_token)
+        now = utc_now()
+        if stored_token.revoked_at is None:
+            await self.repository.revoke_auth_session_family(
+                family_id=stored_token.family_id,
+                revoked_at=now,
+                reason="logout",
+            )
+        await self._record_auth_event(
+            AuditEvent(
+                tenant_id=stored_token.tenant_id,
+                actor_id=stored_token.user_id,
+                action="auth.logout",
+                resource_type="auth_session",
+                resource_id=stored_token.id,
+                result="allowed",
+                metadata={"family_id": str(stored_token.family_id)},
+            ),
+            audit_context=audit_context,
+        )
+        await self.repository.commit()
 
     async def seed_admin(self) -> SeedAdminResult:
         tenant = await self.repository.get_tenant_by_slug(self.settings.admin_tenant_slug)
@@ -254,29 +321,51 @@ class AuthService:
             tenant_slug=self.settings.admin_tenant_slug,
         )
 
-    async def _issue_token_pair(self, *, user: User, family_id: UUID) -> TokenResponse:
-        access_token, access_expires_at = create_access_token(
-            settings=self.settings,
-            user_id=user.id,
-            tenant_id=user.tenant_id,
-            username=user.username,
-            is_super_admin=user.is_super_admin,
-        )
-        raw_refresh_token = create_refresh_token()
-        refresh_expires_at = utc_now() + timedelta(days=self.settings.refresh_token_days)
-        await self.repository.create_refresh_token(
+    async def _issue_session(self, *, user: User, family_id: UUID) -> IssuedSession:
+        raw_session_token = create_session_token()
+        raw_csrf_token = create_csrf_token()
+        expires_at = utc_now() + timedelta(days=self.settings.session_days)
+        await self.repository.create_auth_session(
             tenant_id=user.tenant_id,
             user_id=user.id,
             family_id=family_id,
-            token_hash=hash_token(raw_refresh_token),
-            expires_at=refresh_expires_at,
+            token_hash=hash_token(raw_session_token),
+            csrf_token_hash=hash_token(raw_csrf_token),
+            expires_at=expires_at,
         )
-        expires_in = max(int((access_expires_at - utc_now()).total_seconds()), 0)
-        return TokenResponse(
-            access_token=access_token,
-            refresh_token=raw_refresh_token,
-            expires_in=expires_in,
-            refresh_expires_at=refresh_expires_at,
+        return IssuedSession(
+            session_token=raw_session_token,
+            csrf_token=raw_csrf_token,
+            response=SessionResponse(
+                expires_at=expires_at,
+                user=self._profile_response(user),
+            ),
+        )
+
+    async def _get_session_token(self, raw_token: str) -> AuthSession | None:
+        return await self.repository.get_auth_session_by_token_hash(hash_token(raw_token))
+
+    @staticmethod
+    def _ensure_csrf_token(
+        *,
+        stored_token: AuthSession,
+        csrf_token: str | None,
+    ) -> None:
+        if csrf_token is None or stored_token.csrf_token_hash is None:
+            raise ApiError("CSRF_TOKEN_INVALID", "CSRF 校验失败", status_code=403)
+        if hash_token(csrf_token) != stored_token.csrf_token_hash:
+            raise ApiError("CSRF_TOKEN_INVALID", "CSRF 校验失败", status_code=403)
+
+    @staticmethod
+    def _profile_response(user: User) -> UserProfileResponse:
+        return UserProfileResponse(
+            id=user.id,
+            tenant_id=user.tenant_id,
+            username=user.username,
+            email=user.email,
+            display_name=user.display_name,
+            is_super_admin=user.is_super_admin,
+            must_change_password=user.must_change_password,
         )
 
     @staticmethod

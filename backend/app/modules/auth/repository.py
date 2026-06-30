@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.modules.auth.models import RefreshToken, Tenant, User
+from app.modules.auth.models import AuthSession, Tenant, User
 
 
 class AuthRepository:
@@ -72,46 +72,48 @@ class AuthRepository:
         await self.session.flush()
         return user
 
-    async def create_refresh_token(
+    async def create_auth_session(
         self,
         *,
         tenant_id: UUID,
         user_id: UUID,
         family_id: UUID,
         token_hash: str,
+        csrf_token_hash: str,
         expires_at: datetime,
-    ) -> RefreshToken:
-        refresh_token = RefreshToken(
+    ) -> AuthSession:
+        auth_session = AuthSession(
             tenant_id=tenant_id,
             user_id=user_id,
             family_id=family_id,
             token_hash=token_hash,
+            csrf_token_hash=csrf_token_hash,
             expires_at=expires_at,
         )
-        self.session.add(refresh_token)
+        self.session.add(auth_session)
         await self.session.flush()
-        return refresh_token
+        return auth_session
 
-    async def get_refresh_token_by_hash(self, token_hash: str) -> RefreshToken | None:
+    async def get_auth_session_by_token_hash(self, token_hash: str) -> AuthSession | None:
         result = await self.session.execute(
-            select(RefreshToken).where(RefreshToken.token_hash == token_hash)
+            select(AuthSession).where(AuthSession.token_hash == token_hash)
         )
         return result.scalar_one_or_none()
 
-    async def mark_refresh_token_rotated(
+    async def mark_auth_session_rotated(
         self,
         *,
-        old_token_id: UUID,
-        new_token_id: UUID,
+        old_session_id: UUID,
+        new_session_id: UUID,
         used_at: datetime,
     ) -> None:
         await self.session.execute(
-            update(RefreshToken)
-            .where(RefreshToken.id == old_token_id)
-            .values(used_at=used_at, replaced_by_id=new_token_id)
+            update(AuthSession)
+            .where(AuthSession.id == old_session_id)
+            .values(used_at=used_at, replaced_by_id=new_session_id)
         )
 
-    async def revoke_refresh_family(
+    async def revoke_auth_session_family(
         self,
         *,
         family_id: UUID,
@@ -119,8 +121,8 @@ class AuthRepository:
         reason: str,
     ) -> None:
         await self.session.execute(
-            update(RefreshToken)
-            .where(RefreshToken.family_id == family_id, RefreshToken.revoked_at.is_(None))
+            update(AuthSession)
+            .where(AuthSession.family_id == family_id, AuthSession.revoked_at.is_(None))
             .values(revoked_at=revoked_at, revoked_reason=reason)
         )
 

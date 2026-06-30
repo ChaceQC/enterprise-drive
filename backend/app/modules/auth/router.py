@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import build_audit_context, get_current_user
@@ -14,8 +14,8 @@ from app.modules.auth.models import User
 from app.modules.auth.repository import AuthRepository
 from app.modules.auth.schemas import (
     LoginRequest,
-    RefreshTokenRequest,
-    TokenResponse,
+    LogoutResponse,
+    SessionResponse,
     UserProfileResponse,
 )
 from app.modules.auth.service import AuthService
@@ -34,30 +34,64 @@ def get_auth_service(
     )
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=SessionResponse)
 async def login(
     http_request: Request,
+    response: Response,
     request: LoginRequest,
     service: Annotated[AuthService, Depends(get_auth_service)],
-) -> TokenResponse:
-    return await service.login(
+) -> SessionResponse:
+    issued_session = await service.login(
         tenant_slug=request.tenant_slug,
         username=request.username,
         password=request.password,
         audit_context=build_audit_context(http_request),
     )
+    _set_session_cookie(
+        response=response,
+        request=http_request,
+        session_token=issued_session.session_token,
+        csrf_token=issued_session.csrf_token,
+    )
+    return issued_session.response
 
 
-@router.post("/refresh", response_model=TokenResponse)
-async def refresh(
+@router.post("/session/rotate", response_model=SessionResponse)
+async def rotate_session(
     http_request: Request,
-    request: RefreshTokenRequest,
+    response: Response,
     service: Annotated[AuthService, Depends(get_auth_service)],
-) -> TokenResponse:
-    return await service.refresh(
-        refresh_token=request.refresh_token,
+) -> SessionResponse:
+    session_token = _require_session_cookie(http_request)
+    issued_session = await service.rotate_session(
+        session_token=session_token,
+        csrf_token=_read_csrf_header(http_request),
         audit_context=build_audit_context(http_request),
     )
+    _set_session_cookie(
+        response=response,
+        request=http_request,
+        session_token=issued_session.session_token,
+        csrf_token=issued_session.csrf_token,
+    )
+    return issued_session.response
+
+
+@router.post("/logout", response_model=LogoutResponse)
+async def logout(
+    http_request: Request,
+    response: Response,
+    service: Annotated[AuthService, Depends(get_auth_service)],
+) -> LogoutResponse:
+    session_token = _read_session_cookie(http_request, required=False)
+    if session_token is not None:
+        await service.logout(
+            session_token=session_token,
+            csrf_token=_read_csrf_header(http_request),
+            audit_context=build_audit_context(http_request),
+        )
+    _clear_session_cookie(response=response, request=http_request)
+    return LogoutResponse()
 
 
 @router.get("/me", response_model=UserProfileResponse)
@@ -73,3 +107,71 @@ async def me(
         is_super_admin=current_user.is_super_admin,
         must_change_password=current_user.must_change_password,
     )
+
+
+def _read_session_cookie(request: Request, *, required: bool = True) -> str | None:
+    settings = request.app.state.settings
+    session_token = request.cookies.get(settings.session_cookie_name)
+    if session_token is None and required:
+        from app.api.errors import ApiError
+
+        raise ApiError("AUTH_REQUIRED", "请先登录", status_code=401)
+    return session_token
+
+
+def _require_session_cookie(request: Request) -> str:
+    session_token = _read_session_cookie(request)
+    assert session_token is not None
+    return session_token
+
+
+def _set_session_cookie(
+    *,
+    response: Response,
+    request: Request,
+    session_token: str,
+    csrf_token: str,
+) -> None:
+    settings = request.app.state.settings
+    response.set_cookie(
+        key=settings.session_cookie_name,
+        value=session_token,
+        max_age=settings.session_days * 24 * 60 * 60,
+        path=settings.session_cookie_path,
+        secure=settings.session_cookie_secure,
+        httponly=True,
+        samesite=settings.session_cookie_samesite,
+    )
+    response.set_cookie(
+        key=settings.csrf_cookie_name,
+        value=csrf_token,
+        max_age=settings.session_days * 24 * 60 * 60,
+        path=settings.session_cookie_path,
+        secure=settings.session_cookie_secure,
+        httponly=False,
+        samesite=settings.session_cookie_samesite,
+    )
+
+
+def _clear_session_cookie(*, response: Response, request: Request) -> None:
+    settings = request.app.state.settings
+    response.delete_cookie(
+        key=settings.session_cookie_name,
+        path=settings.session_cookie_path,
+        secure=settings.session_cookie_secure,
+        httponly=True,
+        samesite=settings.session_cookie_samesite,
+    )
+    response.delete_cookie(
+        key=settings.csrf_cookie_name,
+        path=settings.session_cookie_path,
+        secure=settings.session_cookie_secure,
+        httponly=False,
+        samesite=settings.session_cookie_samesite,
+    )
+
+
+def _read_csrf_header(request: Request) -> str | None:
+    settings = request.app.state.settings
+    token = request.headers.get(settings.csrf_header_name)
+    return token.strip() if token else None

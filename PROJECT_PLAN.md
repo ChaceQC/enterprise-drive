@@ -37,7 +37,7 @@
 
 - uv 工程、FastAPI app、配置、日志、错误响应、request_id middleware。
 - SQLAlchemy、Alembic、PostgreSQL、Redis、MinIO 本地 compose。
-- 用户登录、JWT、基础用户表和管理员 seed。
+- 用户登录、BFF Cookie 会话、基础用户表和管理员 seed。
 - CI：ruff、mypy、pytest。
 
 ### Sprint 2：空间和文件树
@@ -81,4 +81,4 @@
 
 ## 5. 当前下一步
 
-容量校准草稿已暂停，先处理 2026-07-01 代码审计发现的实现边界问题：优先替换对象存储默认实现，移除 `boto3/botocore` 直接依赖，改用开放协议或非云厂商专有的开源 S3 兼容客户端；随后将 Redis 固定窗口限流改为成熟限流库或 Lua 原子脚本，再恢复容量校准和对象生命周期任务。
+2026-07-01 代码审计发现的实现边界问题已完成首轮整改：浏览器认证改为 BFF + HttpOnly Cookie Session，移除 JWT/refresh token 兼容路径；对象存储默认实现已移除 `boto3/botocore` 并改用 MinIO Python SDK；Redis 固定窗口限流已改为 Lua 原子脚本。容量校准草稿仍保存在 `stash@{0}: paused quota reconciliation draft`，下一步在保留该 stash 的前提下恢复容量校准设计，补齐 blob/object 垃圾回收和容量校准任务。

@@ -3,11 +3,11 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from datetime import timedelta
-from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
-import boto3  # type: ignore[import-untyped]
-from botocore.config import Config  # type: ignore[import-untyped]
+from minio import Minio
+from minio.commonconfig import CopySource
+from minio.datatypes import Part
 
 from app.core.config import Settings
 from app.core.security import utc_now
@@ -23,16 +23,14 @@ from app.infrastructure.storage.base import (
 class S3StorageAdapter:
     def __init__(self, *, settings: Settings) -> None:
         self.settings = settings
-        self._client = boto3.client(
-            "s3",
-            endpoint_url=settings.s3_endpoint_url,
-            aws_access_key_id=settings.s3_access_key_id,
-            aws_secret_access_key=settings.s3_secret_access_key,
-            region_name=settings.s3_region,
-            config=Config(
-                signature_version="s3v4",
-                s3={"addressing_style": "path"},
-            ),
+        endpoint_url = urlsplit(settings.s3_endpoint_url)
+        endpoint = endpoint_url.netloc or endpoint_url.path
+        self._client = Minio(
+            endpoint,
+            access_key=settings.s3_access_key_id,
+            secret_key=settings.s3_secret_access_key,
+            region=settings.s3_region,
+            secure=endpoint_url.scheme == "https",
         )
 
     async def create_multipart_upload(
@@ -43,14 +41,13 @@ class S3StorageAdapter:
         content_type: str | None,
     ) -> MultipartUpload:
         await asyncio.to_thread(self._ensure_bucket, bucket)
-        response = await asyncio.to_thread(
-            self._client.create_multipart_upload,
-            Bucket=bucket,
-            Key=storage_key,
-            ContentType=content_type or "application/octet-stream",
+        provider_upload_id = await asyncio.to_thread(
+            self._client._create_multipart_upload,
+            bucket,
+            storage_key,
+            {"Content-Type": content_type or "application/octet-stream"},
         )
-        provider_upload_id = str(response["UploadId"])
-        return MultipartUpload(provider_upload_id=provider_upload_id)
+        return MultipartUpload(provider_upload_id=str(provider_upload_id))
 
     async def presign_upload_part(
         self,
@@ -61,18 +58,16 @@ class S3StorageAdapter:
         part_no: int,
         expires_in_seconds: int,
     ) -> PresignedUploadPart:
-        params = {
-            "Bucket": bucket,
-            "Key": storage_key,
-            "UploadId": provider_upload_id,
-            "PartNumber": part_no,
-        }
         upload_url = await asyncio.to_thread(
-            self._client.generate_presigned_url,
-            "upload_part",
-            Params=params,
-            ExpiresIn=expires_in_seconds,
-            HttpMethod="PUT",
+            self._client.get_presigned_url,
+            "PUT",
+            bucket,
+            storage_key,
+            expires=timedelta(seconds=expires_in_seconds),
+            extra_query_params={
+                "partNumber": str(part_no),
+                "uploadId": provider_upload_id,
+            },
         )
         return PresignedUploadPart(
             part_no=part_no,
@@ -89,10 +84,10 @@ class S3StorageAdapter:
         provider_upload_id: str,
     ) -> None:
         await asyncio.to_thread(
-            self._client.abort_multipart_upload,
-            Bucket=bucket,
-            Key=storage_key,
-            UploadId=provider_upload_id,
+            self._client._abort_multipart_upload,
+            bucket,
+            storage_key,
+            provider_upload_id,
         )
 
     async def complete_multipart_upload(
@@ -103,26 +98,25 @@ class S3StorageAdapter:
         provider_upload_id: str,
         parts: list[CompletedUploadPart],
     ) -> CompletedMultipartUpload:
+        multipart_parts = [
+            Part(part.part_no, part.etag, size=part.size_bytes)
+            for part in sorted(parts, key=lambda item: item.part_no)
+        ]
         response = await asyncio.to_thread(
-            self._client.complete_multipart_upload,
-            Bucket=bucket,
-            Key=storage_key,
-            UploadId=provider_upload_id,
-            MultipartUpload={
-                "Parts": [
-                    {"PartNumber": part.part_no, "ETag": part.etag}
-                    for part in sorted(parts, key=lambda item: item.part_no)
-                ]
-            },
+            self._client._complete_multipart_upload,
+            bucket,
+            storage_key,
+            provider_upload_id,
+            multipart_parts,
         )
         head_response = await asyncio.to_thread(
-            self._client.head_object,
-            Bucket=bucket,
-            Key=storage_key,
+            self._client.stat_object,
+            bucket,
+            storage_key,
         )
         return CompletedMultipartUpload(
-            etag=str(response.get("ETag")) if response.get("ETag") is not None else None,
-            size_bytes=int(head_response["ContentLength"]),
+            etag=str(response.etag) if response.etag is not None else None,
+            size_bytes=int(head_response.size) if head_response.size is not None else None,
         )
 
     async def presign_download(
@@ -140,15 +134,11 @@ class S3StorageAdapter:
             f"filename*=UTF-8''{quote(safe_filename, safe='')}"
         )
         download_url = await asyncio.to_thread(
-            self._client.generate_presigned_url,
-            "get_object",
-            Params={
-                "Bucket": bucket,
-                "Key": storage_key,
-                "ResponseContentDisposition": content_disposition,
-            },
-            ExpiresIn=expires_in_seconds,
-            HttpMethod="GET",
+            self._client.presigned_get_object,
+            bucket,
+            storage_key,
+            expires=timedelta(seconds=expires_in_seconds),
+            response_headers={"response-content-disposition": content_disposition},
         )
         return PresignedDownload(
             download_url=str(download_url),
@@ -176,9 +166,9 @@ class S3StorageAdapter:
     ) -> None:
         await asyncio.to_thread(
             self._client.copy_object,
-            Bucket=bucket,
-            Key=destination_key,
-            CopySource={"Bucket": bucket, "Key": source_key},
+            bucket,
+            destination_key,
+            CopySource(bucket, source_key),
         )
 
     async def delete_object(
@@ -188,30 +178,24 @@ class S3StorageAdapter:
         storage_key: str,
     ) -> None:
         await asyncio.to_thread(
-            self._client.delete_object,
-            Bucket=bucket,
-            Key=storage_key,
+            self._client.remove_object,
+            bucket,
+            storage_key,
         )
 
     def _ensure_bucket(self, bucket: str) -> None:
-        try:
-            self._client.head_bucket(Bucket=bucket)
-        except Exception:
-            kwargs: dict[str, Any] = {"Bucket": bucket}
-            if self.settings.s3_region != "us-east-1":
-                kwargs["CreateBucketConfiguration"] = {
-                    "LocationConstraint": self.settings.s3_region
-                }
-            self._client.create_bucket(**kwargs)
+        if self._client.bucket_exists(bucket):
+            return
+        self._client.make_bucket(bucket, location=self.settings.s3_region)
 
     def _calculate_sha256(self, bucket: str, storage_key: str) -> str:
-        response = self._client.get_object(Bucket=bucket, Key=storage_key)
+        response = self._client.get_object(bucket, storage_key)
         digest = hashlib.sha256()
-        body = response["Body"]
         try:
-            for chunk in body.iter_chunks(chunk_size=1024 * 1024):
+            for chunk in response.stream(1024 * 1024):
                 if chunk:
                     digest.update(chunk)
         finally:
-            body.close()
+            response.close()
+            response.release_conn()
         return digest.hexdigest()

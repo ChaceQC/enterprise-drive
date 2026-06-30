@@ -12,14 +12,13 @@ dependencies = [
   "alembic>=1.13",
   "pydantic-settings>=2.4",
   "redis>=5.0",
-  "boto3>=1.34",
-  "python-jose[cryptography]>=3.3",
   "argon2-cffi>=23.1",
   "celery[redis]>=5.4",
   "opensearch-py>=2.6",
   "opentelemetry-api>=1.26",
   "opentelemetry-sdk>=1.26",
   "opentelemetry-instrumentation-fastapi>=0.47b0",
+  "minio>=7.2.20",
 ]
 
 [dependency-groups]

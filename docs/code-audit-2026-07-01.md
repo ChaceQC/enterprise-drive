@@ -13,7 +13,7 @@
 
 ## 高优先级问题
 
-### 1. 对象存储直接依赖云厂商 SDK
+### 1. 对象存储直接依赖云厂商 SDK（已整改）
 
 涉及位置：
 
@@ -44,6 +44,13 @@
 - 替换时同步修改 `backend/pyproject.toml`、`uv.lock`、`backend/app/infrastructure/storage/s3.py`、`backend/app/api/deps.py`、`backend/app/workers/upload_tasks.py`、README、后端 README、PROJECT_PLAN 和完整技术计划书。
 - 若短期必须保留 boto3，应在对象存储 README 或进度文档中明确标注为临时方案、限定只存在于 `infrastructure` 适配层，并写明替换计划和验收条件。
 
+整改结果：
+
+- 已移除 `boto3/botocore` 直接依赖，改用 MinIO Python SDK 作为默认对象存储适配实现。
+- `S3StorageAdapter` 仍通过 `StorageAdapter` 协议向业务层暴露能力，上传、下载和清理任务不直接依赖具体 SDK。
+- 完整技术计划书、README、后端 README 和执行计划已同步改为 MinIO Python SDK 与开放 S3 兼容客户端路线。
+- 当前 MinIO Python SDK 的 multipart create/complete/abort 仍需要在适配层调用客户端私有方法；该用法已限定在 `infrastructure` 内，并在进度文档中记录后续替换触发条件。
+
 参考依据：
 
 - MinIO Python SDK 文档说明其面向 MinIO 或其他 S3 兼容对象存储，并提供 Python SDK 安装与 API 文档：https://docs.min.io/aistor/developers/sdk/python/
@@ -52,7 +59,7 @@
 
 ## 中优先级问题
 
-### 2. Redis 固定窗口限流为手写实现，且递增与过期非原子
+### 2. Redis 固定窗口限流为手写实现，且递增与过期非原子（已整改）
 
 涉及位置：
 
@@ -79,6 +86,12 @@
 - 优先评估成熟 Python 限流库，例如 `limits`。该库支持多种限流策略和 Redis、Memcached、MongoDB 等后端，并提供同步和异步 API。
 - 如果为了保持依赖体量暂时保留本地实现，应改为 Redis Lua 脚本，将 `INCR` 和条件 `EXPIRE` 放在一次 `EVAL` 中原子执行，并补真实 Redis 测试覆盖 TTL 行为。
 - 保留本地实现时需在 `PROJECT_PROGRESS.md` 中说明：适用范围仅限固定窗口基础限流；一旦新增滑动窗口、令牌桶、多层级规则、分布式策略复用或管理端动态规则，应切换成熟库。
+
+整改结果：
+
+- `RedisFixedWindowRateLimiter` 已改为 Redis Lua 脚本，在一次 `EVAL` 中完成 `INCR`、首次 `EXPIRE` 和 `TTL` 读取。
+- 如果发现已有 key 缺失 TTL，Lua 脚本会重新设置窗口 TTL，避免长期误限流。
+- 当前仍保留固定窗口策略，仅作为上传初始化、分片签名和下载预签名的基础保护；后续若需要滑动窗口、令牌桶、多层级动态规则或管理端配置，应切换成熟限流库。
 
 参考依据：
 
@@ -191,7 +204,7 @@
 
 ## 已符合规则的复用点
 
-- 认证密码哈希使用 `argon2-cffi`，JWT 使用 `python-jose`，没有手写密码哈希或 JWT 编解码。
+- 认证密码哈希使用 `argon2-cffi`；浏览器认证已改为服务端 opaque session、HttpOnly Cookie 和 CSRF 校验，不使用 JWT 编解码。
 - Web 框架、配置、错误响应、参数校验使用 FastAPI、Pydantic 和 Starlette 体系。
 - 数据访问使用 SQLAlchemy 2.x 和 Alembic migration，没有手写 SQL 字符串拼接业务查询。
 - 异步任务使用 Celery，没有自研任务队列。
@@ -200,8 +213,8 @@
 
 ## 后续行动建议
 
-1. 先替换对象存储默认实现，移除 `boto3/botocore` 直接依赖，优先评估 MinIO Python SDK 的 multipart、presign、copy、delete、stat 和流式读取能力。
-2. 同步修正完整技术计划书中的 pyproject 依赖基线和 StorageAdapter 说明，避免旧文档继续把 boto3 作为默认路线。
-3. 将 Redis 限流改为成熟库，或至少改成 Lua 原子脚本并补真实 Redis TTL 测试。
+1. 对象存储默认实现、依赖基线和相关文档已完成整改，后续只需持续观察 MinIO Python SDK multipart 私有方法的兼容性风险。
+2. Redis 固定窗口限流已改为 Lua 原子脚本；后续新增复杂限流策略时再评估成熟限流库。
+3. 浏览器认证已改为 BFF + HttpOnly Cookie Session，后续接入 OIDC/OAuth 2.1 + PKCE 时应继续保持 BFF 会话边界。
 4. 在恢复容量校准前，先确认容量校准基于 PostgreSQL 事实表和现有 SQLAlchemy 能力实现，避免引入额外复杂调度或自研规则引擎。
 5. 为暂留轻量实现补充触发条件记录；后续触发时优先使用成熟库或框架能力。

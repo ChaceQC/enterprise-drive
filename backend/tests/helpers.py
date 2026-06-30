@@ -29,8 +29,7 @@ def settings() -> Settings:
         cors_origins=[],
         database_url="sqlite+aiosqlite:///:memory:",
         admin_password="admin-password",
-        access_token_minutes=15,
-        refresh_token_days=30,
+        session_days=30,
         rate_limit_enabled=False,
     )
 
@@ -99,7 +98,9 @@ async def login(
         json={"tenant_slug": "default", "username": username, "password": password},
     )
     assert response.status_code == 200
-    return str(response.json()["access_token"])
+    csrf_token = response.cookies.get("drive_csrf")
+    assert csrf_token is not None
+    return csrf_token
 
 
 async def create_second_user(
@@ -130,7 +131,7 @@ async def create_space(
 ) -> dict[str, object]:
     response = await client.post(
         "/api/v1/spaces",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={"slug": slug, "name": name, "space_type": "team"},
     )
     assert response.status_code == 201
@@ -147,7 +148,7 @@ async def create_folder(
 ) -> dict[str, object]:
     response = await client.post(
         "/api/v1/files/folders",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={"space_id": space_id, "parent_id": parent_id, "name": name},
     )
     assert response.status_code == 201

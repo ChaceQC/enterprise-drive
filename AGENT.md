@@ -138,7 +138,7 @@ router -> service -> domain/policy -> repository -> db/infrastructure
 
 每个模块必须交付代码、迁移、测试和文档，不允许只交付接口空壳。
 
-- `auth`：用户登录、密码哈希、JWT、refresh token 轮换、管理员 seed。
+- `auth`：用户登录、密码哈希、服务端 opaque session、HttpOnly Cookie、CSRF、管理员 seed。
 - `org`：用户、部门、用户组、成员关系。
 - `space`：空间、空间成员、空间角色、空间配额。
 - `file`：node、file_blob、file_version、文件夹、移动、重命名、回收站、版本。
@@ -211,7 +211,8 @@ uv run mypy app
 - 文件名来自元数据 `node.name`，不能来自对象存储 key。
 - S3 multipart ETag 不是文件 MD5，不能把它当内容完整性哈希。
 - 对象存储适配必须通过 `StorageAdapter` 或等价协议隔离，业务模块不得直接绑定具体 SDK。
-- boto3 是同步 SDK；在 async endpoint 中不得直接阻塞 event loop，应使用线程池包装或评估异步 SDK。
+- 默认对象存储适配使用非云厂商专有的开源 S3 兼容客户端，例如 MinIO Python SDK；业务模块只能依赖 `StorageAdapter` 协议，不得直接 import 具体 SDK。
+- 若对象存储 SDK 缺少公开 multipart API，只允许在 `infrastructure` 适配层集中封装必要的客户端细节，并在审计或进度文档中记录适用范围、风险和替换触发条件。
 
 ## 11. 上传下载规则
 
@@ -248,7 +249,7 @@ uv run mypy app
 
 ## 13. 审计、Outbox 与异步任务
 
-- 所有关键操作必须审计，包括登录、刷新令牌、上传、下载、删除、恢复、分享、授权、权限拒绝、管理操作。
+- 所有关键操作必须审计，包括登录、会话轮换、登出、上传、下载、删除、恢复、分享、授权、权限拒绝、管理操作。
 - 审计日志必须包含 tenant_id、actor、action、resource、result、request_id、ip、user_agent、created_at 等关键字段。
 - 审计日志不得输出密码、Token、Cookie、数据库连接串、对象存储签名 URL、提取码明文和密钥。
 - 业务事务内必须插入 outbox event，再由 dispatcher 投递到 Celery、日志平台或搜索任务。
@@ -286,9 +287,12 @@ uv run mypy app
 
 - 一期支持本地账号，预留 OIDC / LDAP。
 - 密码哈希使用 Argon2id。
-- access token 短期有效，refresh token 长期有效且服务端保存 token family 和轮换状态。
-- 每次刷新都签发新 refresh token，旧 token 立即作废。
-- 检测到旧 refresh token 被重复使用，必须吊销整个 token family。
+- 浏览器端认证采用 BFF + HttpOnly Cookie Session，不向浏览器返回或保存 JWT，不保留 Bearer token 兼容入口。
+- 会话令牌使用服务端生成的 opaque random token，仅以哈希形式保存到 `auth_sessions`，原始令牌只写入 `HttpOnly`、`SameSite` Cookie。
+- 所有 `POST`、`PUT`、`PATCH`、`DELETE` 等有副作用请求必须校验 `X-CSRF-Token`，CSRF token 可放在非 HttpOnly Cookie 中供前端读取并回传。
+- 会话轮换必须签发新的 session token 和 CSRF token，旧 session 立即标记为 replaced；检测到旧 session 被复用时，必须吊销整个 session family。
+- 新项目尚未上线，不为旧 JWT、refresh token、`Authorization: Bearer` 或 `/auth/refresh` 路径做兼容保留；相关命名、迁移、文档和测试应直接改为当前会话模型。
+- 后续接入第三方身份认证时，优先使用 OIDC/OAuth 2.1 + PKCE 和成熟开源库，在 BFF 层完成 code flow 并继续向浏览器签发本项目服务端 session cookie。
 - 管理员重置密码后必须强制用户下次登录修改。
 - 文件名最大 255 字符，禁止 `/`、`\`、控制字符、NUL、路径穿越片段。
 - Unicode 文件名必须 normalize，避免肉眼相同但二进制不同导致绕过重名检查。

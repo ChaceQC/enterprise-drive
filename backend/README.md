@@ -37,11 +37,11 @@ uv run pytest
 - 统一错误响应。
 - `/healthz` 和 `/readyz` 健康检查。
 - `/api/v1/ping` 基础 API 连通性检查。
-- `tenants`、`users`、`refresh_tokens` 基础表和 Alembic 初始迁移。
-- 本地账号登录、JWT access token、refresh token 轮换。
-- 旧 refresh token 复用检测与 token family 吊销。
+- `tenants`、`users`、`auth_sessions` 基础表和 Alembic 初始迁移。
+- 本地账号登录、BFF + HttpOnly Cookie Session、CSRF 校验和会话轮换。
+- 旧 session 复用检测与 session family 吊销。
 - `audit_logs`、`outbox_events` 基础表和迁移。
-- 登录、刷新令牌和 refresh token 复用检测的认证审计事件。
+- 登录、会话轮换、登出和 session 复用检测的认证审计事件。
 - Celery app 基础配置和 `audit.dispatch_outbox` 任务。
 - outbox dispatcher，支持成功发送、失败重试和 dead 状态。
 - `spaces`、`nodes`、`file_blobs`、`file_versions` 基础表和迁移。
@@ -52,7 +52,7 @@ uv run pytest
 - `upload_sessions`、`upload_parts` 基础表和迁移。
 - `quota_accounts`、`quota_ledger` 基础表和迁移。
 - 空间创建时同步初始化默认空间容量账户。
-- S3/MinIO 对象存储适配器，业务层通过 `StorageAdapter` 协议隔离具体 SDK。
+- MinIO Python SDK 对象存储适配器，业务层通过 `StorageAdapter` 协议隔离具体 SDK。
 - 上传初始化、上传状态查询、分片预签名 URL、multipart complete 和 abort 接口。
 - 秒传分支：命中同租户同 hash、同大小 blob 时直接创建文件节点和版本，并增加 blob 引用计数。
 - multipart complete 成功合并后服务端校验 `sha256`，通过后将新对象归档到 `objects/{tenant_id}/{hash_prefix}/{content_hash}`，再写入 `file_blobs`、`nodes`、`file_versions`、`upload_parts` 和上传会话完成结果。
@@ -60,7 +60,7 @@ uv run pytest
 - 删除到回收站保留空间容量占用；彻底删除回收站节点时释放对应文件版本容量，并写入 `file_purged` 负向容量流水。
 - 上传初始化、秒传、complete、abort 和 hash 不匹配等失败审计事件。
 - `upload.expire_sessions` 维护任务，按租户清理过期上传会话并写入 `upload.expired` 审计事件。
-- Redis 固定窗口基础限流，覆盖上传初始化、分片签名和下载预签名。
+- Redis Lua 原子固定窗口基础限流，覆盖上传初始化、分片签名和下载预签名。
 - 文件下载预签名 URL 接口，按当前文件版本生成短期私有对象下载地址。
 - 下载成功和拒绝均写入 `file.downloaded` 审计事件与 outbox event。
 - 管理员 seed 脚本。
@@ -68,8 +68,11 @@ uv run pytest
 ## 认证接口
 
 - `POST /api/v1/auth/login`
-- `POST /api/v1/auth/refresh`
+- `POST /api/v1/auth/session/rotate`
+- `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
+
+登录成功后，后端写入 `drive_session` HttpOnly Cookie 和可由前端读取的 `drive_csrf` Cookie；所有 `POST`、`PUT`、`PATCH`、`DELETE` 请求都需要把 `drive_csrf` 的值通过 `X-CSRF-Token` 请求头回传。接口不返回 JWT，也不支持 `Authorization: Bearer` 或旧 `/auth/refresh` 兼容路径。
 
 默认管理员由 `.env` 中的 `DRIVE_ADMIN_*` 配置控制。首次本地启动后运行 `uv run python -m scripts.seed_admin` 创建管理员，并在首次登录后尽快修改默认密码。
 

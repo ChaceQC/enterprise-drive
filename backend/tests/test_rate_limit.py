@@ -45,7 +45,7 @@ async def complete_small_file(
 ) -> dict[str, str]:
     init_response = await client.post(
         "/api/v1/uploads/init",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={
             "space_id": space_id,
             "parent_id": parent_id,
@@ -59,7 +59,7 @@ async def complete_small_file(
     assert init_response.status_code == 201
     complete_response = await client.post(
         f"/api/v1/uploads/{init_response.json()['session_id']}/complete",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={"parts": [{"part_no": 1, "etag": "etag-1", "size_bytes": 1024}]},
     )
     assert complete_response.status_code == 200
@@ -81,7 +81,7 @@ async def test_upload_init_rate_limit_blocks_second_request(
 
     first_response = await client.post(
         "/api/v1/uploads/init",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={
             "space_id": space["id"],
             "parent_id": space["root_node_id"],
@@ -93,7 +93,7 @@ async def test_upload_init_rate_limit_blocks_second_request(
     )
     second_response = await client.post(
         "/api/v1/uploads/init",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={
             "space_id": space["id"],
             "parent_id": space["root_node_id"],
@@ -130,7 +130,7 @@ async def test_upload_part_presign_rate_limit_blocks_second_request(
     space = await create_space(client, token, slug="rate-part-presign-space")
     init_response = await client.post(
         "/api/v1/uploads/init",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={
             "space_id": space["id"],
             "parent_id": space["root_node_id"],
@@ -144,11 +144,11 @@ async def test_upload_part_presign_rate_limit_blocks_second_request(
 
     first_response = await client.post(
         f"/api/v1/uploads/{session_id}/parts/1/presign",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
     )
     second_response = await client.post(
         f"/api/v1/uploads/{session_id}/parts/1/presign",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
     )
 
     assert first_response.status_code == 200
@@ -181,7 +181,7 @@ async def test_upload_part_presign_rate_limit_is_scoped_by_session(
     for index in range(2):
         init_response = await client.post(
             "/api/v1/uploads/init",
-            headers={"Authorization": f"Bearer {token}"},
+            headers={"X-CSRF-Token": token},
             json={
                 "space_id": space["id"],
                 "parent_id": space["root_node_id"],
@@ -197,7 +197,7 @@ async def test_upload_part_presign_rate_limit_is_scoped_by_session(
     responses = [
         await client.post(
             f"/api/v1/uploads/{session_id}/parts/1/presign",
-            headers={"Authorization": f"Bearer {token}"},
+            headers={"X-CSRF-Token": token},
         )
         for session_id in session_ids
     ]
@@ -228,11 +228,11 @@ async def test_download_presign_rate_limit_blocks_second_request(
 
     first_response = await client.get(
         f"/api/v1/files/{completed['node_id']}/download",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
     )
     second_response = await client.get(
         f"/api/v1/files/{completed['node_id']}/download",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
     )
 
     assert first_response.status_code == 200

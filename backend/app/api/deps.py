@@ -2,14 +2,12 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Annotated
-from uuid import UUID
 
-from fastapi import Depends, Header, Request
+from fastapi import Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ApiError
 from app.core.config import Settings, get_settings
-from app.core.security import decode_access_token
 from app.db.session import get_db_session
 from app.infrastructure.rate_limit.base import RateLimiter, RateLimitRule
 from app.infrastructure.rate_limit.redis import RedisFixedWindowRateLimiter
@@ -18,6 +16,7 @@ from app.infrastructure.storage.s3 import S3StorageAdapter
 from app.modules.audit.schemas import AuditContext
 from app.modules.auth.models import User
 from app.modules.auth.repository import AuthRepository
+from app.modules.auth.service import AuthService
 
 
 @lru_cache
@@ -26,25 +25,30 @@ def _get_redis_rate_limiter(redis_url: str) -> RedisFixedWindowRateLimiter:
 
 
 async def get_current_user(
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_db_session)],
     settings: Annotated[Settings, Depends(get_settings)],
-    authorization: Annotated[str | None, Header(alias="Authorization")] = None,
 ) -> User:
-    if authorization is None or not authorization.lower().startswith("bearer "):
+    session_token = request.cookies.get(settings.session_cookie_name)
+    if session_token is None:
         raise ApiError("AUTH_REQUIRED", "请先登录", status_code=401)
 
-    token = authorization.split(" ", 1)[1].strip()
-    try:
-        payload = decode_access_token(settings, token)
-        tenant_id = UUID(str(payload["tenant_id"]))
-        user_id = UUID(str(payload["sub"]))
-    except (KeyError, ValueError) as exc:
-        raise ApiError("TOKEN_INVALID", "访问令牌无效", status_code=401) from exc
+    return await AuthService(
+        repository=AuthRepository(session),
+        settings=settings,
+    ).authenticate_session(
+        session_token=session_token,
+        csrf_token=_csrf_token_from_header(request=request, settings=settings),
+        require_csrf=request.method.upper() in _CSRF_METHODS,
+    )
 
-    user = await AuthRepository(session).get_user_by_id(tenant_id=tenant_id, user_id=user_id)
-    if user is None or not user.is_active:
-        raise ApiError("AUTH_REQUIRED", "认证已失效", status_code=401)
-    return user
+
+_CSRF_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _csrf_token_from_header(*, request: Request, settings: Settings) -> str | None:
+    token = request.headers.get(settings.csrf_header_name)
+    return token.strip() if token else None
 
 
 def build_audit_context(request: Request) -> AuditContext:

@@ -31,15 +31,22 @@
 - 审计确认高优先级问题：当前对象存储默认实现仍直接依赖 `boto3/botocore`，虽然已封装在 `StorageAdapter` 适配层，但依赖基线和默认实例化与最新 AGENT 规则冲突，需要优先替换为开放协议或非云厂商专有的开源 S3 兼容客户端。
 - 审计确认中优先级问题：当前 Redis 固定窗口限流为轻量自研实现，`INCR` 与 `EXPIRE` 分离执行，异常时可能留下无 TTL key；后续应使用成熟限流库或 Redis Lua 原子脚本。
 - 审计确认分页游标、文件名校验、上传 hash 规范化、outbox 退避和文件树遍历属于可暂时保留的轻量实现，并已记录适用范围、已知限制和替换触发条件。
+- 按“项目尚未上线，不保留旧兼容”的要求，将浏览器认证改为 BFF + HttpOnly Cookie Session：移除 JWT 生成与校验、`python-jose` 依赖、`Authorization: Bearer` 入口和 `/auth/refresh` 路径。
+- 认证存储从 refresh token 语义改为 `auth_sessions`：服务端只保存 opaque session token 的哈希和 CSRF token 哈希，登录写入 `drive_session` HttpOnly Cookie 和 `drive_csrf` 可读 Cookie。
+- 新增 `POST /api/v1/auth/session/rotate` 和 `POST /api/v1/auth/logout`，会话轮换会签发新的 session token 与 CSRF token，旧 session 被复用时吊销整个 session family。
+- `get_current_user` 已统一从 session cookie 认证；`POST`、`PUT`、`PATCH`、`DELETE` 等有副作用请求必须校验 `X-CSRF-Token`，并补充业务接口空间创建缺少 CSRF 时返回 `CSRF_TOKEN_INVALID` 的测试。
+- 对象存储默认实现已移除 `boto3/botocore`，改用非云厂商专有的 MinIO Python SDK；业务层仍只依赖 `StorageAdapter` 协议。
+- Redis 固定窗口限流已改为 Lua 脚本，在一次 `EVAL` 内完成 `INCR`、条件 `EXPIRE` 和 `TTL` 读取，避免留下无 TTL key。
+- 同步更新 `AGENT.md`、README、后端 README、执行计划、完整技术计划书和代码审计记录中的认证、对象存储与限流说明。
 
 ### 进行中
 
-- 容量校准实现仍暂停在 `stash@{0}`：`paused quota reconciliation draft`；先处理审计发现的对象存储 SDK 和限流实现问题。
+- 容量校准实现仍暂停在 `stash@{0}`：`paused quota reconciliation draft`；本轮审计整改不应用、不覆盖该 stash，后续恢复容量校准时再单独处理。
 
 ### 阻塞与风险
 
-- 对象存储默认实现直接依赖 `boto3/botocore`，与最新“不默认引入或直接依赖云厂商专有 SDK”的规则冲突；当前仅因已封装在 `infrastructure` 适配层而具备替换边界，不能继续扩展为长期默认方案。
-- Redis 固定窗口限流中 `INCR` 与 `EXPIRE` 非原子，异常时可能留下无 TTL 的限流 key；在限流覆盖面继续扩大前需要改为成熟库或 Lua 原子脚本。
+- MinIO Python SDK 的 multipart create/complete/abort 在当前适配中需要调用客户端私有方法，已限定在 `infrastructure` 适配层；若后续出现兼容性、升级稳定性或批量吞吐问题，应评估更完整的开源 S3 兼容客户端或标准 HTTP/SigV4 实现。
+- 当前 Redis 限流仍是固定窗口策略，适用于上传初始化、分片签名和下载预签名的基础保护；若后续需要滑动窗口、令牌桶、多层级动态规则或管理端配置，应切换成熟限流库。
 - 当前空间、文件树、上传和下载接口仍暂以“当前租户 + 空间拥有者”作为访问边界，空间成员、目录 ACL、继承权限和拒绝优先策略尚未接入；该边界已在 README 和后端 README 标为临时实现。
 - 过期上传清理已覆盖数据库会话终态、multipart abort 和 `uploads/...` 临时对象删除；对象复制成功但数据库最终化失败后的 `objects/...` 孤儿对象扫描仍需后续生命周期任务兜底。
 - 当前容量实现已覆盖空间维度的文件版本创建和彻底删除释放；历史空间回填、用户/租户维度配额、定期校准任务和 blob/object 垃圾回收仍需后续补齐。
@@ -48,7 +55,7 @@
 
 ### 下一步
 
-- 替换对象存储默认实现：先评估 MinIO Python SDK 或其他非云厂商专有的开源 S3 兼容客户端，移除 `boto3/botocore` 直接依赖，并同步修正 `backend/pyproject.toml`、`uv.lock`、对象存储适配器、README、后端 README、PROJECT_PLAN 和完整技术计划书。
+- 完成本轮审计整改的全量验证、提交和推送后，在保留 `stash@{0}: paused quota reconciliation draft` 的前提下恢复容量校准设计，补齐 blob/object 垃圾回收和容量校准任务。
 
 ### 涉及文件
 
@@ -79,9 +86,17 @@
 - `backend/app/modules/quota/repository.py`
 - `backend/app/modules/quota/service.py`
 - `backend/app/modules/auth/repository.py`
+- `backend/app/modules/auth/router.py`
+- `backend/app/modules/auth/service.py`
+- `backend/app/modules/auth/models.py`
+- `backend/app/modules/auth/schemas.py`
+- `backend/app/core/security.py`
+- `backend/migrations/versions/20260630_0001_auth_base.py`
 - `backend/tests/test_upload_cleanup.py`
 - `backend/tests/test_rate_limit.py`
 - `backend/tests/test_file_operations.py`
+- `backend/tests/test_auth.py`
+- `backend/tests/test_space_file.py`
 - `backend/tests/helpers.py`
 - `README.md`
 - `backend/README.md`
@@ -126,7 +141,18 @@
 - 已从 `backend` 目录启动 Docker Compose `redis` 服务，使用真实 Redis 验证 `RedisFixedWindowRateLimiter`：同一 key 在 `limit=1` 窗口内第一次允许、第二次拒绝且 `retry_after_seconds > 0`。
 - 已从 `backend` 目录启动 Docker Compose `postgres`、`redis`、`minio` 服务，运行真实 PostgreSQL migration 和管理员 seed 后，通过 ASGI + 真实 Redis + 真实 MinIO 验证上传初始化限流：环境变量设置 `DRIVE_UPLOAD_INIT_RATE_LIMIT_COUNT=1` 后，同一用户第一次 `POST /api/v1/uploads/init` 返回 201，第二次返回 429，错误码为 `RATE_LIMITED`，`details.action=upload.init`。
 - 验证完成后已关闭本次启动的 Docker Compose 服务，并确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 不再监听。
-- 本次审计为文档改动，未启动 API、Worker 或 Docker Compose 服务。
+- 本轮认证、对象存储和限流审计整改未启动 API、Worker 或 Docker Compose 服务。
+- 已运行 `uv run ruff format .`，结果为 94 files left unchanged。
+- 已运行 `uv run ruff format --check .`，结果为 94 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 76 source files。
+- 已运行 `uv run pytest`，结果为 49 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认初始迁移已生成 `auth_sessions` 表且当前迁移可生成 PostgreSQL SQL。
+- 已运行 `git diff --check`，未发现空白错误。
+- 将认证测试命名从 refresh 语义收束为 session rotate 语义后，已运行 `uv run pytest tests/test_auth.py tests/test_space_file.py -q`，结果为 13 passed。
+- 已再次运行 `uv run ruff check .`，结果为 All checks passed。
+- 已再次运行 `uv run pytest`，结果为 49 passed。
+- 已再次运行 `git diff --check`，未发现空白错误。
 
 ## 2026-06-30
 

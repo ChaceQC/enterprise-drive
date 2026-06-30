@@ -50,7 +50,7 @@ async def test_init_multipart_upload_status_and_presign(
 
     init_response = await client.post(
         "/api/v1/uploads/init",
-        headers={"Authorization": f"Bearer {token}", "X-Request-ID": "req_upload_init"},
+        headers={"X-CSRF-Token": token, "X-Request-ID": "req_upload_init"},
         json={
             "space_id": space["id"],
             "parent_id": space["root_node_id"],
@@ -70,15 +70,15 @@ async def test_init_multipart_upload_status_and_presign(
 
     status_response = await client.get(
         f"/api/v1/uploads/{init_payload['session_id']}",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
     )
     presign_response = await client.post(
         f"/api/v1/uploads/{init_payload['session_id']}/parts/1/presign",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
     )
     status_after_presign = await client.get(
         f"/api/v1/uploads/{init_payload['session_id']}",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
     )
 
     assert status_response.status_code == 200
@@ -135,7 +135,7 @@ async def test_init_upload_uses_instant_upload_when_blob_exists(
 
     response = await client.post(
         "/api/v1/uploads/init",
-        headers={"Authorization": f"Bearer {token}", "X-Request-ID": "req_upload_instant"},
+        headers={"X-CSRF-Token": token, "X-Request-ID": "req_upload_instant"},
         json={
             "space_id": space["id"],
             "parent_id": space["root_node_id"],
@@ -208,7 +208,7 @@ async def test_init_upload_rejects_name_conflict_and_invalid_part(
 
     conflict_response = await client.post(
         "/api/v1/uploads/init",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={
             "space_id": space["id"],
             "parent_id": space["root_node_id"],
@@ -220,7 +220,7 @@ async def test_init_upload_rejects_name_conflict_and_invalid_part(
     )
     init_response = await client.post(
         "/api/v1/uploads/init",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={
             "space_id": space["id"],
             "parent_id": space["root_node_id"],
@@ -232,7 +232,7 @@ async def test_init_upload_rejects_name_conflict_and_invalid_part(
     )
     invalid_part_response = await client.post(
         f"/api/v1/uploads/{init_response.json()['session_id']}/parts/2/presign",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
     )
 
     assert conflict_response.status_code == 409
@@ -256,7 +256,7 @@ async def test_complete_multipart_upload_creates_file_version_and_is_idempotent(
     content_hash = zero_bytes_sha256(size_bytes)
     init_response = await client.post(
         "/api/v1/uploads/init",
-        headers={"Authorization": f"Bearer {token}", "X-Request-ID": "req_upload_start"},
+        headers={"X-CSRF-Token": token, "X-Request-ID": "req_upload_start"},
         json={
             "space_id": space["id"],
             "parent_id": space["root_node_id"],
@@ -281,17 +281,17 @@ async def test_complete_multipart_upload_creates_file_version_and_is_idempotent(
 
     complete_response = await client.post(
         f"/api/v1/uploads/{session_id}/complete",
-        headers={"Authorization": f"Bearer {token}", "X-Request-ID": "req_upload_complete"},
+        headers={"X-CSRF-Token": token, "X-Request-ID": "req_upload_complete"},
         json=complete_payload,
     )
     duplicate_response = await client.post(
         f"/api/v1/uploads/{session_id}/complete",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json=complete_payload,
     )
     status_response = await client.get(
         f"/api/v1/uploads/{session_id}",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
     )
 
     assert complete_response.status_code == 200
@@ -369,7 +369,7 @@ async def test_complete_upload_rejects_hash_mismatch_without_creating_version(
     size_bytes = 1024
     init_response = await client.post(
         "/api/v1/uploads/init",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={
             "space_id": space["id"],
             "parent_id": space["root_node_id"],
@@ -382,7 +382,7 @@ async def test_complete_upload_rejects_hash_mismatch_without_creating_version(
 
     response = await client.post(
         f"/api/v1/uploads/{init_response.json()['session_id']}/complete",
-        headers={"Authorization": f"Bearer {token}", "X-Request-ID": "req_upload_hash_mismatch"},
+        headers={"X-CSRF-Token": token, "X-Request-ID": "req_upload_hash_mismatch"},
         json={"parts": [{"part_no": 1, "etag": "etag-1", "size_bytes": size_bytes}]},
     )
 
@@ -445,7 +445,7 @@ async def test_complete_upload_reuses_existing_blob_without_copying_final_object
 
     init_response = await client.post(
         "/api/v1/uploads/init",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={
             "space_id": space["id"],
             "parent_id": space["root_node_id"],
@@ -478,7 +478,7 @@ async def test_complete_upload_reuses_existing_blob_without_copying_final_object
 
     complete_response = await client.post(
         f"/api/v1/uploads/{session_id}/complete",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={"parts": [{"part_no": 1, "etag": "etag-1", "size_bytes": size_bytes}]},
     )
 
@@ -510,7 +510,7 @@ async def test_init_upload_rejects_unsupported_hash_algo(
 
     response = await client.post(
         "/api/v1/uploads/init",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={
             "space_id": space["id"],
             "parent_id": space["root_node_id"],
@@ -543,7 +543,7 @@ async def test_init_upload_rejects_when_space_quota_exceeded(
 
     response = await client.post(
         "/api/v1/uploads/init",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={
             "space_id": space["id"],
             "parent_id": space["root_node_id"],
@@ -579,7 +579,7 @@ async def test_complete_upload_rejects_missing_part(
     space = await create_space(client, token, slug="missing-part-space")
     init_response = await client.post(
         "/api/v1/uploads/init",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={
             "space_id": space["id"],
             "parent_id": space["root_node_id"],
@@ -592,7 +592,7 @@ async def test_complete_upload_rejects_missing_part(
 
     response = await client.post(
         f"/api/v1/uploads/{init_response.json()['session_id']}/complete",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={
             "parts": [
                 {"part_no": 1, "etag": "etag-1", "size_bytes": settings.upload_part_size_bytes}
@@ -615,7 +615,7 @@ async def test_abort_upload_marks_session_terminal(
     space = await create_space(client, token, slug="abort-upload-space")
     init_response = await client.post(
         "/api/v1/uploads/init",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
         json={
             "space_id": space["id"],
             "parent_id": space["root_node_id"],
@@ -629,15 +629,15 @@ async def test_abort_upload_marks_session_terminal(
 
     abort_response = await client.post(
         f"/api/v1/uploads/{session_id}/abort",
-        headers={"Authorization": f"Bearer {token}", "X-Request-ID": "req_upload_abort"},
+        headers={"X-CSRF-Token": token, "X-Request-ID": "req_upload_abort"},
     )
     duplicate_abort_response = await client.post(
         f"/api/v1/uploads/{session_id}/abort",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
     )
     presign_response = await client.post(
         f"/api/v1/uploads/{session_id}/parts/1/presign",
-        headers={"Authorization": f"Bearer {token}"},
+        headers={"X-CSRF-Token": token},
     )
 
     assert abort_response.status_code == 200

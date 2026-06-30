@@ -72,11 +72,11 @@ class User(Base):
     )
 
 
-class RefreshToken(Base):
-    __tablename__ = "refresh_tokens"
+class AuthSession(Base):
+    __tablename__ = "auth_sessions"
     __table_args__ = (
-        Index("idx_refresh_tokens_family", "tenant_id", "family_id"),
-        Index("uq_refresh_tokens_hash", "token_hash", unique=True),
+        Index("idx_auth_sessions_family", "tenant_id", "family_id"),
+        Index("uq_auth_sessions_token_hash", "token_hash", unique=True),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
@@ -94,6 +94,7 @@ class RefreshToken(Base):
     )
     family_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    csrf_token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     replaced_by_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
