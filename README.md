@@ -28,7 +28,7 @@
 
 ## 当前状态
 
-当前仓库处于 Sprint 1 工程底座阶段，已建立 `backend` 后端工程、uv 依赖锁定、FastAPI 应用入口、配置加载、结构化日志、`X-Request-ID` 中间件、统一错误响应、健康检查、本地依赖 Compose 和后端 CI。认证基础能力已落地：租户、用户、refresh token 表，管理员 seed，本地账号登录、访问令牌和刷新令牌轮换。基础审计和 outbox 已接入认证动作。
+当前仓库处于 Sprint 1 工程底座阶段，已建立 `backend` 后端工程、uv 依赖锁定、FastAPI 应用入口、配置加载、结构化日志、`X-Request-ID` 中间件、统一错误响应、健康检查、本地依赖 Compose 和后端 CI。认证基础能力已落地：租户、用户、refresh token 表，管理员 seed，本地账号登录、访问令牌和刷新令牌轮换。基础审计、outbox 和 Celery audit 队列 dispatcher 已接入。
 
 本地后端验证：
 

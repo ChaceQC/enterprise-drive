@@ -12,6 +12,7 @@ docker compose up -d postgres redis minio opensearch
 uv run alembic upgrade head
 uv run python -m scripts.seed_admin
 uv run fastapi dev app/main.py --host 127.0.0.1 --port 18080
+uv run celery -A app.infrastructure.queue.celery_app worker -Q audit -l info
 ```
 
 生产环境的 Nginx 使用宿主机安装和管理，不放入 Docker Compose；本目录的 Compose 只用于本地依赖服务。
@@ -39,6 +40,8 @@ uv run pytest
 - 旧 refresh token 复用检测与 token family 吊销。
 - `audit_logs`、`outbox_events` 基础表和迁移。
 - 登录、刷新令牌和 refresh token 复用检测的认证审计事件。
+- Celery app 基础配置和 `audit.dispatch_outbox` 任务。
+- outbox dispatcher，支持成功发送、失败重试和 dead 状态。
 - 管理员 seed 脚本。
 
 ## 认证接口

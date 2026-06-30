@@ -22,10 +22,13 @@
 - 实现审计写入服务，事务内同步写入 audit log 和 outbox event。
 - 在登录成功、登录失败、刷新令牌成功、刷新令牌过期、用户失效和 refresh token 复用检测中写入认证审计事件。
 - 补充认证审计和 outbox 测试。
+- 补充 Celery app 基础配置和 `audit.dispatch_outbox` 任务。
+- 实现 outbox dispatcher，支持 pending/failed 到期事件领取、发送成功标记、失败指数退避、超过最大重试进入 dead。
+- 补充 outbox dispatcher 状态流转测试。
 
 ### 进行中
 
-- Sprint 1 工程底座的下一阶段：outbox dispatcher 和 Celery 基础队列。
+- Sprint 2 空间和文件树的前置模型设计。
 
 ### 阻塞与风险
 
@@ -33,7 +36,7 @@
 
 ### 下一步
 
-- 补充 outbox dispatcher、Celery app 基础配置和 audit 队列投递测试。
+- 补充 `spaces`、`nodes`、`file_blobs`、`file_versions` 基础模型和迁移，并实现空间创建与文件列表的最小 API 骨架。
 
 ### 验证
 
@@ -44,7 +47,7 @@
 - 已运行 `uv run ruff format --check .`。
 - 已运行 `uv run ruff check .`。
 - 已运行 `uv run mypy app`。
-- 已运行 `uv run pytest`，结果为 10 passed。
+- 已运行 `uv run pytest`，结果为 14 passed。
 - 已运行 `uv run alembic upgrade head --sql`，确认认证、审计和 outbox 迁移可生成 PostgreSQL SQL。
 - 已启动 Docker Desktop，并运行 `docker compose up -d postgres redis minio opensearch`。
 - 已运行 `uv run alembic upgrade head`，真实 PostgreSQL migration 通过。

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import utc_now
 from app.modules.audit.models import AuditLog, OutboxEvent
 from app.modules.audit.schemas import AuditContext, AuditEvent
 
@@ -50,3 +53,66 @@ class AuditRepository:
         self.session.add(outbox_event)
         await self.session.flush()
         return outbox_event
+
+    async def claim_due_outbox_events(
+        self,
+        *,
+        limit: int,
+        now: datetime | None = None,
+    ) -> list[OutboxEvent]:
+        claimed_at = now or utc_now()
+        result = await self.session.execute(
+            select(OutboxEvent)
+            .where(
+                OutboxEvent.status.in_(["pending", "failed"]),
+                OutboxEvent.next_retry_at <= claimed_at,
+            )
+            .order_by(OutboxEvent.created_at)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        events = list(result.scalars().all())
+        for event in events:
+            event.status = "processing"
+            event.updated_at = claimed_at
+        await self.session.flush()
+        return events
+
+    async def mark_outbox_sent(
+        self,
+        *,
+        event: OutboxEvent,
+        sent_at: datetime | None = None,
+    ) -> None:
+        now = sent_at or utc_now()
+        event.status = "sent"
+        event.updated_at = now
+        await self.session.flush()
+
+    async def mark_outbox_failed(
+        self,
+        *,
+        event: OutboxEvent,
+        next_retry_at: datetime,
+        max_retries: int,
+        failed_at: datetime | None = None,
+    ) -> None:
+        now = failed_at or utc_now()
+        event.retry_count += 1
+        event.status = "dead" if event.retry_count >= max_retries else "failed"
+        event.next_retry_at = next_retry_at
+        event.updated_at = now
+        await self.session.flush()
+
+    async def reset_stale_processing(
+        self,
+        *,
+        before: datetime,
+    ) -> int:
+        result = await self.session.execute(
+            update(OutboxEvent)
+            .where(OutboxEvent.status == "processing", OutboxEvent.updated_at < before)
+            .values(status="failed", next_retry_at=utc_now(), updated_at=utc_now())
+        )
+        rowcount = getattr(result, "rowcount", 0)
+        return int(rowcount or 0)

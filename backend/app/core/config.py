@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     s3_endpoint_url: str = "http://127.0.0.1:19000"
     s3_bucket: str = "enterprise-drive-local"
     opensearch_url: str = "http://127.0.0.1:19200"
+    celery_broker_url: str = "redis://127.0.0.1:16379/1"
+    celery_result_backend: str = "redis://127.0.0.1:16379/2"
+    outbox_batch_size: int = 100
+    outbox_max_retries: int = 8
 
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 15

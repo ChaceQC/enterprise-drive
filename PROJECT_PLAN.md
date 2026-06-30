@@ -77,4 +77,4 @@
 
 ## 5. 当前下一步
 
-继续推进 Sprint 1：补充 outbox dispatcher、Celery 基础队列配置，以及认证审计事件的后台投递测试。
+继续推进 Sprint 2：补充 space、node、file_blob、file_version 基础模型和迁移，先实现空间与文件树的元数据骨架。
