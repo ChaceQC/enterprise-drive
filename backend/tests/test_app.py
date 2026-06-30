@@ -1,28 +1,31 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 
 import pytest
-from fastapi.testclient import TestClient
+import pytest_asyncio
+from httpx import ASGITransport, AsyncClient
 
 from app.core.config import Settings
 from app.main import create_app
 
 
-@pytest.fixture
-def client() -> Iterator[TestClient]:
+@pytest_asyncio.fixture
+async def client() -> AsyncIterator[AsyncClient]:
     settings = Settings(
         environment="test",
         cors_origins=[],
         trusted_hosts=["testserver"],
         secret_key="test-secret",
     )
-    with TestClient(create_app(settings)) as test_client:
+    transport = ASGITransport(app=create_app(settings))
+    async with AsyncClient(transport=transport, base_url="http://testserver") as test_client:
         yield test_client
 
 
-def test_healthz(client: TestClient) -> None:
-    response = client.get("/healthz")
+@pytest.mark.asyncio
+async def test_healthz(client: AsyncClient) -> None:
+    response = await client.get("/healthz")
 
     assert response.status_code == 200
     assert response.json() == {
@@ -33,23 +36,26 @@ def test_healthz(client: TestClient) -> None:
     }
 
 
-def test_readyz(client: TestClient) -> None:
-    response = client.get("/readyz")
+@pytest.mark.asyncio
+async def test_readyz(client: AsyncClient) -> None:
+    response = await client.get("/readyz")
 
     assert response.status_code == 200
     assert response.json()["status"] == "ready"
 
 
-def test_request_id_is_reused(client: TestClient) -> None:
-    response = client.get("/api/v1/ping", headers={"X-Request-ID": "req_test"})
+@pytest.mark.asyncio
+async def test_request_id_is_reused(client: AsyncClient) -> None:
+    response = await client.get("/api/v1/ping", headers={"X-Request-ID": "req_test"})
 
     assert response.status_code == 200
     assert response.headers["X-Request-ID"] == "req_test"
     assert response.json() == {"message": "pong", "request_id": "req_test"}
 
 
-def test_not_found_uses_unified_error_response(client: TestClient) -> None:
-    response = client.get("/missing", headers={"X-Request-ID": "req_missing"})
+@pytest.mark.asyncio
+async def test_not_found_uses_unified_error_response(client: AsyncClient) -> None:
+    response = await client.get("/missing", headers={"X-Request-ID": "req_missing"})
 
     assert response.status_code == 404
     assert response.headers["X-Request-ID"] == "req_missing"

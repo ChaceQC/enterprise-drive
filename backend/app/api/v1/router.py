@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
+from app.modules.auth.router import router as auth_router
+
 router = APIRouter()
+router.include_router(auth_router, prefix="/auth", tags=["auth"])
 
 
 @router.get("/ping", tags=["system"])

@@ -12,18 +12,24 @@
 - 建立 `backend` 后端工程底座：uv 项目、FastAPI 应用入口、配置加载、结构化日志、`X-Request-ID` 中间件、统一错误响应、健康检查和 `/api/v1/ping`。
 - 补充 Alembic 基础目录、SQLAlchemy 基类、本地依赖 Docker Compose、后端 README 和 GitHub Actions 后端 CI。
 - 根据协作约束补充“缺少必要工具或依赖时自行安装或补齐”的规则。
+- 补充 `tenants`、`users`、`refresh_tokens` SQLAlchemy 模型和 Alembic 初始迁移。
+- 实现本地账号登录、JWT access token、refresh token 服务端哈希存储和 refresh token family 轮换。
+- 实现旧 refresh token 复用检测，复用时吊销整个 token family。
+- 实现 `/api/v1/auth/login`、`/api/v1/auth/refresh`、`/api/v1/auth/me`。
+- 补充管理员 seed 脚本 `scripts/seed_admin.py`。
+- 补充认证服务和认证 API 测试。
 
 ### 进行中
 
-- Sprint 1 工程底座的下一阶段：数据库基础模型、认证和管理员 seed。
+- Sprint 1 工程底座的下一阶段：基础审计日志、outbox 和认证审计写入。
 
 ### 阻塞与风险
 
-- `pytest` 存在 FastAPI / Starlette TestClient 上游弃用警告，当前不影响测试通过；后续可关注 httpx2 兼容路径。
+- 暂无。
 
 ### 下一步
 
-- 补充 SQLAlchemy 基础模型、Alembic 初始迁移、本地账号认证、JWT refresh token 轮换和管理员 seed。
+- 补充 `audit_logs`、`outbox_events` 基础模型和迁移，并在登录、刷新令牌、复用检测等认证动作中写入审计事件。
 
 ### 验证
 
@@ -34,4 +40,11 @@
 - 已运行 `uv run ruff format --check .`。
 - 已运行 `uv run ruff check .`。
 - 已运行 `uv run mypy app`。
-- 已运行 `uv run pytest`，结果为 4 passed，存在 1 条上游弃用警告。
+- 已运行 `uv run pytest`，结果为 8 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认初始迁移可生成 PostgreSQL SQL。
+- 已启动 Docker Desktop，并运行 `docker compose up -d postgres redis minio opensearch`。
+- 已运行 `uv run alembic upgrade head`，真实 PostgreSQL migration 通过。
+- 已运行 `uv run python -m scripts.seed_admin`，管理员 seed 通过。
+- 已启动本地 API `uv run uvicorn app.main:app --host 127.0.0.1 --port 18080`。
+- 已验证 `/healthz`、`/readyz`、`/api/v1/auth/login`、`/api/v1/auth/me`、`/api/v1/auth/refresh`。
+- 验证完成后已关闭本次启动的 API 和 Docker Compose 服务，并确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 不再监听。

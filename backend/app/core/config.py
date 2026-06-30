@@ -41,6 +41,16 @@ class Settings(BaseSettings):
     s3_bucket: str = "enterprise-drive-local"
     opensearch_url: str = "http://127.0.0.1:19200"
 
+    jwt_algorithm: str = "HS256"
+    access_token_minutes: int = 15
+    refresh_token_days: int = 30
+
+    admin_tenant_slug: str = "default"
+    admin_tenant_name: str = "默认企业"
+    admin_username: str = "admin"
+    admin_email: str = "admin@example.com"
+    admin_password: str = "change-me-before-first-run"
+
 
 @lru_cache
 def get_settings() -> Settings:

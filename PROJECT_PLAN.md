@@ -77,4 +77,4 @@
 
 ## 5. 当前下一步
 
-继续推进 Sprint 1：补充 SQLAlchemy 基础模型、Alembic 初始迁移、本地账号认证、JWT refresh token 轮换和管理员 seed。
+继续推进 Sprint 1：补充基础审计日志、outbox 事件表、认证审计写入和管理员 seed 的部署说明。
