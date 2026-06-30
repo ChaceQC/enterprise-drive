@@ -17,6 +17,12 @@ class AuthRepository:
         result = await self.session.execute(select(Tenant).where(Tenant.slug == slug))
         return result.scalar_one_or_none()
 
+    async def list_tenant_ids(self) -> list[UUID]:
+        result = await self.session.execute(
+            select(Tenant.id).order_by(Tenant.created_at, Tenant.id)
+        )
+        return list(result.scalars().all())
+
     async def create_tenant(self, *, slug: str, name: str) -> Tenant:
         tenant = Tenant(slug=slug, name=name)
         self.session.add(tenant)

@@ -137,9 +137,11 @@ class UploadLifecycleService:
             current_user=current_user,
             session_id=session_id,
         )
-        if upload_session.status == "completed":
-            return self._completed_response(upload_session)
         try:
+            if upload_session.status == "completed":
+                return self._completed_response(upload_session)
+            if upload_session.status != "completing":
+                raise ApiError("UPLOAD_NOT_ACTIVE", "上传会话不可继续上传", status_code=409)
             now = utc_now()
             await self.repository.record_uploaded_parts(
                 tenant_id=tenant_id,
@@ -323,6 +325,9 @@ class UploadLifecycleService:
             current_user=current_user,
             session_id=session_id,
         )
+        if upload_session.status in {"completed", "expired"}:
+            await self.repository.rollback()
+            return
         upload_session.status = "failed"
         await record_upload_event(
             audit_service=self.audit_service,

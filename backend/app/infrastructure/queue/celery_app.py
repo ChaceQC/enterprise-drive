@@ -10,13 +10,14 @@ celery_app = Celery(
     "enterprise_drive",
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
-    include=["app.workers.audit_tasks"],
+    include=["app.workers.audit_tasks", "app.workers.upload_tasks"],
 )
 
 celery_app.conf.update(
     task_default_queue="maintenance",
     task_routes={
         "audit.dispatch_outbox": {"queue": "audit"},
+        "upload.expire_sessions": {"queue": "maintenance"},
     },
     task_serializer="json",
     result_serializer="json",

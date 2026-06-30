@@ -35,6 +35,32 @@ async def record_upload_event(
     )
 
 
+async def record_system_upload_event(
+    *,
+    audit_service: AuditService | None,
+    upload_session: UploadSession,
+    action: str,
+    result: str = "allowed",
+    audit_context: AuditContext | None,
+    metadata: dict[str, object],
+) -> None:
+    if audit_service is None:
+        return
+    await audit_service.record(
+        event=AuditEvent(
+            tenant_id=upload_session.tenant_id,
+            actor_id=None,
+            actor_type="system",
+            action=action,
+            resource_type="upload",
+            resource_id=upload_session.id,
+            result=result,
+            metadata=metadata,
+        ),
+        context=audit_context or AuditContext(),
+    )
+
+
 def instant_upload_metadata(*, node: Node, blob_id: UUID) -> dict[str, object]:
     return {
         "mode": "instant",
@@ -91,4 +117,22 @@ def failed_upload_metadata(*, upload_session: UploadSession, reason: str) -> dic
         "parent_id": str(upload_session.parent_id),
         "status": upload_session.status,
         "reason": reason,
+    }
+
+
+def expired_upload_metadata(
+    *,
+    upload_session: UploadSession,
+    cleanup_status: str,
+    cleanup_errors: list[str],
+) -> dict[str, object]:
+    return {
+        "mode": "multipart",
+        "space_id": str(upload_session.space_id),
+        "parent_id": str(upload_session.parent_id),
+        "status": upload_session.status,
+        "storage_key": upload_session.storage_key,
+        "has_provider_upload": upload_session.provider_upload_id is not None,
+        "cleanup_status": cleanup_status,
+        "cleanup_errors": cleanup_errors,
     }

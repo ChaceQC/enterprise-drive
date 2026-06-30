@@ -12,3 +12,7 @@ def build_object_storage_key(*, tenant_id: UUID, content_hash: str) -> str:
     normalized_hash = content_hash.lower()
     hash_prefix = normalized_hash[:2]
     return f"objects/{tenant_id}/{hash_prefix}/{normalized_hash}"
+
+
+def is_upload_temp_storage_key(storage_key: str) -> bool:
+    return storage_key.startswith("uploads/")

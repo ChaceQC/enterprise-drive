@@ -187,6 +187,41 @@ class UploadRepository:
         )
         return result.scalar_one_or_none()
 
+    async def get_upload_session_for_update_by_id(
+        self,
+        *,
+        tenant_id: UUID,
+        session_id: UUID,
+    ) -> UploadSession | None:
+        result = await self.session.execute(
+            select(UploadSession)
+            .where(
+                UploadSession.tenant_id == tenant_id,
+                UploadSession.id == session_id,
+            )
+            .with_for_update()
+        )
+        return result.scalar_one_or_none()
+
+    async def list_expired_active_upload_session_ids(
+        self,
+        *,
+        tenant_id: UUID,
+        cutoff: datetime,
+        limit: int,
+    ) -> list[UUID]:
+        result = await self.session.execute(
+            select(UploadSession.id)
+            .where(
+                UploadSession.tenant_id == tenant_id,
+                UploadSession.status.in_(["initiated", "uploading", "completing"]),
+                UploadSession.expires_at <= cutoff,
+            )
+            .order_by(UploadSession.expires_at, UploadSession.id)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
     async def list_uploaded_part_numbers(
         self,
         *,

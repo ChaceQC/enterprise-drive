@@ -1,5 +1,65 @@
 # PROJECT_PROGRESS.md
 
+## 2026-07-01
+
+### 已完成
+
+- 实现过期上传清理服务 `UploadCleanupService`，按租户扫描过期的 `initiated`、`uploading`、`completing` 上传会话。
+- 上传清理会将会话标记为 `expired`，再最佳努力调用对象存储 `abort_multipart_upload` 并删除 `uploads/...` 临时对象；清理失败会记录到任务统计和审计 metadata，不回滚已过期终态。
+- 为维护任务补充租户列表查询和上传会话按租户加锁读取，避免跨租户扫描。
+- 新增 `upload.expire_sessions` Celery 任务并路由到 `maintenance` 队列，任务参数支持 `tenant_id`、`limit` 和 `request_id`。
+- 新增系统审计写入路径，过期清理写入 `upload.expired` 审计事件和 outbox event，actor_type 为 `system`。
+- 在 multipart complete 重新加锁最终写入前补充状态校验，避免过期清理与完成上传并发时继续创建文件版本。
+- 补充上传清理测试，覆盖过期会话清理、终态/未到期会话跳过、对象存储 abort/delete 调用和审计写入。
+- 同步更新 README、后端 README、执行计划和完整技术计划书中的过期上传清理状态、maintenance 队列职责和下一步说明。
+
+### 进行中
+
+- Sprint 3 上传/下载限流、容量释放和容量校准设计与实现。
+
+### 阻塞与风险
+
+- 当前空间、文件树、上传和下载接口仍暂以“当前租户 + 空间拥有者”作为访问边界，空间成员、目录 ACL、继承权限和拒绝优先策略尚未接入；该边界已在 README 和后端 README 标为临时实现。
+- 过期上传清理已覆盖数据库会话终态、multipart abort 和 `uploads/...` 临时对象删除；对象复制成功但数据库最终化失败后的 `objects/...` 孤儿对象扫描仍需后续生命周期任务兜底。
+- 当前容量初版仅覆盖空间维度和文件版本创建场景；删除释放容量、历史空间回填、用户/租户维度配额和定期校准任务仍需后续补齐。
+- 当前清理任务按批次扫描租户内过期会话，尚未接入定时调度配置、任务监控指标和失败告警。
+
+### 下一步
+
+- 实现上传初始化、分片签名和下载预签名的基础限流策略，并补充限流配置、测试和文档。
+
+### 涉及文件
+
+- `backend/app/modules/upload/cleanup.py`
+- `backend/app/modules/upload/repository.py`
+- `backend/app/modules/upload/audit.py`
+- `backend/app/modules/upload/lifecycle.py`
+- `backend/app/modules/upload/storage_keys.py`
+- `backend/app/workers/upload_tasks.py`
+- `backend/app/infrastructure/queue/celery_app.py`
+- `backend/app/modules/auth/repository.py`
+- `backend/tests/test_upload_cleanup.py`
+- `README.md`
+- `backend/README.md`
+- `PROJECT_PLAN.md`
+- `企业网盘开发者技术计划书.md`
+
+### 验证
+
+- 已运行 `uv run pytest tests/test_upload_cleanup.py tests/test_upload.py`，结果为 12 passed。
+- 已运行 `uv run ruff format .`。
+- 已运行 `uv run ruff format --check .`，结果为 89 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 72 source files。
+- 已运行 `uv run pytest`，结果为 41 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认当前迁移仍可生成 PostgreSQL SQL。
+- 已确认启动前 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 未监听。
+- 已从 `backend` 目录启动 Docker Compose 依赖服务 `postgres`、`redis`、`minio`、`opensearch`。
+- 已运行 `uv run alembic upgrade head`，真实 PostgreSQL migration 通过。
+- 已运行 `uv run python -m scripts.seed_admin`，管理员 seed 通过。
+- 已使用真实 PostgreSQL 和 MinIO 验证过期上传清理：创建 multipart 上传会话后强制过期，调用 `UploadCleanupService.expire_upload_sessions` 返回 `scanned=1`、`expired=1`、`aborted=1`、`deleted=1`、`storage_errors=0`；数据库会话状态为 `expired`，`upload.expired` 审计 actor_type 为 `system`，outbox 状态为 `pending`，MinIO 中对应 `uploads/...` 对象不存在。
+- 验证完成后已关闭本次启动的 Docker Compose 服务，并确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 不再监听。
+
 ## 2026-06-30
 
 ### 已完成

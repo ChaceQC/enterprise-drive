@@ -58,6 +58,7 @@ uv run pytest
 - multipart complete 成功合并后服务端校验 `sha256`，通过后将新对象归档到 `objects/{tenant_id}/{hash_prefix}/{content_hash}`，再写入 `file_blobs`、`nodes`、`file_versions`、`upload_parts` 和上传会话完成结果。
 - 秒传和 multipart complete 创建文件版本时原子增加空间容量快照，并写入 `quota_ledger` 容量流水。
 - 上传初始化、秒传、complete、abort 和 hash 不匹配等失败审计事件。
+- `upload.expire_sessions` 维护任务，按租户清理过期上传会话并写入 `upload.expired` 审计事件。
 - 文件下载预签名 URL 接口，按当前文件版本生成短期私有对象下载地址。
 - 下载成功和拒绝均写入 `file.downloaded` 审计事件与 outbox event。
 - 管理员 seed 脚本。
@@ -101,6 +102,8 @@ uv run pytest
 
 完成 multipart 上传时，客户端提交全部分片的 `part_no`、`etag` 和可选 `size_bytes`。服务端先将会话推进到 `completing`，再调用对象存储合并分片；合并后先检查对象大小，再计算服务端 `sha256` 并与初始化时的 `content_hash` 比对。二者都匹配后，若同租户同 hash、同大小 blob 已存在，会复用已有 blob 并清理本次 `uploads/...` 临时对象；若不存在，会先复制到 `objects/{tenant_id}/{hash_prefix}/{content_hash}`，再写入 blob、文件节点、版本、分片记录、容量流水和上传完成审计，提交后清理临时对象。hash 不匹配返回 `UPLOAD_HASH_MISMATCH`，上传会话标记为 `failed`，写入 `upload.failed` 审计，不创建文件版本和容量流水。重复调用已完成的 complete 会返回同一完成结果。abort 会将未完成会话标记为 `aborted`，并调用对象存储取消 multipart upload。
 
+过期上传由 Celery 任务 `upload.expire_sessions` 扫描处理，可传入 `tenant_id`、`limit` 和 `request_id`。任务会按租户查找已过期的 `initiated`、`uploading`、`completing` 会话，先标记为 `expired`，再最佳努力调用对象存储取消 multipart upload，并仅删除 `uploads/...` 临时对象，避免误删最终 `objects/...` 内容。对象存储清理失败不会回滚会话终态，会写入 `upload.expired` 审计 metadata 和任务统计中的 `storage_errors`。
+
 对象存储和上传策略由以下环境变量控制：
 
 - `DRIVE_S3_ENDPOINT_URL`
@@ -114,7 +117,7 @@ uv run pytest
 - `DRIVE_DOWNLOAD_PRESIGN_EXPIRES_SECONDS`
 - `DRIVE_DEFAULT_SPACE_QUOTA_BYTES`
 
-当前上传接口沿用临时空间拥有者访问边界。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除释放容量、容量校准、用户/租户维度配额、过期会话清理和上传限流将在后续步骤补齐。
+当前上传接口沿用临时空间拥有者访问边界。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除释放容量、容量校准、用户/租户维度配额和上传限流将在后续步骤补齐。
 
 ## 下载接口
 
