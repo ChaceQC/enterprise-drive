@@ -41,7 +41,8 @@
 - 已按要求恢复 `stash@{0}: paused quota reconciliation draft` 中的容量校准草稿，并按 AGENT 规则整理为基于现有 SQLAlchemy、Celery 和 PostgreSQL 事实表的维护任务，没有引入新的外部依赖或自研调度框架。
 - 新增 `QuotaReconciliationService`，以 `file_versions` 和 `nodes.space_id` 汇总实际空间容量，支持 `repair=false` 只读报告模式和 `repair=true` 修复模式。
 - 容量校准修复模式会补建缺失的空间容量账户、校准 `quota_accounts.used_bytes`，并用 `reason=quota_reconciled` 写入账本差额；修复时写入 `quota.reconciled` 系统审计和 outbox event。
-- 新增 Celery 维护任务 `quota.reconcile_space_usage` 并路由到 `maintenance` 队列，支持 `tenant_id`、`limit`、`repair` 和 `request_id` 参数。
+- 新增 Celery 维护任务 `quota.reconcile_space_usage` 并路由到 `maintenance` 队列，支持 `tenant_id`、`limit`、`repair`、`request_id` 和 `scan_all` 参数。
+- 按 AGENT 的鲁棒性和可扩展性要求修正容量校准扫描边界：`limit` 作为单批大小，worker 默认通过 cursor 分批扫完整个租户，避免定期任务长期只校准第一批空间。
 - 补充容量校准测试，覆盖只读报告不落库、修复快照和账本漂移、补建缺失空间容量账户、系统审计写入和 worker 聚合入口。
 - 新增 `file_blobs.status`，用 `active` / `deleting` 区分可复用内容对象和正在清理的内容对象；上传秒传和 multipart complete 只复用 active blob，同 hash blob 正在清理时返回 `BLOB_DELETING`。
 - 新增 `BlobCleanupService`，按租户扫描 `ref_count=0`、`status=active` 且无 `file_versions` 引用的 blob，先标记为 `deleting`，再在数据库事务外删除对象存储内容，最后删除 blob 元数据。
@@ -224,6 +225,15 @@
 - 已运行 `uv run alembic upgrade head --sql`，确认当前迁移仍可生成 PostgreSQL SQL。
 - 已运行 `git diff --check`，未发现空白错误。
 - 本轮容量校准恢复未启动 API、Worker 或 Docker Compose 服务；已确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 未监听。
+- 本次重新恢复已掉出 `refs/stash` 的 `paused quota reconciliation draft`，确认有效实现已在当前代码中吸收，并继续修正容量校准 worker 的批量扫描边界。
+- 已运行 `uv run pytest tests/test_quota_reconciliation.py -q`，结果为 4 passed，覆盖 `limit=1` 时 worker 通过 cursor 扫描同租户多个空间。
+- 已运行 `uv run ruff format app/infrastructure/queue/celery_app.py app/modules/quota/repository.py app/modules/quota/reconciliation.py app/workers/quota_tasks.py tests/test_quota_reconciliation.py`，格式化本轮涉及的 Python 文件。
+- 已运行 `uv run ruff format --check .`，结果为 118 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 94 source files。
+- 已运行 `uv run pytest`，结果为 65 passed。
+- 已运行 `git diff --check`，未发现空白错误。
+- 本轮没有数据库结构变更，未新增 Alembic migration；未启动 API、Worker 或 Docker Compose 服务。
 - 已运行 `uv run ruff format .`，格式化 blob 清理相关文件。
 - 已运行 `uv run pytest tests/test_blob_cleanup.py`，结果为 5 passed。
 - 已运行 `uv run pytest tests/test_upload.py tests/test_file_operations.py`，结果为 19 passed。

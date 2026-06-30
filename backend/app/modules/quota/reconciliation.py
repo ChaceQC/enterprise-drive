@@ -43,6 +43,7 @@ class SpaceQuotaReconciliationResult:
     ledger_drifts: int = 0
     repaired_accounts: int = 0
     ledger_entries: int = 0
+    next_space_id: UUID | None = None
     items: list[SpaceQuotaReconciliationItem] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
@@ -53,6 +54,7 @@ class SpaceQuotaReconciliationResult:
             "ledger_drifts": self.ledger_drifts,
             "repaired_accounts": self.repaired_accounts,
             "ledger_entries": self.ledger_entries,
+            "next_space_id": str(self.next_space_id) if self.next_space_id else None,
             "items": [item.to_dict() for item in self.items],
         }
 
@@ -74,6 +76,7 @@ class QuotaReconciliationService:
         *,
         tenant_id: UUID,
         limit: int = 100,
+        after_space_id: UUID | None = None,
         repair: bool = False,
         audit_context: AuditContext | None = None,
     ) -> SpaceQuotaReconciliationResult:
@@ -83,9 +86,15 @@ class QuotaReconciliationService:
         try:
             snapshots = await self.repository.list_space_usage_snapshots(
                 tenant_id=tenant_id,
-                limit=limit,
+                limit=limit + 1,
+                after_space_id=after_space_id,
             )
-            result = SpaceQuotaReconciliationResult(scanned=len(snapshots))
+            has_more = len(snapshots) > limit
+            snapshots = snapshots[:limit]
+            result = SpaceQuotaReconciliationResult(
+                scanned=len(snapshots),
+                next_space_id=snapshots[-1].space_id if has_more and snapshots else None,
+            )
             for snapshot in snapshots:
                 item = await self._reconcile_one(
                     tenant_id=tenant_id,

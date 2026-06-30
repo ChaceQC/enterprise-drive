@@ -138,7 +138,12 @@ class QuotaRepository:
         *,
         tenant_id: UUID,
         limit: int,
+        after_space_id: UUID | None = None,
     ) -> list[SpaceQuotaUsageSnapshot]:
+        conditions = [Space.tenant_id == tenant_id]
+        if after_space_id is not None:
+            conditions.append(Space.id > after_space_id)
+
         actual_usage = (
             select(
                 Node.space_id.label("space_id"),
@@ -184,8 +189,8 @@ class QuotaRepository:
             )
             .outerjoin(actual_usage, actual_usage.c.space_id == Space.id)
             .outerjoin(ledger_usage, ledger_usage.c.account_id == QuotaAccount.id)
-            .where(Space.tenant_id == tenant_id)
-            .order_by(Space.created_at, Space.id)
+            .where(*conditions)
+            .order_by(Space.id)
             .limit(limit)
         )
         return [

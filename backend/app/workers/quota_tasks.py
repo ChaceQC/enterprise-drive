@@ -28,6 +28,7 @@ def reconcile_space_usage(
     limit: int = 100,
     repair: bool = False,
     request_id: str | None = None,
+    scan_all: bool = True,
 ) -> dict[str, object]:
     return asyncio.run(
         _reconcile_space_usage(
@@ -35,6 +36,7 @@ def reconcile_space_usage(
             limit=limit,
             repair=repair,
             request_id=request_id,
+            scan_all=scan_all,
         )
     )
 
@@ -48,6 +50,7 @@ async def _reconcile_space_usage(
     limit: int,
     repair: bool,
     request_id: str | None,
+    scan_all: bool = True,
 ) -> dict[str, object]:
     settings = get_settings()
     session_factory = get_session_factory()
@@ -62,26 +65,34 @@ async def _reconcile_space_usage(
             "ledger_entries": 0,
             "items": [],
         }
+        if limit <= 0:
+            return total
         for current_tenant_id in tenant_ids:
             service = QuotaReconciliationService(
                 repository=QuotaRepository(session),
                 default_space_limit_bytes=settings.default_space_quota_bytes,
                 audit_service=AuditService(repository=AuditRepository(session)),
             )
-            result = await service.reconcile_space_usage(
-                tenant_id=current_tenant_id,
-                limit=limit,
-                repair=repair,
-                audit_context=AuditContext(request_id=request_id),
-            )
-            payload = result.to_dict()
-            for key in _COUNTER_KEYS:
-                total[key] = _counter(total, key) + _counter(payload, key)
-            total_items = total["items"]
-            payload_items = payload["items"]
-            assert isinstance(total_items, list)
-            assert isinstance(payload_items, list)
-            total_items.extend(payload_items)
+            after_space_id: UUID | None = None
+            while True:
+                result = await service.reconcile_space_usage(
+                    tenant_id=current_tenant_id,
+                    limit=limit,
+                    after_space_id=after_space_id,
+                    repair=repair,
+                    audit_context=AuditContext(request_id=request_id),
+                )
+                payload = result.to_dict()
+                for key in _COUNTER_KEYS:
+                    total[key] = _counter(total, key) + _counter(payload, key)
+                total_items = total["items"]
+                payload_items = payload["items"]
+                assert isinstance(total_items, list)
+                assert isinstance(payload_items, list)
+                total_items.extend(payload_items)
+                if not scan_all or result.next_space_id is None:
+                    break
+                after_space_id = result.next_space_id
         return total
 
 

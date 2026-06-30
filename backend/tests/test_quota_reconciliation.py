@@ -293,6 +293,7 @@ async def test_quota_reconcile_worker_aggregates_tenant_results(
     await seed_admin(session_factory, settings)
     csrf_token = await login(client)
     space = await create_space(client, csrf_token, slug="quota-worker-space")
+    other_space = await create_space(client, csrf_token, slug="quota-worker-other-space")
     await create_instant_file(
         client,
         session_factory,
@@ -304,10 +305,22 @@ async def test_quota_reconcile_worker_aggregates_tenant_results(
         content_hash="a" * 64,
         size_bytes=1024,
     )
+    await create_instant_file(
+        client,
+        session_factory,
+        csrf_token,
+        tenant_id=str(other_space["tenant_id"]),
+        space_id=str(other_space["id"]),
+        parent_id=str(other_space["root_node_id"]),
+        file_name="任务校准二.txt",
+        content_hash="b" * 64,
+        size_bytes=2048,
+    )
 
     async with session_factory() as session:
-        quota_account = (await session.execute(select(QuotaAccount))).scalar_one()
-        quota_account.used_bytes = 0
+        quota_accounts = (await session.execute(select(QuotaAccount))).scalars().all()
+        for quota_account in quota_accounts:
+            quota_account.used_bytes = 0
         await session.commit()
 
     monkeypatch.setattr(quota_tasks, "get_settings", lambda: settings)
@@ -315,22 +328,29 @@ async def test_quota_reconcile_worker_aggregates_tenant_results(
 
     result = await quota_tasks._reconcile_space_usage(
         tenant_id=UUID(str(space["tenant_id"])),
-        limit=10,
+        limit=1,
         repair=True,
         request_id="req_quota_worker",
     )
 
-    assert result["scanned"] == 1
-    assert result["snapshot_drifts"] == 1
-    assert result["repaired_accounts"] == 1
+    assert result["scanned"] == 2
+    assert result["snapshot_drifts"] == 2
+    assert result["repaired_accounts"] == 2
     assert isinstance(result["items"], list)
-    assert result["items"][0]["space_id"] == str(space["id"])
+    assert {item["space_id"] for item in result["items"]} == {
+        str(space["id"]),
+        str(other_space["id"]),
+    }
 
     async with session_factory() as session:
-        quota_account = (await session.execute(select(QuotaAccount))).scalar_one()
-        audit = (
-            await session.execute(select(AuditLog).where(AuditLog.action == "quota.reconciled"))
-        ).scalar_one()
+        quota_accounts = (await session.execute(select(QuotaAccount))).scalars().all()
+        audits = (
+            (await session.execute(select(AuditLog).where(AuditLog.action == "quota.reconciled")))
+            .scalars()
+            .all()
+        )
 
-    assert quota_account.used_bytes == 1024
-    assert audit.request_id == "req_quota_worker"
+    used_bytes_by_space = {str(account.owner_id): account.used_bytes for account in quota_accounts}
+    assert used_bytes_by_space[str(space["id"])] == 1024
+    assert used_bytes_by_space[str(other_space["id"])] == 2048
+    assert {audit.request_id for audit in audits} == {"req_quota_worker"}
