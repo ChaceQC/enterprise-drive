@@ -47,6 +47,7 @@ uv run pytest
 - `spaces`、`nodes`、`file_blobs`、`file_versions` 基础表和迁移。
 - 空间创建时同步创建空间根目录节点。
 - `space_members` 基础表和迁移，空间创建时同步写入创建者的 `owner` 角色成员关系。
+- 空间成员管理 API，支持 owner/admin 添加、查看、调整和移除成员，并保护最后一个 owner。
 - 文件夹创建、目录子节点列表和签名 cursor pagination。
 - 文件树节点重命名、移动、删除到回收站、恢复和彻底删除。
 - 空间创建、文件夹创建、重命名、移动、删除、恢复和彻底删除审计事件。
@@ -83,6 +84,10 @@ uv run pytest
 
 - `POST /api/v1/spaces`
 - `GET /api/v1/spaces`
+- `GET /api/v1/spaces/{space_id}/members`
+- `POST /api/v1/spaces/{space_id}/members`
+- `PATCH /api/v1/spaces/{space_id}/members/{user_id}`
+- `DELETE /api/v1/spaces/{space_id}/members/{user_id}`
 - `POST /api/v1/files/folders`
 - `GET /api/v1/files?space_id=...&parent_id=...`
 - `PATCH /api/v1/files/{node_id}`
@@ -91,7 +96,7 @@ uv run pytest
 - `DELETE /api/v1/files/{node_id}/purge`
 - `POST /api/v1/files/{node_id}/restore`
 
-当前空间和文件树接口已开始使用 `PermissionService` 的空间级成员角色检查：空间列表按 `space_members` 成员关系返回；文件列表需要 `list`，创建文件夹需要 `upload`，重命名和移动需要 `update`，删除和彻底删除需要 `delete`，恢复需要 `restore`。目录 ACL、继承权限和拒绝优先策略将在后续步骤接入。
+当前空间和文件树接口已使用 `PermissionService` 的空间级成员角色检查：空间列表按 `space_members` 成员关系返回；成员管理需要 `manage`/`grant`，文件列表需要 `list`，创建文件夹需要 `upload`，重命名和移动需要 `update`，删除和彻底删除需要 `delete`，恢复需要 `restore`。成员变更会递增 `spaces.permission_version` 并写入 `permission.space_member.*` 审计事件；目录 ACL、继承权限和拒绝优先策略将在后续步骤接入。
 
 文件夹名称会进行 Unicode NFC 归一化并去除首尾空白，禁止 `/`、`\`、NUL、控制字符和路径穿越片段。同一目录下未删除节点的名称由数据库唯一索引兜底，根目录由 `tenant_id + space_id` 唯一索引兜底。
 

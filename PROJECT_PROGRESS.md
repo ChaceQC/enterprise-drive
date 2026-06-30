@@ -54,16 +54,21 @@
 - 新增 `PermissionService` 空间级角色检查，使用固定动作集合和角色白名单，不引入复杂权限表达式引擎。
 - 空间列表已改为按 `space_members` 成员关系返回；文件树、上传初始化、multipart complete 和下载已接入空间级动作检查，非成员或角色权限不足仍返回统一的 `SPACE_NOT_FOUND` / `NODE_NOT_FOUND`。
 - 补充权限接入测试，覆盖非成员不可见、viewer 可列空间和文件、viewer 不能创建文件夹或初始化上传、viewer 可下载已有文件。
+- 新增空间成员管理 API：`GET/POST /api/v1/spaces/{space_id}/members`、`PATCH/DELETE /api/v1/spaces/{space_id}/members/{user_id}`，owner/admin 可添加、查看、调整和移除成员。
+- 空间成员变更会递增 `spaces.permission_version`，写入 `permission.space_member.added`、`permission.space_member.updated`、`permission.space_member.removed` 审计；无权管理成员的请求写入 denied 审计。
+- 成员管理已保护最后一个 `owner`，拒绝删除或降级最后一个空间所有者；重复添加成员返回 `SPACE_MEMBER_EXISTS`，目标用户不存在或不可用返回 `USER_NOT_FOUND`。
+- 成员管理编排服务放在 `space` 模块，通过 `AuthService` 查询目标用户，避免权限模块直接依赖空间和认证模块的 repository。
+- 补充空间成员管理测试，覆盖 owner 管理成员生命周期、viewer 越权被拒、admin 可查看成员、角色变更后权限即时生效、移除成员后失权以及最后 owner 保护。
 
 ### 进行中
 
-- Sprint 4 权限系统已开始；空间成员事实表、owner 成员自动写入和空间级成员角色检查已完成，下一步补空间成员管理 API 与目录 ACL。
+- Sprint 4 权限系统已开始；空间成员事实表、owner 成员自动写入、空间级成员角色检查和空间成员管理 API 已完成，下一步接目录 ACL、继承和拒绝优先。
 
 ### 阻塞与风险
 
 - MinIO Python SDK 的 multipart create/complete/abort 在当前适配中需要调用客户端私有方法，已限定在 `infrastructure` 适配层；若后续出现兼容性、升级稳定性或批量吞吐问题，应评估更完整的开源 S3 兼容客户端或标准 HTTP/SigV4 实现。
 - 当前 Redis 限流仍是固定窗口策略，适用于上传初始化、分片签名和下载预签名的基础保护；若后续需要滑动窗口、令牌桶、多层级动态规则或管理端配置，应切换成熟限流库。
-- 当前空间、文件树、上传和下载接口已接入空间级成员角色检查；目录 ACL、继承权限、拒绝优先、权限缓存和权限变更失效事件仍未接入。
+- 当前空间、文件树、上传、下载和空间成员管理接口已接入空间级成员角色检查；目录 ACL、继承权限、拒绝优先、权限缓存和权限变更失效事件仍未接入。
 - 过期上传清理已覆盖数据库会话终态、multipart abort 和 `uploads/...` 临时对象删除；对象复制成功但数据库最终化失败后的 `objects/...` 孤儿对象扫描仍需后续生命周期任务兜底。
 - 当前容量实现已覆盖空间维度的文件版本创建、彻底删除释放、空间容量校准和 DB 驱动的 blob/object 清理；用户/租户维度配额、定时调度配置和监控告警仍需后续补齐。
 - `file.cleanup_unreferenced_blobs` 只清理仍有 DB blob 元数据且已无版本引用的最终对象；对象存储里没有 DB 元数据的孤儿对象扫描仍需后续治理任务兜底。
@@ -72,7 +77,7 @@
 
 ### 下一步
 
-- 完成本轮空间级 PermissionService 接入的全量验证、提交和推送后，补空间成员管理 API：支持 owner/admin 添加、调整和移除成员，并写入授权审计；随后接目录 ACL、继承和拒绝优先策略。
+- 完成本轮空间成员管理 API 的全量验证、提交和推送后，接目录 ACL、继承和拒绝优先策略：先建立节点级 ACL 数据模型和最小权限决策流程，再将文件列表、下载和授权动作纳入节点级校验。
 
 ### 涉及文件
 
@@ -109,7 +114,10 @@
 - `backend/app/modules/permission/actions.py`
 - `backend/app/modules/permission/models.py`
 - `backend/app/modules/permission/repository.py`
+- `backend/app/modules/permission/schemas.py`
 - `backend/app/modules/permission/service.py`
+- `backend/app/modules/space/members.py`
+- `backend/app/modules/space/router.py`
 - `backend/app/db/models.py`
 - `backend/app/workers/quota_tasks.py`
 - `backend/app/workers/file_tasks.py`
@@ -126,6 +134,7 @@
 - `backend/tests/test_file_operations.py`
 - `backend/tests/test_auth.py`
 - `backend/tests/test_space_file.py`
+- `backend/tests/test_space_members.py`
 - `backend/tests/test_quota_reconciliation.py`
 - `backend/tests/test_blob_cleanup.py`
 - `backend/tests/helpers.py`
@@ -214,6 +223,15 @@
 - 已运行 `uv run alembic upgrade head --sql`，确认当前权限迁移链仍可生成 PostgreSQL SQL。
 - 已运行 `git diff --check`，未发现空白错误。
 - 本轮空间级 PermissionService 接入未启动 API、Worker 或 Docker Compose 服务。
+- 已运行 `uv run pytest tests/test_space_members.py`，结果为 3 passed。
+- 已运行 `uv run ruff format .`，格式化空间成员管理测试文件。
+- 已运行 `uv run ruff format --check .`，结果为 110 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 88 source files。
+- 已运行 `uv run pytest`，结果为 62 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认当前迁移链仍可生成 PostgreSQL SQL。
+- 已运行 `git diff --check`，未发现空白错误。
+- 本轮空间成员管理 API 实现未启动 API、Worker 或 Docker Compose 服务。
 - 已运行 `uv run ruff format --check .`，结果为 100 files already formatted。
 - 已运行 `uv run ruff check .`，结果为 All checks passed。
 - 已运行 `uv run mypy app`，结果为 no issues found in 80 source files。

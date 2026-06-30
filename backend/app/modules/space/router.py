@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,10 +12,21 @@ from app.db.session import get_db_session
 from app.modules.audit.repository import AuditRepository
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
+from app.modules.auth.repository import AuthRepository
+from app.modules.auth.service import AuthService
 from app.modules.file.repository import FileRepository
 from app.modules.permission.repository import PermissionRepository
+from app.modules.permission.schemas import (
+    AddSpaceMemberRequest,
+    RemoveSpaceMemberResponse,
+    SpaceMemberListResponse,
+    SpaceMemberResponse,
+    UpdateSpaceMemberRequest,
+)
+from app.modules.permission.service import PermissionService
 from app.modules.quota.repository import QuotaRepository
 from app.modules.quota.service import QuotaService
+from app.modules.space.members import SpaceMemberService
 from app.modules.space.repository import SpaceRepository
 from app.modules.space.schemas import CreateSpaceRequest, CreateSpaceResponse, SpaceListResponse
 from app.modules.space.service import SpaceService
@@ -35,6 +47,20 @@ def get_space_service(
             default_space_limit_bytes=settings.default_space_quota_bytes,
         ),
         settings=settings,
+        audit_service=AuditService(repository=AuditRepository(session)),
+    )
+
+
+def get_space_member_service(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> SpaceMemberService:
+    permission_repository = PermissionRepository(session)
+    return SpaceMemberService(
+        repository=permission_repository,
+        permission_service=PermissionService(repository=permission_repository),
+        space_repository=SpaceRepository(session),
+        auth_service=AuthService(repository=AuthRepository(session), settings=settings),
         audit_service=AuditService(repository=AuditRepository(session)),
     )
 
@@ -66,4 +92,73 @@ async def list_spaces(
         current_user=current_user,
         cursor=cursor,
         page_size=page_size,
+    )
+
+
+@router.get("/{space_id}/members", response_model=SpaceMemberListResponse)
+async def list_space_members(
+    http_request: Request,
+    space_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[SpaceMemberService, Depends(get_space_member_service)],
+) -> SpaceMemberListResponse:
+    return await service.list_members(
+        current_user=current_user,
+        space_id=space_id,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.post(
+    "/{space_id}/members",
+    response_model=SpaceMemberResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_space_member(
+    http_request: Request,
+    space_id: UUID,
+    request: AddSpaceMemberRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[SpaceMemberService, Depends(get_space_member_service)],
+) -> SpaceMemberResponse:
+    return await service.add_member(
+        current_user=current_user,
+        space_id=space_id,
+        user_id=request.user_id,
+        role=request.role,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.patch("/{space_id}/members/{user_id}", response_model=SpaceMemberResponse)
+async def update_space_member(
+    http_request: Request,
+    space_id: UUID,
+    user_id: UUID,
+    request: UpdateSpaceMemberRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[SpaceMemberService, Depends(get_space_member_service)],
+) -> SpaceMemberResponse:
+    return await service.update_member(
+        current_user=current_user,
+        space_id=space_id,
+        user_id=user_id,
+        role=request.role,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.delete("/{space_id}/members/{user_id}", response_model=RemoveSpaceMemberResponse)
+async def remove_space_member(
+    http_request: Request,
+    space_id: UUID,
+    user_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[SpaceMemberService, Depends(get_space_member_service)],
+) -> RemoveSpaceMemberResponse:
+    return await service.remove_member(
+        current_user=current_user,
+        space_id=space_id,
+        user_id=user_id,
+        audit_context=build_audit_context(http_request),
     )

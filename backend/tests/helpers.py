@@ -112,12 +112,12 @@ async def create_second_user(
     session_factory: async_sessionmaker[AsyncSession],
     *,
     password: str = "member-password",
-) -> None:
+) -> UUID:
     async with session_factory() as session:
         repository = AuthRepository(session)
         tenant = await repository.get_tenant_by_slug("default")
         assert tenant is not None
-        await repository.create_user(
+        user = await repository.create_user(
             tenant_id=tenant.id,
             username="member",
             email="member@example.com",
@@ -125,6 +125,7 @@ async def create_second_user(
             password_hash=hash_password(password),
         )
         await repository.commit()
+        return user.id
 
 
 async def add_space_member(

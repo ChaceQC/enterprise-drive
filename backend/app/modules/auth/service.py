@@ -256,6 +256,12 @@ class AuthService:
             raise ApiError("AUTH_REQUIRED", "认证已失效", status_code=401)
         return user
 
+    async def get_active_user(self, *, tenant_id: UUID, user_id: UUID) -> User | None:
+        user = await self.repository.get_user_by_id(tenant_id=tenant_id, user_id=user_id)
+        if user is None or not user.is_active:
+            return None
+        return user
+
     async def logout(
         self,
         *,
