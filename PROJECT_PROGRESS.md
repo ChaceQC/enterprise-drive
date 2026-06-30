@@ -27,13 +27,19 @@
 - 同步更新 README、后端 README、执行计划和完整技术计划书中的彻底删除容量释放策略、接口清单、后续容量校准和对象生命周期边界。
 - 按新的开发约束暂停容量校准推进，先在 `AGENT.md` 补充“优先复用成熟库、标准工具、开放协议、框架能力或可信开源实现；实验功能在鲁棒性、可扩展性和可维护性前提下保持简洁”的规则，并要求轻量自研实现记录原因、范围、限制和替换触发条件。
 - 根据补充要求修正 `AGENT.md`：不默认引入或直接依赖云厂商专有 SDK，外部能力优先使用开放协议、兼容接口、标准客户端或可替换的开源适配器；确需临时使用 SDK 时必须封装在 infrastructure 适配层并记录替换计划。
+- 完成复用成熟库、开放协议和禁止默认云厂商 SDK 维度的代码审计，新增 `docs/code-audit-2026-07-01.md`。
+- 审计确认高优先级问题：当前对象存储默认实现仍直接依赖 `boto3/botocore`，虽然已封装在 `StorageAdapter` 适配层，但依赖基线和默认实例化与最新 AGENT 规则冲突，需要优先替换为开放协议或非云厂商专有的开源 S3 兼容客户端。
+- 审计确认中优先级问题：当前 Redis 固定窗口限流为轻量自研实现，`INCR` 与 `EXPIRE` 分离执行，异常时可能留下无 TTL key；后续应使用成熟限流库或 Redis Lua 原子脚本。
+- 审计确认分页游标、文件名校验、上传 hash 规范化、outbox 退避和文件树遍历属于可暂时保留的轻量实现，并已记录适用范围、已知限制和替换触发条件。
 
 ### 进行中
 
-- 代码审计：检查现有自研能力是否可替换为成熟库或开源方案，并评估后续容量校准任务是否应基于现有库/框架能力保持简洁实现。
+- 容量校准实现仍暂停在 `stash@{0}`：`paused quota reconciliation draft`；先处理审计发现的对象存储 SDK 和限流实现问题。
 
 ### 阻塞与风险
 
+- 对象存储默认实现直接依赖 `boto3/botocore`，与最新“不默认引入或直接依赖云厂商专有 SDK”的规则冲突；当前仅因已封装在 `infrastructure` 适配层而具备替换边界，不能继续扩展为长期默认方案。
+- Redis 固定窗口限流中 `INCR` 与 `EXPIRE` 非原子，异常时可能留下无 TTL 的限流 key；在限流覆盖面继续扩大前需要改为成熟库或 Lua 原子脚本。
 - 当前空间、文件树、上传和下载接口仍暂以“当前租户 + 空间拥有者”作为访问边界，空间成员、目录 ACL、继承权限和拒绝优先策略尚未接入；该边界已在 README 和后端 README 标为临时实现。
 - 过期上传清理已覆盖数据库会话终态、multipart abort 和 `uploads/...` 临时对象删除；对象复制成功但数据库最终化失败后的 `objects/...` 孤儿对象扫描仍需后续生命周期任务兜底。
 - 当前容量实现已覆盖空间维度的文件版本创建和彻底删除释放；历史空间回填、用户/租户维度配额、定期校准任务和 blob/object 垃圾回收仍需后续补齐。
@@ -42,7 +48,7 @@
 
 ### 下一步
 
-- 完成代码审计清单，标出必须优先复用成熟库或开源方案的模块，以及允许保留轻量自研实现的原因和替换触发条件。
+- 替换对象存储默认实现：先评估 MinIO Python SDK 或其他非云厂商专有的开源 S3 兼容客户端，移除 `boto3/botocore` 直接依赖，并同步修正 `backend/pyproject.toml`、`uv.lock`、对象存储适配器、README、后端 README、PROJECT_PLAN 和完整技术计划书。
 
 ### 涉及文件
 
@@ -56,8 +62,14 @@
 - `backend/app/infrastructure/rate_limit/base.py`
 - `backend/app/infrastructure/rate_limit/redis.py`
 - `backend/app/infrastructure/rate_limit/testing.py`
+- `backend/app/infrastructure/storage/s3.py`
+- `backend/app/infrastructure/storage/base.py`
 - `backend/app/api/deps.py`
 - `backend/app/core/config.py`
+- `backend/app/core/pagination.py`
+- `backend/app/modules/audit/dispatcher.py`
+- `backend/app/modules/file/validators.py`
+- `backend/app/modules/upload/hash.py`
 - `backend/app/modules/upload/router.py`
 - `backend/app/modules/file/router.py`
 - `backend/app/modules/file/repository.py`
@@ -75,6 +87,7 @@
 - `backend/README.md`
 - `AGENT.md`
 - `PROJECT_PLAN.md`
+- `docs/code-audit-2026-07-01.md`
 - `企业网盘开发者技术计划书.md`
 
 ### 验证
@@ -113,6 +126,7 @@
 - 已从 `backend` 目录启动 Docker Compose `redis` 服务，使用真实 Redis 验证 `RedisFixedWindowRateLimiter`：同一 key 在 `limit=1` 窗口内第一次允许、第二次拒绝且 `retry_after_seconds > 0`。
 - 已从 `backend` 目录启动 Docker Compose `postgres`、`redis`、`minio` 服务，运行真实 PostgreSQL migration 和管理员 seed 后，通过 ASGI + 真实 Redis + 真实 MinIO 验证上传初始化限流：环境变量设置 `DRIVE_UPLOAD_INIT_RATE_LIMIT_COUNT=1` 后，同一用户第一次 `POST /api/v1/uploads/init` 返回 201，第二次返回 429，错误码为 `RATE_LIMITED`，`details.action=upload.init`。
 - 验证完成后已关闭本次启动的 Docker Compose 服务，并确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 不再监听。
+- 本次审计为文档改动，未启动 API、Worker 或 Docker Compose 服务。
 
 ## 2026-06-30
 
