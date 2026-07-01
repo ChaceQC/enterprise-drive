@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import logging
 from collections.abc import AsyncIterator
 
 import pytest
@@ -7,6 +9,7 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
 from app.core.config import Settings
+from app.core.logging import JsonFormatter
 from app.main import create_app
 
 
@@ -64,3 +67,23 @@ async def test_not_found_uses_unified_error_response(client: AsyncClient) -> Non
         "message": "资源不存在",
         "request_id": "req_missing",
     }
+
+
+def test_json_formatter_preserves_extra_fields() -> None:
+    record = logging.LogRecord(
+        name="enterprise_drive.preview",
+        level=logging.WARNING,
+        pathname=__file__,
+        lineno=1,
+        msg="preview render finished without artifact",
+        args=(),
+        exc_info=None,
+    )
+    record.preview_status = "unsupported"
+    record.preview_reason = "office_renderer_missing"
+
+    payload = json.loads(JsonFormatter().format(record))
+
+    assert payload["message"] == "preview render finished without artifact"
+    assert payload["preview_status"] == "unsupported"
+    assert payload["preview_reason"] == "office_renderer_missing"

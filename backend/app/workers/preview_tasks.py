@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+from typing import Protocol
 from uuid import UUID
 
 from app.core.config import get_settings
@@ -13,8 +15,19 @@ from app.modules.audit.dispatcher import LoggingOutboxPublisher, OutboxDispatche
 from app.modules.audit.models import OutboxEvent
 from app.modules.audit.repository import AuditRepository
 from app.modules.preview.events import PREVIEW_RENDER_REQUESTED
-from app.modules.preview.renderer import PreviewRenderService
+from app.modules.preview.renderer import PreviewRenderResult, PreviewRenderService
 from app.modules.preview.repository import PreviewRepository
+
+logger = logging.getLogger("enterprise_drive.preview")
+
+
+class PreviewRenderHandler(Protocol):
+    async def render_version(
+        self,
+        *,
+        tenant_id: UUID,
+        version_id: UUID,
+    ) -> PreviewRenderResult: ...
 
 
 def dispatch_preview_outbox(batch_size: int | None = None) -> dict[str, int]:
@@ -65,7 +78,7 @@ class PreviewOutboxPublisher:
     def __init__(
         self,
         *,
-        render_service: PreviewRenderService,
+        render_service: PreviewRenderHandler,
         fallback_publisher: OutboxPublisher,
     ) -> None:
         self.render_service = render_service
@@ -83,7 +96,33 @@ class PreviewOutboxPublisher:
         version_id = event.payload.get("version_id")
         if not isinstance(version_id, str):
             raise ValueError("preview render event missing version_id")
-        await self.render_service.render_version(
-            tenant_id=event.tenant_id,
-            version_id=UUID(version_id),
-        )
+        version_uuid = UUID(version_id)
+        try:
+            result = await self.render_service.render_version(
+                tenant_id=event.tenant_id,
+                version_id=version_uuid,
+            )
+        except Exception:
+            logger.exception(
+                "preview render failed and will be retried by outbox",
+                extra={
+                    "event_id": str(event.id),
+                    "tenant_id": str(event.tenant_id),
+                    "version_id": str(version_uuid),
+                    "event_type": event.event_type,
+                    "retry_count": event.retry_count,
+                },
+            )
+            raise
+        if result.status != "ready":
+            logger.warning(
+                "preview render finished without artifact",
+                extra={
+                    "event_id": str(event.id),
+                    "tenant_id": str(event.tenant_id),
+                    "version_id": str(version_uuid),
+                    "event_type": event.event_type,
+                    "preview_status": result.status,
+                    "preview_reason": result.reason,
+                },
+            )

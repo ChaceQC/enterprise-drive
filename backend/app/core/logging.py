@@ -8,6 +8,8 @@ from typing import Any
 
 from app.core.config import Settings
 
+_DEFAULT_LOG_RECORD_KEYS = frozenset(logging.makeLogRecord({}).__dict__)
+
 
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
@@ -20,6 +22,14 @@ class JsonFormatter(logging.Formatter):
 
         if record.exc_info:
             payload["exc_info"] = self.formatException(record.exc_info)
+
+        extra = {
+            key: value
+            for key, value in record.__dict__.items()
+            if key not in _DEFAULT_LOG_RECORD_KEYS and not key.startswith("_")
+        }
+        if extra:
+            payload.update(extra)
 
         return json.dumps(payload, ensure_ascii=False)
 

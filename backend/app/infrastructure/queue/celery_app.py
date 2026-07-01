@@ -2,9 +2,20 @@ from __future__ import annotations
 
 from celery import Celery  # type: ignore[import-untyped]
 
-from app.core.config import get_settings
+from app.core.config import Settings, get_settings
 
 settings = get_settings()
+
+
+def _task_annotations(settings: Settings) -> dict[str, dict[str, int | str]]:
+    return {
+        "preview.dispatch_outbox": {
+            "soft_time_limit": settings.preview_task_soft_time_limit_seconds,
+            "time_limit": settings.preview_task_time_limit_seconds,
+            "rate_limit": settings.preview_task_rate_limit,
+        },
+    }
+
 
 celery_app = Celery(
     "enterprise_drive",
@@ -35,6 +46,7 @@ celery_app.conf.update(
     task_serializer="json",
     result_serializer="json",
     accept_content=["json"],
+    task_annotations=_task_annotations(settings),
     timezone="UTC",
     enable_utc=True,
     task_acks_late=True,

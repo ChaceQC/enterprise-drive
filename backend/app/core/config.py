@@ -75,6 +75,9 @@ class Settings(BaseSettings):
     preview_pdf_dpi: int = 144
     preview_pdf_max_rendered_bytes: int = 50 * 1024 * 1024
     preview_command_timeout_seconds: int = 30
+    preview_task_soft_time_limit_seconds: int = 120
+    preview_task_time_limit_seconds: int = 150
+    preview_task_rate_limit: str = "30/m"
     preview_presign_expires_seconds: int = 300
 
     session_cookie_name: str = "drive_session"
