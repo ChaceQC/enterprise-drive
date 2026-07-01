@@ -137,7 +137,7 @@
 - 新增 Prometheus 指标入口 `/metrics`，使用成熟开源库 `prometheus-client` 暴露文本格式指标；预览 worker 会在 unsupported/failed 终态和 retryable exception 时递增 `preview_failures_total{status,reason}`。
 - 补充 metrics 和 preview worker 测试，覆盖 `/metrics` 可访问、`preview_failures_total` 暴露、预览终态失败和异常失败都会写入对应指标。
 - 新增 `docs/deployment-preview-worker.md`，明确生产 Nginx 继续使用宿主机安装和管理，不放入 Docker Compose；补充 preview Worker 独立队列、LibreOffice/Poppler 工具检查、systemd 和 Kubernetes 下的 CPU、内存、临时磁盘配额示例，以及 `/metrics` 告警建议。
-- 升级 `backend-ci` workflow 使用的 `actions/checkout`、`actions/setup-python` 和 `astral-sh/setup-uv` 主版本，消除 GitHub Actions Node 20 弃用告警。
+- 升级 `backend-ci` workflow 使用的 `actions/checkout`、`actions/setup-python` 和 `astral-sh/setup-uv` 版本；其中 `setup-uv` 固定到已发布 tag `v8.2.0`，避免 GitHub Actions 无法解析不存在的浮动主版本。
 
 ### 进行中
 
