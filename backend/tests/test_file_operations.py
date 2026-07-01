@@ -8,9 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
-from app.modules.audit.models import AuditLog
+from app.modules.audit.models import AuditLog, OutboxEvent
 from app.modules.file.models import FileBlob, FileVersion, Node
 from app.modules.quota.models import QuotaAccount, QuotaLedger
+from app.modules.search.events import SEARCH_INDEX_REQUESTED
 from tests.helpers import (
     client as client,
 )
@@ -109,6 +110,143 @@ async def test_rename_folder_updates_node_and_audit(
     assert audit.request_id == "req_rename"
     assert audit.metadata_json["old_name"] == "旧名称"
     assert audit.metadata_json["new_name"] == "新名称"
+
+
+@pytest.mark.asyncio
+async def test_file_metadata_changes_write_search_index_events(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="search-file-metadata-events")
+    file_payload = await create_instant_file(
+        client,
+        session_factory,
+        token,
+        tenant_id=str(space["tenant_id"]),
+        space_id=str(space["id"]),
+        parent_id=str(space["root_node_id"]),
+        file_name="旧文件名.txt",
+        content_hash="1" * 64,
+        size_bytes=128,
+    )
+    node_id = str(file_payload["node_id"])
+
+    rename_response = await client.patch(
+        f"/api/v1/files/{node_id}",
+        headers={"X-CSRF-Token": token},
+        json={"name": "新文件名.txt"},
+    )
+    delete_response = await client.delete(
+        f"/api/v1/files/{node_id}",
+        headers={"X-CSRF-Token": token},
+    )
+    restore_response = await client.post(
+        f"/api/v1/files/{node_id}/restore",
+        headers={"X-CSRF-Token": token},
+        json={},
+    )
+
+    assert rename_response.status_code == 200
+    assert delete_response.status_code == 200
+    assert restore_response.status_code == 200
+    async with session_factory() as session:
+        events = (
+            (
+                await session.execute(
+                    select(OutboxEvent)
+                    .where(OutboxEvent.event_type == SEARCH_INDEX_REQUESTED)
+                    .order_by(OutboxEvent.created_at, OutboxEvent.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert [event.payload["reason"] for event in events] == [
+        "upload_instant",
+        "file_renamed",
+        "file_deleted",
+        "file_restored",
+    ]
+    assert {event.aggregate_id for event in events} == {UUID(node_id)}
+
+
+@pytest.mark.asyncio
+async def test_directory_changes_write_search_index_events_for_descendant_files(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="search-directory-events")
+    source = await create_folder(
+        client,
+        token,
+        space_id=str(space["id"]),
+        parent_id=str(space["root_node_id"]),
+        name="源目录",
+    )
+    target = await create_folder(
+        client,
+        token,
+        space_id=str(space["id"]),
+        parent_id=str(space["root_node_id"]),
+        name="目标目录",
+    )
+    file_payload = await create_instant_file(
+        client,
+        session_factory,
+        token,
+        tenant_id=str(space["tenant_id"]),
+        space_id=str(space["id"]),
+        parent_id=str(source["id"]),
+        file_name="子文件.txt",
+        content_hash="2" * 64,
+        size_bytes=256,
+    )
+    file_node_id = UUID(str(file_payload["node_id"]))
+
+    move_response = await client.post(
+        f"/api/v1/files/{source['id']}/move",
+        headers={"X-CSRF-Token": token},
+        json={"target_parent_id": target["id"], "new_name": "移动后的目录"},
+    )
+    delete_response = await client.delete(
+        f"/api/v1/files/{source['id']}",
+        headers={"X-CSRF-Token": token},
+    )
+    purge_response = await client.delete(
+        f"/api/v1/files/{source['id']}/purge",
+        headers={"X-CSRF-Token": token},
+    )
+
+    assert move_response.status_code == 200
+    assert delete_response.status_code == 200
+    assert purge_response.status_code == 200
+    async with session_factory() as session:
+        events = (
+            (
+                await session.execute(
+                    select(OutboxEvent)
+                    .where(OutboxEvent.event_type == SEARCH_INDEX_REQUESTED)
+                    .order_by(OutboxEvent.created_at, OutboxEvent.id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    file_events = [event for event in events if event.aggregate_id == file_node_id]
+    assert [event.payload["reason"] for event in file_events] == [
+        "upload_instant",
+        "file_moved",
+        "file_deleted",
+        "file_purged",
+    ]
 
 
 @pytest.mark.asyncio

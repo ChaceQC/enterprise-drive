@@ -379,6 +379,86 @@ async def test_search_index_requested_event_indexes_file_document(
 
 
 @pytest.mark.asyncio
+async def test_file_change_search_events_update_and_delete_index_document(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="search-file-change-events")
+    tenant_id = UUID(str(space["tenant_id"]))
+    async with session_factory() as session:
+        session.add(
+            FileBlob(
+                tenant_id=tenant_id,
+                hash_algo="sha256",
+                content_hash="f" * 64,
+                size_bytes=384,
+                storage_key="objects/test/ff",
+                mime_type="text/plain",
+                ref_count=0,
+            )
+        )
+        await session.commit()
+
+    upload_response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"X-CSRF-Token": token},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "file_name": "索引变更前.txt",
+            "size_bytes": 384,
+            "content_hash": "f" * 64,
+            "hash_algo": "sha256",
+            "mime_type": "text/plain",
+        },
+    )
+    assert upload_response.status_code == 201
+    node_id = UUID(upload_response.json()["node_id"])
+    index_adapter = InMemorySearchIndexAdapter()
+
+    await _dispatch_search_events(
+        session_factory=session_factory,
+        settings=settings,
+        index_adapter=index_adapter,
+        batch_size=10,
+    )
+    assert index_adapter.documents[f"{tenant_id}:{node_id}"].name == "索引变更前.txt"
+
+    rename_response = await client.patch(
+        f"/api/v1/files/{node_id}",
+        headers={"X-CSRF-Token": token},
+        json={"name": "索引变更后.txt"},
+    )
+    assert rename_response.status_code == 200
+
+    await _dispatch_search_events(
+        session_factory=session_factory,
+        settings=settings,
+        index_adapter=index_adapter,
+        batch_size=10,
+    )
+    assert index_adapter.documents[f"{tenant_id}:{node_id}"].name == "索引变更后.txt"
+
+    delete_response = await client.delete(
+        f"/api/v1/files/{node_id}",
+        headers={"X-CSRF-Token": token},
+    )
+    assert delete_response.status_code == 200
+
+    await _dispatch_search_events(
+        session_factory=session_factory,
+        settings=settings,
+        index_adapter=index_adapter,
+        batch_size=10,
+    )
+    assert f"{tenant_id}:{node_id}" not in index_adapter.documents
+    assert index_adapter.deleted_document_ids[-1] == f"{tenant_id}:{node_id}"
+
+
+@pytest.mark.asyncio
 async def test_acl_rebuild_event_reindexes_file_acl_tokens(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
@@ -489,3 +569,31 @@ async def test_acl_rebuild_event_reindexes_file_acl_tokens(
     assert rebuilt_document.acl_tokens == sorted(
         [f"space:{space['id']}:role:owner", f"user:{subject_id}"]
     )
+
+
+async def _dispatch_search_events(
+    *,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    index_adapter: InMemorySearchIndexAdapter,
+    batch_size: int,
+) -> None:
+    async with session_factory() as session:
+        dispatcher = OutboxDispatcher(
+            repository=AuditRepository(session),
+            publisher=search_tasks.SearchOutboxPublisher(
+                index_service=SearchIndexService(
+                    repository=SearchRepository(session),
+                    index_adapter=index_adapter,
+                ),
+                fallback_publisher=LoggingOutboxPublisher(),
+            ),
+            max_retries=settings.outbox_max_retries,
+        )
+        result = await dispatcher.dispatch_pending(
+            batch_size=batch_size,
+            event_types=[SEARCH_INDEX_REQUESTED],
+        )
+        await session.commit()
+    assert result.failed == 0
+    assert result.dead == 0

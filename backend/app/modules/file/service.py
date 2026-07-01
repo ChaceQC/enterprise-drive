@@ -37,6 +37,7 @@ from app.modules.permission.actions import (
 )
 from app.modules.permission.service import FILE_LIST_PERMISSION_ACTIONS, PermissionService
 from app.modules.quota.service import QuotaService
+from app.modules.search.events import emit_search_index_requested
 from app.modules.space.models import Space
 from app.modules.space.repository import SpaceRepository
 
@@ -193,6 +194,7 @@ class FileService:
             normalized_name=normalized_name,
             exclude_node_id=node.id,
         )
+        affected_nodes = await self._collect_active_subtree(node=node)
 
         old_name = node.name
         try:
@@ -207,6 +209,11 @@ class FileService:
                 action="file.renamed",
                 audit_context=audit_context,
                 metadata={"old_name": old_name, "new_name": normalized_name},
+            )
+            await self._emit_search_index_requests(
+                nodes=affected_nodes,
+                reason="file_renamed",
+                metadata={"root_node_id": str(node.id)},
             )
             await self.repository.commit()
         except IntegrityError as exc:
@@ -250,6 +257,7 @@ class FileService:
             normalized_name=normalized_name,
             exclude_node_id=node.id,
         )
+        affected_nodes = await self._collect_active_subtree(node=node)
 
         old_parent_id = node.parent_id
         old_name = node.name
@@ -270,6 +278,15 @@ class FileService:
                     "new_parent_id": str(target_parent.id),
                     "old_name": old_name,
                     "new_name": normalized_name,
+                },
+            )
+            await self._emit_search_index_requests(
+                nodes=affected_nodes,
+                reason="file_moved",
+                metadata={
+                    "root_node_id": str(node.id),
+                    "old_parent_id": str(old_parent_id) if old_parent_id else None,
+                    "new_parent_id": str(target_parent.id),
                 },
             )
             await self.repository.commit()
@@ -309,6 +326,11 @@ class FileService:
             action="file.deleted",
             audit_context=audit_context,
             metadata={"deleted_count": len(subtree_nodes)},
+        )
+        await self._emit_search_index_requests(
+            nodes=subtree_nodes,
+            reason="file_deleted",
+            metadata={"root_node_id": str(node.id)},
         )
         await self.repository.commit()
         return DeleteNodeResponse(node_id=node.id, deleted_count=len(subtree_nodes))
@@ -362,6 +384,11 @@ class FileService:
                     "purged_count": len(subtree_nodes),
                     "released_bytes": released_bytes,
                 },
+            )
+            await self._emit_search_index_requests(
+                nodes=subtree_nodes,
+                reason="file_purged",
+                metadata={"root_node_id": str(node.id)},
             )
             await self.repository.delete_versions_for_nodes(
                 tenant_id=current_user.tenant_id,
@@ -439,6 +466,11 @@ class FileService:
                     "restore_parent_id": str(restore_parent.id),
                     "restored_count": len(subtree_nodes),
                 },
+            )
+            await self._emit_search_index_requests(
+                nodes=subtree_nodes,
+                reason="file_restored",
+                metadata={"root_node_id": str(node.id)},
             )
             await self.repository.commit()
         except IntegrityError as exc:
@@ -620,6 +652,25 @@ class FileService:
             )
             collected.extend(child for child in children if not child.is_deleted)
         return collected
+
+    async def _emit_search_index_requests(
+        self,
+        *,
+        nodes: list[Node],
+        reason: str,
+        metadata: dict[str, object] | None = None,
+    ) -> None:
+        for node in nodes:
+            if node.node_type != "file":
+                continue
+            await emit_search_index_requested(
+                audit_service=self.audit_service,
+                tenant_id=node.tenant_id,
+                node_id=node.id,
+                space_id=node.space_id,
+                reason=reason,
+                metadata=metadata,
+            )
 
     def _blob_ref_counts(self, *, versions: list[FileVersion]) -> dict[UUID, int]:
         counts: dict[UUID, int] = {}
