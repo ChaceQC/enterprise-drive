@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol
 
@@ -61,6 +61,8 @@ class SearchHit:
     size_bytes: int
     updated_at: datetime
     score: float | None = None
+    highlights: dict[str, list[str]] = field(default_factory=dict)
+    sort_values: list[object] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -70,6 +72,7 @@ class SearchQuery:
     acl_tokens: list[str]
     deny_acl_tokens: list[str]
     limit: int
+    search_after: list[object] | None = None
 
 
 @dataclass(frozen=True)

@@ -30,6 +30,7 @@ router = APIRouter()
 def get_search_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     index_adapter: Annotated[SearchIndexAdapter, Depends(get_search_index_adapter)],
+    settings: Annotated[Settings, Depends(get_settings)],
 ) -> SearchService:
     org_service = OrgService(repository=OrgRepository(session))
     return SearchService(
@@ -40,6 +41,7 @@ def get_search_service(
             org_service=org_service,
         ),
         org_service=org_service,
+        settings=settings,
     )
 
 
@@ -52,6 +54,7 @@ async def search_files(
     service: Annotated[SearchService, Depends(get_search_service)],
     q: Annotated[str, Query(min_length=1, max_length=200)],
     limit: Annotated[int, Query(ge=1, le=50)] = 20,
+    cursor: Annotated[str | None, Query(min_length=1)] = None,
 ) -> SearchFilesResponse:
     await enforce_rate_limit(
         settings=settings,
@@ -61,4 +64,9 @@ async def search_files(
         resource_key="search",
         request=http_request,
     )
-    return await service.search_files(current_user=current_user, query=q, limit=limit)
+    return await service.search_files(
+        current_user=current_user,
+        query=q,
+        limit=limit,
+        cursor=cursor,
+    )

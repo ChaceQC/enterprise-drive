@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import re
+from html import escape
+
 from app.infrastructure.search.base import FileSearchDocument, SearchHit, SearchQuery, SearchResult
 
 
@@ -31,7 +34,9 @@ class InMemorySearchIndexAdapter:
                 or query_text in document.content.casefold()
             )
         ]
-        hits.sort(key=lambda document: (document.updated_at, document.node_id), reverse=True)
+        hits.sort(key=_sort_key)
+        if query.search_after is not None:
+            hits = _after_cursor(hits, query.search_after)
         return SearchResult(
             total=len(hits),
             hits=[
@@ -43,7 +48,54 @@ class InMemorySearchIndexAdapter:
                     size_bytes=document.size_bytes,
                     updated_at=document.updated_at,
                     score=None,
+                    highlights=_highlights(document, query.query),
+                    sort_values=_sort_values(document),
                 )
                 for document in hits[: query.limit]
             ],
         )
+
+
+def _sort_key(document: FileSearchDocument) -> tuple[float, str, str]:
+    return (-document.updated_at.timestamp(), document.node_id, document.document_id)
+
+
+def _sort_values(document: FileSearchDocument) -> list[object]:
+    return [None, document.updated_at.isoformat(), document.node_id]
+
+
+def _after_cursor(
+    documents: list[FileSearchDocument],
+    search_after: list[object],
+) -> list[FileSearchDocument]:
+    for index, document in enumerate(documents):
+        if _sort_values(document) == search_after:
+            return documents[index + 1 :]
+    return documents
+
+
+def _highlights(document: FileSearchDocument, query: str) -> dict[str, list[str]]:
+    highlights: dict[str, list[str]] = {}
+    _append_highlight(highlights, "name", document.name, query)
+    _append_highlight(highlights, "normalized_name", document.normalized_name, query)
+    _append_highlight(highlights, "content", document.content, query)
+    return highlights
+
+
+def _append_highlight(
+    highlights: dict[str, list[str]],
+    field: str,
+    value: str,
+    query: str,
+) -> None:
+    if not value or query.casefold() not in value.casefold():
+        return
+    pattern = re.compile(re.escape(query), re.IGNORECASE)
+    fragments: list[str] = []
+    position = 0
+    for match in pattern.finditer(value):
+        fragments.append(escape(value[position : match.start()]))
+        fragments.append(f"<mark>{escape(match.group(0))}</mark>")
+        position = match.end()
+    fragments.append(escape(value[position:]))
+    highlights[field] = ["".join(fragments)]

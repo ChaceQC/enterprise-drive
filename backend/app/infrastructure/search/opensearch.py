@@ -60,7 +60,7 @@ def _search_body(query: SearchQuery) -> dict[str, object]:
     must_not: list[dict[str, object]] = []
     if query.deny_acl_tokens:
         must_not.append({"terms": {"deny_acl_tokens": query.deny_acl_tokens}})
-    return {
+    body: dict[str, object] = {
         "size": query.limit,
         "query": {
             "bool": {
@@ -76,8 +76,21 @@ def _search_body(query: SearchQuery) -> dict[str, object]:
                 "must_not": must_not,
             }
         },
+        "highlight": {
+            "pre_tags": ["<mark>"],
+            "post_tags": ["</mark>"],
+            "encoder": "html",
+            "fields": {
+                "name": {"number_of_fragments": 0},
+                "normalized_name": {"number_of_fragments": 0},
+                "content": {"fragment_size": 160, "number_of_fragments": 3},
+            },
+        },
         "sort": [{"_score": "desc"}, {"updated_at": "desc"}, {"node_id": "asc"}],
     }
+    if query.search_after is not None:
+        body["search_after"] = query.search_after
+    return body
 
 
 def _parse_hit(hit: dict[str, object]) -> SearchHit:
@@ -92,6 +105,8 @@ def _parse_hit(hit: dict[str, object]) -> SearchHit:
         size_bytes=int(source["size_bytes"]),
         updated_at=_parse_datetime(source["updated_at"]),
         score=_parse_score(hit.get("_score")),
+        highlights=_parse_highlights(hit.get("highlight")),
+        sort_values=_parse_sort_values(hit.get("sort")),
     )
 
 
@@ -109,3 +124,25 @@ def _parse_score(value: object) -> float | None:
     if isinstance(value, int | float | str):
         return float(value)
     raise ValueError("OpenSearch hit has invalid _score")
+
+
+def _parse_highlights(value: object) -> dict[str, list[str]]:
+    if not isinstance(value, dict):
+        return {}
+    highlights: dict[str, list[str]] = {}
+    for field, fragments in value.items():
+        if isinstance(fragments, list):
+            highlights[str(field)] = [str(fragment) for fragment in fragments]
+    return highlights
+
+
+def _parse_sort_values(value: object) -> list[object]:
+    if not isinstance(value, list):
+        return []
+    sort_values: list[object] = []
+    for item in value:
+        if isinstance(item, str | int | float | bool) or item is None:
+            sort_values.append(item)
+        else:
+            sort_values.append(str(item))
+    return sort_values

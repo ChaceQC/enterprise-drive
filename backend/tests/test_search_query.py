@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from datetime import UTC, datetime
 from uuid import UUID
 
 import pytest
@@ -120,6 +121,73 @@ async def test_search_files_returns_role_visible_indexed_file(
     assert payload["items"][0]["node_id"] == node_id
     assert payload["items"][0]["space_id"] == space["id"]
     assert payload["items"][0]["name"] == "项目计划.txt"
+    assert payload["items"][0]["highlights"]["name"] == ["<mark>项目</mark>计划.txt"]
+    assert payload["next_cursor"] is None
+
+
+@pytest.mark.asyncio
+async def test_search_files_uses_cursor_pagination_and_query_bound_cursor(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    search_index_adapter: InMemorySearchIndexAdapter,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="search-query-cursor")
+    node_ids: list[str] = []
+    for index, content_hash in enumerate(["a" * 64, "b" * 64, "c" * 64], start=1):
+        node_ids.append(
+            await _create_instant_file(
+                client,
+                session_factory,
+                token,
+                tenant_id=str(space["tenant_id"]),
+                space_id=str(space["id"]),
+                parent_id=str(space["root_node_id"]),
+                file_name=f"分页文件{index}.txt",
+                content_hash=content_hash,
+            )
+        )
+    for index, node_id in enumerate(node_ids, start=1):
+        await _index_file(
+            session_factory,
+            search_index_adapter,
+            tenant_id=str(space["tenant_id"]),
+            node_id=node_id,
+        )
+        document_id = f"{space['tenant_id']}:{node_id}"
+        document = search_index_adapter.documents[document_id]
+        search_index_adapter.documents[document_id] = replace(
+            document,
+            updated_at=datetime(2026, 7, 1, 0, 0, index, tzinfo=UTC),
+        )
+
+    first_response = await client.get("/api/v1/search", params={"q": "分页", "limit": 2})
+
+    assert first_response.status_code == 200
+    first_payload = first_response.json()
+    assert [item["node_id"] for item in first_payload["items"]] == [node_ids[2], node_ids[1]]
+    assert first_payload["next_cursor"] is not None
+    assert first_payload["items"][0]["highlights"]["name"] == ["<mark>分页</mark>文件3.txt"]
+
+    second_response = await client.get(
+        "/api/v1/search",
+        params={"q": "分页", "limit": 2, "cursor": first_payload["next_cursor"]},
+    )
+
+    assert second_response.status_code == 200
+    second_payload = second_response.json()
+    assert [item["node_id"] for item in second_payload["items"]] == [node_ids[0]]
+    assert second_payload["next_cursor"] is None
+
+    wrong_query_response = await client.get(
+        "/api/v1/search",
+        params={"q": "分页文件", "limit": 2, "cursor": first_payload["next_cursor"]},
+    )
+
+    assert wrong_query_response.status_code == 400
+    assert wrong_query_response.json()["code"] == "CURSOR_INVALID"
 
 
 @pytest.mark.asyncio
