@@ -6,6 +6,7 @@ from typing import Protocol
 from uuid import UUID
 
 from app.core.config import get_settings
+from app.core.metrics import record_preview_failure
 from app.db.session import get_session_factory
 from app.infrastructure.preview.libreoffice import LibreOfficePreviewConverter
 from app.infrastructure.preview.poppler import PopplerPdfPreviewConverter
@@ -103,6 +104,7 @@ class PreviewOutboxPublisher:
                 version_id=version_uuid,
             )
         except Exception:
+            record_preview_failure(status="failed", reason="exception")
             logger.exception(
                 "preview render failed and will be retried by outbox",
                 extra={
@@ -115,6 +117,10 @@ class PreviewOutboxPublisher:
             )
             raise
         if result.status != "ready":
+            record_preview_failure(
+                status=result.status,
+                reason=result.reason or "unknown",
+            )
             logger.warning(
                 "preview render finished without artifact",
                 extra={

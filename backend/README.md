@@ -38,6 +38,7 @@ uv run pytest
 - `X-Request-ID` 中间件。
 - 统一错误响应。
 - `/healthz` 和 `/readyz` 健康检查。
+- `/metrics` Prometheus 文本指标入口，当前暴露 `preview_failures_total`。
 - `/api/v1/ping` 基础 API 连通性检查。
 - `tenants`、`users`、`auth_sessions` 基础表和 Alembic 初始迁移。
 - `departments`、`department_members`、`user_groups`、`user_group_members` 组织基础表和迁移。
@@ -71,7 +72,7 @@ uv run pytest
 - `file.cleanup_unreferenced_blobs` 维护任务，清理 ref_count 为 0 且无版本引用的最终对象和 blob 元数据。
 - `permission.invalidate_cache` 任务，消费 `permission.changed` outbox event 并失效 Redis 权限缓存 key；审计 dispatcher 只消费 `audit.*`，避免抢占权限事件。
 - 搜索 ACL token builder、`search.acl_rebuild_requested` outbox event、`search.index_requested` 文件索引事件、`search.extract_requested` 文本抽取事件和 `GET /api/v1/search` 查询接口；`search.dispatch_outbox` 会从 PostgreSQL 重新加载文件、版本、blob、空间成员和节点 ACL 事实后写入 OpenSearch，不再活跃或已彻底删除的文件会删除索引文档，并在 ACL 变更后按 space 或 node 子树保守重建索引 token；当前文本抽取只处理 UTF-8 文本类文件，写入 `file_versions.search_text` 后刷新索引 `content` 字段，Office/PDF 等复杂格式后续接入成熟开源解析工具；查询接口使用 `acl_tokens` allow 过滤、`deny_acl_tokens` 排除过滤、签名 cursor 分页、HTML 编码高亮和 `read_meta` 二次权限校验。
-- 预览基础链路：上传成功后写入 `preview.render_requested` outbox event，`preview.dispatch_outbox` 消费事件并使用 Pillow 生成图片 WebP 预览产物；PDF 会通过 Poppler `pdftoppm` 在临时目录中渲染第一页 PNG，再复用 Pillow 生成 WebP；Office 文档会通过 LibreOffice headless 转换为 PDF，再复用 PDF/图片链路。产物写入私有对象存储 `previews/{tenant_id}/{node_id}/{version_id}/image.webp`；`GET /api/v1/files/{node_id}/preview` 会校验节点级 `preview` 权限并返回短期私有预览 URL。缺少 `pdftoppm` 或 `soffice` 时会标记为 `unsupported` 并写入明确错误原因，避免无意义重试；`preview.dispatch_outbox` 已配置独立 Celery 软/硬超时、速率限制和结构化失败日志，便于后续接入日志告警与指标。
+- 预览基础链路：上传成功后写入 `preview.render_requested` outbox event，`preview.dispatch_outbox` 消费事件并使用 Pillow 生成图片 WebP 预览产物；PDF 会通过 Poppler `pdftoppm` 在临时目录中渲染第一页 PNG，再复用 Pillow 生成 WebP；Office 文档会通过 LibreOffice headless 转换为 PDF，再复用 PDF/图片链路。产物写入私有对象存储 `previews/{tenant_id}/{node_id}/{version_id}/image.webp`；`GET /api/v1/files/{node_id}/preview` 会校验节点级 `preview` 权限并返回短期私有预览 URL。缺少 `pdftoppm` 或 `soffice` 时会标记为 `unsupported` 并写入明确错误原因，避免无意义重试；`preview.dispatch_outbox` 已配置独立 Celery 软/硬超时、速率限制、结构化失败日志和 `preview_failures_total` 指标，便于后续接入日志告警与指标看板。
 - `shares`、`share_items`、`share_recipients`、`share_access_logs` 基础表和迁移；服务层支持内部分享、外链分享、提取码哈希、过期时间、访问/下载次数上限和撤销状态。
 - 分享创建会校验 root 节点和全部分享项的节点级 `share` 权限，分享项必须与 root 节点属于同一空间；外链原始 token 只返回一次，数据库只保存全局唯一 token hash，提取码只保存 Argon2id hash。
 - 分享创建和撤销会写入 `share.created` / `share.revoked` 审计事件和 `audit.share.*` outbox event；`POST /api/v1/shares`、`GET /api/v1/shares/{share_id}`、`POST /api/v1/shares/{share_id}/revoke` 已接入 Cookie Session、CSRF 和创建者边界；`POST /api/v1/public/shares/access` 已接入 `tenant_slug`、外链 token、提取码、状态、过期、访问次数校验，以及 IP 总量和 `token + IP` 维度限流，会带租户边界查询分享、原子增加 `view_count` 并写入 `share_access_logs`；`POST /api/v1/public/shares/download` 已接入外链下载，会校验分享状态、提取码、下载权限、分享项范围、文件当前版本和下载次数限制，原子增加 `download_count`，返回短期私有对象下载 URL，并写入 `share_access_logs` 和 `share.external.downloaded` 审计。

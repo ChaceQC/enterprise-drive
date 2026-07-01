@@ -11,6 +11,7 @@ from app.api.middleware import RequestIdMiddleware
 from app.api.v1.router import router as api_v1_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
+from app.core.metrics import register_metrics_route
 from app.health import register_health_routes
 
 logger = logging.getLogger("enterprise_drive")
@@ -39,6 +40,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     register_exception_handlers(app)
     register_health_routes(app, app_settings)
+    register_metrics_route(app)
     app.include_router(api_v1_router, prefix=app_settings.api_v1_prefix)
     return app
 

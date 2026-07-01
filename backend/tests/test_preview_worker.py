@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.core.config import Settings
+from app.core.metrics import METRICS_REGISTRY
 from app.infrastructure.queue import celery_app as celery_module
 from app.modules.audit.dispatcher import OutboxPublisher
 from app.modules.audit.models import OutboxEvent
@@ -54,6 +55,9 @@ async def test_preview_publisher_logs_terminal_non_ready_result(
     assert extra["version_id"] == str(version_id)
     assert extra["preview_status"] == "unsupported"
     assert extra["preview_reason"] == "office_renderer_missing"
+    assert (
+        _preview_failure_sample_value(status="unsupported", reason="office_renderer_missing") >= 1
+    )
 
 
 @pytest.mark.asyncio
@@ -82,6 +86,7 @@ async def test_preview_publisher_logs_retryable_failure(
     assert extra["tenant_id"] == str(tenant_id)
     assert extra["version_id"] == str(version_id)
     assert extra["retry_count"] == 2
+    assert _preview_failure_sample_value(status="failed", reason="exception") >= 1
 
 
 def _preview_event(*, tenant_id: UUID, version_id: UUID) -> OutboxEvent:
@@ -110,3 +115,16 @@ class _FailingPreviewRenderService:
 class _NoopPublisher(OutboxPublisher):
     async def publish(self, event: OutboxEvent) -> None:
         return None
+
+
+def _preview_failure_sample_value(*, status: str, reason: str) -> float:
+    for metric in METRICS_REGISTRY.collect():
+        if metric.name != "preview_failures":
+            continue
+        for sample in metric.samples:
+            if sample.name == "preview_failures_total" and sample.labels == {
+                "status": status,
+                "reason": reason,
+            }:
+                return float(sample.value)
+    return 0.0

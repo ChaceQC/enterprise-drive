@@ -48,6 +48,15 @@ async def test_readyz(client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_metrics_endpoint_exposes_prometheus_text(client: AsyncClient) -> None:
+    response = await client.get("/metrics")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/plain")
+    assert "preview_failures_total" in response.text
+
+
+@pytest.mark.asyncio
 async def test_request_id_is_reused(client: AsyncClient) -> None:
     response = await client.get("/api/v1/ping", headers={"X-Request-ID": "req_test"})
 

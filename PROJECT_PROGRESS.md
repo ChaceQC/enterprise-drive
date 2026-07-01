@@ -134,10 +134,12 @@
 - 补充 Office 预览测试，使用 fake Office/PDF converter 覆盖 DOCX 预览产物生成、缺少 Office renderer 的终态，以及 LibreOffice 适配器缺失工具和扩展名校验。
 - `preview.dispatch_outbox` 已补充 Celery 任务级软/硬超时和速率限制配置：`DRIVE_PREVIEW_TASK_SOFT_TIME_LIMIT_SECONDS`、`DRIVE_PREVIEW_TASK_TIME_LIMIT_SECONDS`、`DRIVE_PREVIEW_TASK_RATE_LIMIT`，在不引入新调度器的前提下限制预览队列资源占用。
 - 预览 worker 已在渲染 unsupported/failed 终态和 retryable exception 时输出结构化日志字段，包括 `event_id`、`tenant_id`、`version_id`、`preview_status`、`preview_reason` 和 `retry_count`；JSON 日志 formatter 已保留 `extra` 字段，便于后续日志告警和指标接入。
+- 新增 Prometheus 指标入口 `/metrics`，使用成熟开源库 `prometheus-client` 暴露文本格式指标；预览 worker 会在 unsupported/failed 终态和 retryable exception 时递增 `preview_failures_total{status,reason}`。
+- 补充 metrics 和 preview worker 测试，覆盖 `/metrics` 可访问、`preview_failures_total` 暴露、预览终态失败和异常失败都会写入对应指标。
 
 ### 进行中
 
-- Sprint 5 分享、搜索和预览模块已开始；基础分享、外链访问/下载、搜索索引/抽取、图片 WebP 预览、PDF 首页 WebP 预览、Office 经 LibreOffice headless 转 PDF 的基础链路，以及 preview worker 任务超时/限速和结构化失败日志已完成。下一步补充真实 LibreOffice 环境联调、预览失败指标和更完整的 worker 资源配额部署说明。
+- Sprint 5 分享、搜索和预览模块已开始；基础分享、外链访问/下载、搜索索引/抽取、图片 WebP 预览、PDF 首页 WebP 预览、Office 经 LibreOffice headless 转 PDF 的基础链路，以及 preview worker 任务超时/限速、结构化失败日志和预览失败指标已完成。下一步补充真实 LibreOffice 环境联调和更完整的 worker 资源配额部署说明。
 
 ### 阻塞与风险
 
@@ -145,7 +147,7 @@
 - 当前 Redis 限流仍是固定窗口策略，适用于上传初始化、分片签名和下载预签名的基础保护；若后续需要滑动窗口、令牌桶、多层级动态规则或管理端配置，应切换成熟限流库。
 - 当前空间、文件树、上传、下载、空间成员管理和节点 ACL 管理接口已接入权限检查；文件列表已返回当前页子节点的批量权限评估结果；权限变更 outbox 事件已接入 Redis 缓存失效 worker；org 部门/用户组 ACL 主体和搜索 ACL 重建事件已接入。
 - 搜索当前已完成 token builder、outbox 事件、文件索引文档构建、`search.index_requested` 写入 OpenSearch 入口、`search.acl_rebuild_requested` 的保守范围重建、`search.extract_requested` UTF-8 文本类抽取入口、`/api/v1/search` 查询过滤、签名 cursor 分页、HTML 编码 highlight，以及上传完成、重命名、移动、删除、恢复和彻底删除后的索引同步；Office/PDF、OCR 和大文件解析需后续使用成熟开源工具接入。
-- 预览当前支持图片、PDF 首页和 Office 文档生成 WebP 产物；PDF 依赖 Poppler `pdftoppm`，Office 依赖 LibreOffice `soffice`。本机已发现 `pdftoppm` 可用但 LibreOffice/soffice 不可用，因此本轮只能通过 fake converter 和缺失工具测试验证 Office 代码路径，真实 Office 转码需在安装 LibreOffice 的环境中联调；当前已具备 preview 任务级超时、限速和结构化失败日志，预览失败指标和容器/主机级 CPU、内存、临时磁盘配额仍需后续补齐。
+- 预览当前支持图片、PDF 首页和 Office 文档生成 WebP 产物；PDF 依赖 Poppler `pdftoppm`，Office 依赖 LibreOffice `soffice`。本机已发现 `pdftoppm` 可用但 LibreOffice/soffice 不可用，因此本轮只能通过 fake converter 和缺失工具测试验证 Office 代码路径，真实 Office 转码需在安装 LibreOffice 的环境中联调；当前已具备 preview 任务级超时、限速、结构化失败日志和 `preview_failures_total` 指标，容器/主机级 CPU、内存、临时磁盘配额仍需后续补齐。
 - 部门/用户组 ACL 变更当前无法精确枚举所有受影响用户缓存，已采用通配模式保守失效租户内节点权限缓存；若后续权限缓存读路径启用并出现大租户性能压力，应补充 subject membership 反向索引或异步展开任务。
 - 当前 Redis 权限缓存已完成失效 worker，但权限判断读路径尚未启用 Redis 缓存；接入读缓存时必须保持数据库为事实来源，高危动作继续二次查库。
 - 当前节点 ACL 路径加载采用逐级父节点查询并限制最大深度 64，适合一期目录深度可控场景；若后续目录深度、列表批量权限展示或搜索过滤压力升高，应引入递归 CTE、closure table 或批量权限评估缓存。
@@ -158,7 +160,7 @@
 
 ### 下一步
 
-- 补充真实 LibreOffice 环境联调、预览失败指标和容器/主机级 CPU、内存、临时磁盘配额部署说明；随后推进搜索复杂格式抽取的成熟开源工具适配。
+- 补充真实 LibreOffice 环境联调和容器/主机级 CPU、内存、临时磁盘配额部署说明；随后推进搜索复杂格式抽取的成熟开源工具适配。
 
 ### 涉及文件
 
@@ -221,6 +223,8 @@
 - `backend/app/infrastructure/preview/poppler.py`
 - `backend/app/infrastructure/queue/celery_app.py`
 - `backend/app/core/logging.py`
+- `backend/app/core/metrics.py`
+- `backend/app/main.py`
 - `backend/app/modules/search/acl.py`
 - `backend/app/modules/search/cursor.py`
 - `backend/app/modules/search/events.py`
@@ -279,6 +283,7 @@
 - `backend/tests/test_preview_office.py`
 - `backend/tests/test_preview_libreoffice.py`
 - `backend/tests/test_preview_worker.py`
+- `backend/tests/test_app.py`
 - `backend/tests/test_auth.py`
 - `backend/tests/test_space_file.py`
 - `backend/tests/test_space_members.py`
@@ -382,6 +387,15 @@
 - 已运行 `uv run mypy app`，结果为 no issues found in 137 source files。
 - 已运行 `uv run pytest`，结果为 122 passed。
 - 已运行 `uv run alembic upgrade head --sql`，确认 preview worker 任务配置和日志变更不影响当前迁移链。
+- 已运行 `git diff --check`，未发现空白错误；仅有 Windows 工作区 LF/CRLF 提示。
+- 本轮未启动 API、Worker、Docker Compose 或其他常驻服务，并已确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 未监听。
+- 已运行 `uv run ruff format .`，结果为 180 files left unchanged。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run ruff format --check .`，结果为 180 files already formatted。
+- 已运行 `uv run mypy app`，结果为 no issues found in 138 source files。
+- 已运行 `uv run pytest tests/test_app.py tests/test_preview_worker.py -q`，结果为 9 passed。
+- 已运行 `uv run pytest`，结果为 123 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认 metrics 入口和 Prometheus 依赖变更不影响当前迁移链。
 - 已运行 `git diff --check`，未发现空白错误；仅有 Windows 工作区 LF/CRLF 提示。
 - 本轮未启动 API、Worker、Docker Compose 或其他常驻服务，并已确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 未监听。
 - 已运行 `git diff --check`，未发现空白错误。
