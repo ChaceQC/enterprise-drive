@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from io import BytesIO
 from uuid import UUID, uuid4
 
 import pytest
 from docx import Document
 from httpx import AsyncClient
+from openpyxl import Workbook
+from pptx import Presentation
+from pptx.util import Inches
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from sqlalchemy import select
@@ -35,8 +39,11 @@ from app.modules.search.extractor import SearchExtractionService
 from app.modules.search.extractors import (
     DocxTextExtractor,
     PdfTextExtractor,
+    PptxTextExtractor,
     TextExtractionContext,
+    TextExtractionError,
     TextExtractor,
+    XlsxTextExtractor,
 )
 from app.modules.search.indexer import SearchIndexService
 from app.modules.search.repository import SearchRepository
@@ -102,6 +109,70 @@ def test_docx_text_extractor_reads_paragraphs_and_table_cells() -> None:
     )
 
     assert text == "Docx Paragraph\nCell A\nCell B"
+
+
+def test_pptx_text_extractor_reads_shapes_and_table_cells() -> None:
+    pptx_bytes = _build_pptx_with_text("PPTX Shape", ("Slide Cell A", "Slide Cell B"))
+
+    text = PptxTextExtractor().extract(
+        pptx_bytes,
+        TextExtractionContext(
+            mime_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            name="slides.pptx",
+        ),
+    )
+
+    assert text == "PPTX Shape\nSlide Cell A\nSlide Cell B"
+
+
+def test_xlsx_text_extractor_reads_cell_values() -> None:
+    xlsx_bytes = _build_xlsx_with_text("XLSX Cell", ("Sheet Cell A", "Sheet Cell B"))
+
+    text = XlsxTextExtractor().extract(
+        xlsx_bytes,
+        TextExtractionContext(
+            mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            name="sheet.xlsx",
+        ),
+    )
+
+    assert text == "XLSX Cell\nSheet Cell A\nSheet Cell B"
+
+
+@pytest.mark.parametrize(
+    ("extractor", "content", "context", "reason"),
+    [
+        (
+            PptxTextExtractor(max_entries=1),
+            lambda: _build_pptx_with_text("Large PPTX", ("Cell A", "Cell B")),
+            TextExtractionContext(
+                mime_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                name="slides.pptx",
+            ),
+            "pptx_archive_too_large",
+        ),
+        (
+            XlsxTextExtractor(max_entries=1),
+            lambda: _build_xlsx_with_text("Large XLSX", ("Cell A", "Cell B")),
+            TextExtractionContext(
+                mime_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                name="sheet.xlsx",
+            ),
+            "xlsx_archive_too_large",
+        ),
+    ],
+)
+def test_ooxml_text_extractors_skip_when_archive_exceeds_limit(
+    extractor: TextExtractor,
+    content: Callable[[], bytes],
+    context: TextExtractionContext,
+    reason: str,
+) -> None:
+    with pytest.raises(TextExtractionError) as exc_info:
+        extractor.extract(content(), context)
+
+    assert exc_info.value.status == "skipped"
+    assert exc_info.value.reason == reason
 
 
 def test_build_index_acl_tokens_includes_roles_and_allowed_subjects() -> None:
@@ -657,6 +728,62 @@ async def test_search_extract_requested_indexes_docx_text_content(
     assert index_adapter.documents[f"{tenant_id}:{node_id}"].content == (
         "DOCX Searchable Body\n表格一\n表格二"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("slug", "file_name", "mime_type", "content_hash", "content", "expected_text"),
+    [
+        (
+            "search-pptx-extract-space",
+            "可搜索PPTX.pptx",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "a" * 64,
+            lambda: _build_pptx_with_text("PPTX Searchable Body", ("幻灯片表格一", "幻灯片表格二")),
+            "PPTX Searchable Body\n幻灯片表格一\n幻灯片表格二",
+        ),
+        (
+            "search-xlsx-extract-space",
+            "可搜索XLSX.xlsx",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "b" * 64,
+            lambda: _build_xlsx_with_text("XLSX Searchable Body", ("表格单元格一", "表格单元格二")),
+            "XLSX Searchable Body\n表格单元格一\n表格单元格二",
+        ),
+    ],
+)
+async def test_search_extract_requested_indexes_ooxml_text_content(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
+    slug: str,
+    file_name: str,
+    mime_type: str,
+    content_hash: str,
+    content: Callable[[], bytes],
+    expected_text: str,
+) -> None:
+    tenant_id, node_id, version_id, index_adapter = await _upload_existing_blob_and_extract_text(
+        client=client,
+        session_factory=session_factory,
+        settings=settings,
+        storage_adapter=storage_adapter,
+        slug=slug,
+        storage_key=f"objects/test/{slug}",
+        file_name=file_name,
+        content_hash=content_hash,
+        mime_type=mime_type,
+        content=content(),
+    )
+
+    async with session_factory() as session:
+        version = await session.get(FileVersion, version_id)
+    assert version is not None
+    assert version.search_status == "indexed"
+    assert version.search_text == expected_text
+    assert version.search_error is None
+    assert index_adapter.documents[f"{tenant_id}:{node_id}"].content == expected_text
 
 
 @pytest.mark.asyncio
@@ -1291,6 +1418,67 @@ async def _dispatch_search_events(
     return result
 
 
+async def _upload_existing_blob_and_extract_text(
+    *,
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
+    slug: str,
+    storage_key: str,
+    file_name: str,
+    content_hash: str,
+    mime_type: str,
+    content: bytes,
+) -> tuple[UUID, str, UUID, InMemorySearchIndexAdapter]:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug=slug)
+    tenant_id = UUID(str(space["tenant_id"]))
+    storage_adapter.object_contents[(settings.s3_bucket, storage_key)] = content
+    async with session_factory() as session:
+        session.add(
+            FileBlob(
+                tenant_id=tenant_id,
+                hash_algo="sha256",
+                content_hash=content_hash,
+                size_bytes=len(content),
+                storage_key=storage_key,
+                mime_type=mime_type,
+                ref_count=0,
+            )
+        )
+        await session.commit()
+
+    response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"X-CSRF-Token": token},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "file_name": file_name,
+            "size_bytes": len(content),
+            "content_hash": content_hash,
+            "hash_algo": "sha256",
+            "mime_type": mime_type,
+        },
+    )
+    assert response.status_code == 201
+    node_id = response.json()["node_id"]
+    version_id = UUID(response.json()["version_id"])
+    index_adapter = InMemorySearchIndexAdapter()
+
+    await _dispatch_search_events(
+        session_factory=session_factory,
+        settings=settings,
+        index_adapter=index_adapter,
+        storage_adapter=storage_adapter,
+        batch_size=10,
+        event_types=[SEARCH_EXTRACT_REQUESTED],
+    )
+    return tenant_id, node_id, version_id, index_adapter
+
+
 def _build_pdf_with_text(*texts: str) -> bytes:
     writer = PdfWriter()
     font = DictionaryObject(
@@ -1322,4 +1510,36 @@ def _build_docx_with_text(paragraph_text: str, table_row: tuple[str, str]) -> by
     table.cell(0, 1).text = table_row[1]
     buffer = BytesIO()
     document.save(buffer)
+    return buffer.getvalue()
+
+
+def _build_pptx_with_text(shape_text: str, table_row: tuple[str, str]) -> bytes:
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[6])
+    text_box = slide.shapes.add_textbox(Inches(0.5), Inches(0.5), Inches(4), Inches(1))
+    text_box.text = shape_text
+    table = slide.shapes.add_table(
+        rows=1,
+        cols=2,
+        left=Inches(0.5),
+        top=Inches(1.5),
+        width=Inches(4),
+        height=Inches(1),
+    ).table
+    table.cell(0, 0).text = table_row[0]
+    table.cell(0, 1).text = table_row[1]
+    buffer = BytesIO()
+    presentation.save(buffer)
+    return buffer.getvalue()
+
+
+def _build_xlsx_with_text(first_cell: str, table_row: tuple[str, str]) -> bytes:
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet["A1"] = first_cell
+    worksheet["A2"] = table_row[0]
+    worksheet["B2"] = table_row[1]
+    buffer = BytesIO()
+    workbook.save(buffer)
+    workbook.close()
     return buffer.getvalue()

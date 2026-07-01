@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from io import BytesIO
-from typing import Protocol
+from typing import Any, Protocol
 from zipfile import BadZipFile, ZipFile
 
 from docx import Document
-from docx.opc.exceptions import PackageNotFoundError
+from docx.opc.exceptions import PackageNotFoundError as DocxPackageNotFoundError
+from openpyxl import load_workbook
+from openpyxl.utils.exceptions import InvalidFileException
+from pptx import Presentation
+from pptx.exc import PackageNotFoundError as PptxPackageNotFoundError
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
@@ -43,6 +47,18 @@ _DOCX_MIME_TYPES = {
 _DOCX_EXTENSIONS = {".docx"}
 _DEFAULT_DOCX_MAX_UNCOMPRESSED_BYTES = 5 * 1024 * 1024
 _DEFAULT_DOCX_MAX_ENTRIES = 256
+_PPTX_MIME_TYPES = {
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+}
+_PPTX_EXTENSIONS = {".pptx"}
+_DEFAULT_PPTX_MAX_UNCOMPRESSED_BYTES = 5 * 1024 * 1024
+_DEFAULT_PPTX_MAX_ENTRIES = 256
+_XLSX_MIME_TYPES = {
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+}
+_XLSX_EXTENSIONS = {".xlsx"}
+_DEFAULT_XLSX_MAX_UNCOMPRESSED_BYTES = 5 * 1024 * 1024
+_DEFAULT_XLSX_MAX_ENTRIES = 512
 
 
 class TextExtractionError(Exception):
@@ -123,9 +139,14 @@ class DocxTextExtractor:
 
     def extract(self, content: bytes, context: TextExtractionContext) -> str:
         try:
-            self._check_archive_limits(content)
+            _check_archive_limits(
+                content,
+                max_uncompressed_bytes=self.max_uncompressed_bytes,
+                max_entries=self.max_entries,
+                reason="docx_archive_too_large",
+            )
             document = Document(BytesIO(content))
-        except (BadZipFile, KeyError, PackageNotFoundError, ValueError) as exc:
+        except (BadZipFile, KeyError, DocxPackageNotFoundError, ValueError) as exc:
             raise TextExtractionError("decode_failed") from exc
         paragraphs = [paragraph.text.strip() for paragraph in document.paragraphs]
         table_cells = [
@@ -136,15 +157,129 @@ class DocxTextExtractor:
         ]
         return "\n".join(text for text in [*paragraphs, *table_cells] if text)
 
-    def _check_archive_limits(self, content: bytes) -> None:
-        with ZipFile(BytesIO(content)) as archive:
-            entries = archive.infolist()
-            if len(entries) > self.max_entries:
-                raise TextExtractionError("docx_archive_too_large", status="skipped")
-            uncompressed_size = sum(entry.file_size for entry in entries)
-            if uncompressed_size > self.max_uncompressed_bytes:
-                raise TextExtractionError("docx_archive_too_large", status="skipped")
+
+class PptxTextExtractor:
+    def __init__(
+        self,
+        *,
+        max_uncompressed_bytes: int = _DEFAULT_PPTX_MAX_UNCOMPRESSED_BYTES,
+        max_entries: int = _DEFAULT_PPTX_MAX_ENTRIES,
+    ) -> None:
+        self.max_uncompressed_bytes = max_uncompressed_bytes
+        self.max_entries = max_entries
+
+    def supports(self, context: TextExtractionContext) -> bool:
+        normalized_name = context.name.casefold()
+        return context.mime_type in _PPTX_MIME_TYPES or any(
+            normalized_name.endswith(extension) for extension in _PPTX_EXTENSIONS
+        )
+
+    def extract(self, content: bytes, context: TextExtractionContext) -> str:
+        try:
+            _check_archive_limits(
+                content,
+                max_uncompressed_bytes=self.max_uncompressed_bytes,
+                max_entries=self.max_entries,
+                reason="pptx_archive_too_large",
+            )
+            presentation = Presentation(BytesIO(content))
+        except (BadZipFile, KeyError, PptxPackageNotFoundError, ValueError) as exc:
+            raise TextExtractionError("decode_failed") from exc
+        texts = [
+            text
+            for slide in presentation.slides
+            for text in self._extract_shape_texts(slide.shapes)
+        ]
+        return "\n".join(text for text in texts if text)
+
+    def _extract_shape_texts(self, shapes: Any) -> list[str]:
+        texts: list[str] = []
+        for shape in shapes:
+            if getattr(shape, "has_table", False):
+                table = shape.table
+                texts.extend(
+                    cell.text.strip()
+                    for row in table.rows
+                    for cell in row.cells
+                    if cell.text.strip()
+                )
+                continue
+            shape_text = getattr(shape, "text", "")
+            if isinstance(shape_text, str) and shape_text.strip():
+                texts.append(shape_text.strip())
+                continue
+            nested_shapes = getattr(shape, "shapes", None)
+            if nested_shapes is not None:
+                texts.extend(self._extract_shape_texts(nested_shapes))
+        return texts
+
+
+class XlsxTextExtractor:
+    def __init__(
+        self,
+        *,
+        max_uncompressed_bytes: int = _DEFAULT_XLSX_MAX_UNCOMPRESSED_BYTES,
+        max_entries: int = _DEFAULT_XLSX_MAX_ENTRIES,
+    ) -> None:
+        self.max_uncompressed_bytes = max_uncompressed_bytes
+        self.max_entries = max_entries
+
+    def supports(self, context: TextExtractionContext) -> bool:
+        normalized_name = context.name.casefold()
+        return context.mime_type in _XLSX_MIME_TYPES or any(
+            normalized_name.endswith(extension) for extension in _XLSX_EXTENSIONS
+        )
+
+    def extract(self, content: bytes, context: TextExtractionContext) -> str:
+        workbook: Any | None = None
+        try:
+            _check_archive_limits(
+                content,
+                max_uncompressed_bytes=self.max_uncompressed_bytes,
+                max_entries=self.max_entries,
+                reason="xlsx_archive_too_large",
+            )
+            workbook = load_workbook(
+                filename=BytesIO(content),
+                read_only=True,
+                data_only=True,
+            )
+            texts = [
+                str(value).strip()
+                for worksheet in workbook.worksheets
+                for row in worksheet.iter_rows(values_only=True)
+                for value in row
+                if value is not None and str(value).strip()
+            ]
+        except (BadZipFile, InvalidFileException, KeyError, OSError, ValueError) as exc:
+            raise TextExtractionError("decode_failed") from exc
+        finally:
+            if workbook is not None:
+                workbook.close()
+        return "\n".join(texts)
+
+
+def _check_archive_limits(
+    content: bytes,
+    *,
+    max_uncompressed_bytes: int,
+    max_entries: int,
+    reason: str,
+) -> None:
+    with ZipFile(BytesIO(content)) as archive:
+        entries = archive.infolist()
+        if len(entries) > max_entries:
+            raise TextExtractionError(reason, status="skipped")
+        uncompressed_size = sum(entry.file_size for entry in entries)
+        if uncompressed_size > max_uncompressed_bytes:
+            raise TextExtractionError(reason, status="skipped")
 
 
 def default_text_extractors() -> list[TextExtractor]:
-    return [Utf8TextExtractor(), PdfTextExtractor(), DocxTextExtractor()]
+    return [
+        Utf8TextExtractor(),
+        PdfTextExtractor(),
+        DocxTextExtractor(),
+        PptxTextExtractor(),
+        XlsxTextExtractor(),
+    ]
