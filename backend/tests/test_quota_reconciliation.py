@@ -304,6 +304,53 @@ async def test_reconcile_space_usage_repairs_missing_space_account(
 
 
 @pytest.mark.asyncio
+async def test_reconcile_space_usage_counts_empty_missing_account_as_repaired(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    csrf_token = await login(client)
+    space = await create_space(client, csrf_token, slug="quota-empty-missing-account-space")
+
+    async with session_factory() as session:
+        quota_account = (await session.execute(select(QuotaAccount))).scalar_one()
+        await session.delete(quota_account)
+        await session.commit()
+
+    async with session_factory() as session:
+        service = QuotaReconciliationService(
+            repository=QuotaRepository(session),
+            default_space_limit_bytes=settings.default_space_quota_bytes,
+        )
+        result = await service.reconcile_space_usage(
+            tenant_id=UUID(str(space["tenant_id"])),
+            repair=True,
+        )
+
+    assert result.scanned == 1
+    assert result.missing_accounts == 1
+    assert result.snapshot_drifts == 0
+    assert result.ledger_drifts == 0
+    assert result.repaired_accounts == 1
+    assert result.ledger_entries == 0
+    assert result.items[0].missing_account is True
+    assert result.items[0].used_bytes is None
+    assert result.items[0].actual_bytes == 0
+    assert result.items[0].ledger_delta_bytes == 0
+    assert result.items[0].repaired is True
+
+    async with session_factory() as session:
+        quota_account = (await session.execute(select(QuotaAccount))).scalar_one()
+        ledgers = (await session.execute(select(QuotaLedger))).scalars().all()
+
+    assert quota_account.owner_type == "space"
+    assert quota_account.owner_id == UUID(str(space["id"]))
+    assert quota_account.used_bytes == 0
+    assert ledgers == []
+
+
+@pytest.mark.asyncio
 async def test_quota_reconcile_worker_aggregates_tenant_results(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],

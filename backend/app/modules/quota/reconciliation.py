@@ -180,6 +180,7 @@ class QuotaReconciliationService:
                 )
                 if not repaired:
                     raise ApiError("QUOTA_RECONCILE_FAILED", "容量校准失败", status_code=500)
+                repaired = True
             if ledger_delta is not None and ledger_delta != 0:
                 await self.repository.add_ledger(
                     tenant_id=tenant_id,

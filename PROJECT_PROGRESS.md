@@ -45,6 +45,7 @@
 - 新增 Celery 维护任务 `quota.reconcile_space_usage` 并路由到 `maintenance` 队列，支持 `tenant_id`、`limit`、`repair`、`request_id`、`scan_all` 和 `max_items` 参数；统计始终完整，返回明细超过 `max_items` 时用 `items_truncated=true` 标记。
 - 按 AGENT 的鲁棒性和可扩展性要求修正容量校准扫描边界：`limit` 作为单批大小，worker 默认通过 cursor 分批扫完整个租户，避免定期任务长期只校准第一批空间。
 - 补充容量校准测试，覆盖只读报告不落库、修复快照和账本漂移、重复修复幂等、补建缺失空间容量账户、系统审计写入、worker 聚合入口和返回明细截断。
+- 本次再次按 `stash@{0}: paused quota reconciliation draft` 复核容量校准恢复状态：当前 `refs/stash` 为空，原草稿 Git 对象 `75600a4 On dev: paused quota reconciliation draft` 仍可追溯，其有效内容已由当前 `dev` 的容量校准提交吸收；补充修正缺失空间容量账户且实际用量为 0 时的修复统计，确保补建账户也计入 `repaired_accounts`，且不写入无差额账本流水。
 - 新增 `file_blobs.status`，用 `active` / `deleting` 区分可复用内容对象和正在清理的内容对象；上传秒传和 multipart complete 只复用 active blob，同 hash blob 正在清理时返回 `BLOB_DELETING`。
 - 新增 `BlobCleanupService`，按租户扫描 `ref_count=0`、`status=active` 且无 `file_versions` 引用的 blob，先标记为 `deleting`，再在数据库事务外删除对象存储内容，最后删除 blob 元数据。
 - 对象存储删除失败时会恢复 blob 为 `active`，计入 `storage_errors`，并写入 `file.blob.cleanup_failed` 系统审计；删除成功会写入 `file.blob.cleaned` 系统审计和 outbox event。
@@ -320,6 +321,11 @@
 - 已重新定位掉出 `refs/stash` 的 `paused quota reconciliation draft`，确认草稿有效实现已在当前代码中吸收，并继续按 AGENT 规则修正容量校准修复幂等和 worker 返回体量。
 - 已运行 `uv run pytest tests/test_quota_reconciliation.py -q`，结果为 4 passed，覆盖重复修复不追加账本差额和 worker 明细截断。
 - 已运行 `uv run ruff format app/modules/quota/repository.py app/modules/quota/reconciliation.py app/workers/quota_tasks.py tests/test_quota_reconciliation.py`，格式化本轮涉及的 Python 文件。
+- 本次复核 `paused quota reconciliation draft` 后，已运行 `uv run ruff format app/modules/quota/reconciliation.py tests/test_quota_reconciliation.py`，格式化容量校准修复统计相关文件。
+- 已运行 `uv run ruff format --check app/modules/quota/reconciliation.py tests/test_quota_reconciliation.py`，结果为 2 files already formatted。
+- 已运行 `uv run ruff check app/modules/quota/reconciliation.py tests/test_quota_reconciliation.py`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 115 source files。
+- 已运行 `uv run pytest tests/test_quota_reconciliation.py -q`，结果为 5 passed。
 - 已运行 `uv run ruff format --check .`，结果为 126 files already formatted。
 - 已运行 `uv run ruff check .`，结果为 All checks passed。
 - 已运行 `uv run mypy app`，结果为 no issues found in 99 source files。
