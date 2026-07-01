@@ -56,3 +56,6 @@ plugins = ["sqlalchemy.ext.mypy.plugin"]
 addopts = "-q"
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+  "integration: tests that require external services such as MinIO",
+]

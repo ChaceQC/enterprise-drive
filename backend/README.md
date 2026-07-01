@@ -30,6 +30,19 @@ uv run mypy app
 uv run pytest
 ```
 
+真实 MinIO 集成测试默认跳过，避免普通单元测试依赖外部服务。需要验证对象存储真实行为时，先启动本地 MinIO，再显式设置环境变量：
+
+```bash
+DRIVE_RUN_MINIO_TESTS=1 \
+DRIVE_TEST_MINIO_ENDPOINT=http://127.0.0.1:19000 \
+DRIVE_TEST_MINIO_ACCESS_KEY=drive-dev \
+DRIVE_TEST_MINIO_SECRET_KEY=drive-dev-password \
+DRIVE_TEST_MINIO_BUCKET=enterprise-drive-test \
+uv run pytest tests/test_storage_minio_integration.py -q
+```
+
+`backend-ci` 会在 GitHub Actions 中启动临时 MinIO 并运行该集成测试文件，覆盖 MinIO SDK multipart 私有方法封装、预签名 PUT/GET、copy、delete、list、服务端 hash 校验和孤儿最终对象扫描。后续仍需继续扩展异常恢复、SDK 升级兼容和并发竞争场景。
+
 ## 当前能力
 
 - FastAPI 应用入口。
@@ -71,6 +84,7 @@ uv run pytest
 - `quota.reconcile_space_usage` 维护任务，支持空间容量只读报告和修复模式。
 - `file.cleanup_unreferenced_blobs` 维护任务，清理 ref_count 为 0 且无版本引用的最终对象和 blob 元数据。
 - `file.cleanup_orphaned_objects` 维护任务，默认 dry-run，按对象存储游标扫描受控 `objects/{tenant_id}/{hash_prefix}/{sha256}` key，清理没有 DB blob 元数据引用的孤儿最终对象。
+- 真实 MinIO 集成测试，覆盖对象读写、copy、delete、list 游标、预签名下载、multipart 私有方法封装、预签名分片 PUT、complete 后 hash 校验和孤儿最终对象扫描。
 - `permission.invalidate_cache` 任务，消费 `permission.changed` outbox event 并失效 Redis 权限缓存 key；审计 dispatcher 只消费 `audit.*`，避免抢占权限事件。
 - 搜索 ACL token builder、`search.acl_rebuild_requested` outbox event、`search.index_requested` 文件索引事件、`search.extract_requested` 文本抽取事件和 `GET /api/v1/search` 查询接口；`search.dispatch_outbox` 会从 PostgreSQL 重新加载文件、版本、blob、空间成员和节点 ACL 事实后写入 OpenSearch，不再活跃或已彻底删除的文件会删除索引文档，并在 ACL 变更后按 space 或 node 子树保守重建索引 token；当前抽取支持 UTF-8 文本类文件、PDF 可复制正文、DOCX 段落/表格文本、PPTX 文本框/表格文本和 XLSX 单元格文本，PDF 使用 `pypdf` 解析，DOCX 使用 `python-docx` 解析，PPTX 使用 `python-pptx` 解析，XLSX 使用 `openpyxl` 解析，写入 `file_versions.search_text` 后刷新索引 `content` 字段；图片 OCR 等复杂格式后续继续接入成熟开源解析工具；查询接口使用 `acl_tokens` allow 过滤、`deny_acl_tokens` 排除过滤、签名 cursor 分页、HTML 编码高亮和 `read_meta` 二次权限校验。
 - 预览基础链路：上传成功后写入 `preview.render_requested` outbox event，`preview.dispatch_outbox` 消费事件并使用 Pillow 生成图片 WebP 预览产物；PDF 会通过 Poppler `pdftoppm` 在临时目录中渲染第一页 PNG，再复用 Pillow 生成 WebP；Office 文档会通过 LibreOffice headless 转换为 PDF，再复用 PDF/图片链路。产物写入私有对象存储 `previews/{tenant_id}/{node_id}/{version_id}/image.webp`；`GET /api/v1/files/{node_id}/preview` 会校验节点级 `preview` 权限并返回短期私有预览 URL。缺少 `pdftoppm` 或 `soffice` 时会标记为 `unsupported` 并写入明确错误原因，避免无意义重试；`preview.dispatch_outbox` 已配置独立 Celery 软/硬超时、速率限制、结构化失败日志和 `preview_failures_total` 指标，便于后续接入日志告警与指标看板。

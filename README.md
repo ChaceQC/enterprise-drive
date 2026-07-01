@@ -50,6 +50,20 @@ uv run mypy app
 uv run pytest
 ```
 
+真实 MinIO 集成测试默认跳过；需要本机已有 MinIO 或通过 Docker 启动临时 MinIO 后显式打开：
+
+```bash
+cd backend
+DRIVE_RUN_MINIO_TESTS=1 \
+DRIVE_TEST_MINIO_ENDPOINT=http://127.0.0.1:19000 \
+DRIVE_TEST_MINIO_ACCESS_KEY=drive-dev \
+DRIVE_TEST_MINIO_SECRET_KEY=drive-dev-password \
+DRIVE_TEST_MINIO_BUCKET=enterprise-drive-test \
+uv run pytest tests/test_storage_minio_integration.py -q
+```
+
+GitHub `backend-ci` 会启动临时 MinIO，并运行这组真实对象存储集成测试，覆盖 MinIO SDK multipart 私有方法封装、预签名上传/下载、copy、delete、list、hash 校验和孤儿最终对象扫描。
+
 ## 文档
 
 - `AGENT.md`：开发协作约束。

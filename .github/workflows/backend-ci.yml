@@ -34,6 +34,22 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --all-extras --dev
 
+      - name: Start MinIO
+        run: |
+          docker run -d --name enterprise-drive-ci-minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=drive-dev \
+            -e MINIO_ROOT_PASSWORD=drive-dev-password \
+            minio/minio:latest server /data
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:9000/minio/health/live; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs enterprise-drive-ci-minio
+          exit 1
+
       - name: Ruff check
         run: uv run ruff check .
 
@@ -44,4 +60,10 @@ jobs:
         run: uv run mypy app
 
       - name: Pytest
+        env:
+          DRIVE_RUN_MINIO_TESTS: "1"
+          DRIVE_TEST_MINIO_ENDPOINT: "http://127.0.0.1:9000"
+          DRIVE_TEST_MINIO_ACCESS_KEY: "drive-dev"
+          DRIVE_TEST_MINIO_SECRET_KEY: "drive-dev-password"
+          DRIVE_TEST_MINIO_BUCKET: "enterprise-drive-ci"
         run: uv run pytest
