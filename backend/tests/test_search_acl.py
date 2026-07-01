@@ -4,6 +4,7 @@ from io import BytesIO
 from uuid import UUID, uuid4
 
 import pytest
+from docx import Document
 from httpx import AsyncClient
 from pypdf import PdfWriter
 from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
@@ -31,7 +32,12 @@ from app.modules.search.events import (
     SEARCH_INDEX_REQUESTED,
 )
 from app.modules.search.extractor import SearchExtractionService
-from app.modules.search.extractors import PdfTextExtractor, TextExtractionContext, TextExtractor
+from app.modules.search.extractors import (
+    DocxTextExtractor,
+    PdfTextExtractor,
+    TextExtractionContext,
+    TextExtractor,
+)
 from app.modules.search.indexer import SearchIndexService
 from app.modules.search.repository import SearchRepository
 from app.workers import search_tasks
@@ -82,6 +88,20 @@ def test_pdf_text_extractor_limits_pages() -> None:
     )
 
     assert text == "First Page"
+
+
+def test_docx_text_extractor_reads_paragraphs_and_table_cells() -> None:
+    docx_bytes = _build_docx_with_text("Docx Paragraph", ("Cell A", "Cell B"))
+
+    text = DocxTextExtractor().extract(
+        docx_bytes,
+        TextExtractionContext(
+            mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            name="document.docx",
+        ),
+    )
+
+    assert text == "Docx Paragraph\nCell A\nCell B"
 
 
 def test_build_index_acl_tokens_includes_roles_and_allowed_subjects() -> None:
@@ -571,6 +591,136 @@ async def test_search_extract_requested_indexes_pdf_text_content(
     assert version.search_text == "PDF Searchable Body"
     assert version.search_error is None
     assert index_adapter.documents[f"{tenant_id}:{node_id}"].content == "PDF Searchable Body"
+
+
+@pytest.mark.asyncio
+async def test_search_extract_requested_indexes_docx_text_content(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="search-docx-extract-space")
+    tenant_id = UUID(str(space["tenant_id"]))
+    storage_key = "objects/test/docx-content"
+    docx_bytes = _build_docx_with_text("DOCX Searchable Body", ("表格一", "表格二"))
+    storage_adapter.object_contents[(settings.s3_bucket, storage_key)] = docx_bytes
+    async with session_factory() as session:
+        session.add(
+            FileBlob(
+                tenant_id=tenant_id,
+                hash_algo="sha256",
+                content_hash="8" * 64,
+                size_bytes=len(docx_bytes),
+                storage_key=storage_key,
+                mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ref_count=0,
+            )
+        )
+        await session.commit()
+
+    response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"X-CSRF-Token": token},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "file_name": "可搜索DOCX.docx",
+            "size_bytes": len(docx_bytes),
+            "content_hash": "8" * 64,
+            "hash_algo": "sha256",
+            "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        },
+    )
+    assert response.status_code == 201
+    node_id = response.json()["node_id"]
+    version_id = UUID(response.json()["version_id"])
+    index_adapter = InMemorySearchIndexAdapter()
+
+    await _dispatch_search_events(
+        session_factory=session_factory,
+        settings=settings,
+        index_adapter=index_adapter,
+        storage_adapter=storage_adapter,
+        batch_size=10,
+        event_types=[SEARCH_EXTRACT_REQUESTED],
+    )
+
+    async with session_factory() as session:
+        version = await session.get(FileVersion, version_id)
+    assert version is not None
+    assert version.search_status == "indexed"
+    assert version.search_text == "DOCX Searchable Body\n表格一\n表格二"
+    assert version.search_error is None
+    assert index_adapter.documents[f"{tenant_id}:{node_id}"].content == (
+        "DOCX Searchable Body\n表格一\n表格二"
+    )
+
+
+@pytest.mark.asyncio
+async def test_search_extract_requested_skips_docx_when_archive_exceeds_limit(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="search-docx-archive-limit-space")
+    tenant_id = UUID(str(space["tenant_id"]))
+    storage_key = "objects/test/docx-archive-limit"
+    docx_bytes = _build_docx_with_text("Large Archive", ("Cell A", "Cell B"))
+    storage_adapter.object_contents[(settings.s3_bucket, storage_key)] = docx_bytes
+    async with session_factory() as session:
+        session.add(
+            FileBlob(
+                tenant_id=tenant_id,
+                hash_algo="sha256",
+                content_hash="9" * 64,
+                size_bytes=len(docx_bytes),
+                storage_key=storage_key,
+                mime_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ref_count=0,
+            )
+        )
+        await session.commit()
+
+    response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"X-CSRF-Token": token},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "file_name": "过大DOCX.docx",
+            "size_bytes": len(docx_bytes),
+            "content_hash": "9" * 64,
+            "hash_algo": "sha256",
+            "mime_type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        },
+    )
+    assert response.status_code == 201
+    version_id = UUID(response.json()["version_id"])
+    index_adapter = InMemorySearchIndexAdapter()
+
+    await _dispatch_search_events(
+        session_factory=session_factory,
+        settings=settings,
+        index_adapter=index_adapter,
+        storage_adapter=storage_adapter,
+        batch_size=10,
+        event_types=[SEARCH_EXTRACT_REQUESTED],
+        extractors=[DocxTextExtractor(max_entries=1)],
+    )
+
+    async with session_factory() as session:
+        version = await session.get(FileVersion, version_id)
+    assert version is not None
+    assert version.search_status == "skipped"
+    assert version.search_text is None
+    assert version.search_error == "docx_archive_too_large"
+    assert index_adapter.documents == {}
 
 
 @pytest.mark.asyncio
@@ -1161,4 +1311,15 @@ def _build_pdf_with_text(*texts: str) -> bytes:
         page[NameObject("/Contents")] = writer._add_object(stream)
     buffer = BytesIO()
     writer.write(buffer)
+    return buffer.getvalue()
+
+
+def _build_docx_with_text(paragraph_text: str, table_row: tuple[str, str]) -> bytes:
+    document = Document()
+    document.add_paragraph(paragraph_text)
+    table = document.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = table_row[0]
+    table.cell(0, 1).text = table_row[1]
+    buffer = BytesIO()
+    document.save(buffer)
     return buffer.getvalue()

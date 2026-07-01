@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from io import BytesIO
 from typing import Protocol
+from zipfile import BadZipFile, ZipFile
 
+from docx import Document
+from docx.opc.exceptions import PackageNotFoundError
 from pypdf import PdfReader
 from pypdf.errors import PdfReadError
 
@@ -34,12 +37,19 @@ _TEXT_EXTENSIONS = {
 _PDF_MIME_TYPES = {"application/pdf"}
 _PDF_EXTENSIONS = {".pdf"}
 _DEFAULT_PDF_MAX_PAGES = 50
+_DOCX_MIME_TYPES = {
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+}
+_DOCX_EXTENSIONS = {".docx"}
+_DEFAULT_DOCX_MAX_UNCOMPRESSED_BYTES = 5 * 1024 * 1024
+_DEFAULT_DOCX_MAX_ENTRIES = 256
 
 
 class TextExtractionError(Exception):
-    def __init__(self, reason: str) -> None:
+    def __init__(self, reason: str, *, status: str = "failed") -> None:
         super().__init__(reason)
         self.reason = reason
+        self.status = status
 
 
 @dataclass(frozen=True)
@@ -95,5 +105,46 @@ class PdfTextExtractor:
         return "\n".join(text.strip() for text in page_texts if text.strip())
 
 
+class DocxTextExtractor:
+    def __init__(
+        self,
+        *,
+        max_uncompressed_bytes: int = _DEFAULT_DOCX_MAX_UNCOMPRESSED_BYTES,
+        max_entries: int = _DEFAULT_DOCX_MAX_ENTRIES,
+    ) -> None:
+        self.max_uncompressed_bytes = max_uncompressed_bytes
+        self.max_entries = max_entries
+
+    def supports(self, context: TextExtractionContext) -> bool:
+        normalized_name = context.name.casefold()
+        return context.mime_type in _DOCX_MIME_TYPES or any(
+            normalized_name.endswith(extension) for extension in _DOCX_EXTENSIONS
+        )
+
+    def extract(self, content: bytes, context: TextExtractionContext) -> str:
+        try:
+            self._check_archive_limits(content)
+            document = Document(BytesIO(content))
+        except (BadZipFile, KeyError, PackageNotFoundError, ValueError) as exc:
+            raise TextExtractionError("decode_failed") from exc
+        paragraphs = [paragraph.text.strip() for paragraph in document.paragraphs]
+        table_cells = [
+            cell.text.strip()
+            for table in document.tables
+            for row in table.rows
+            for cell in row.cells
+        ]
+        return "\n".join(text for text in [*paragraphs, *table_cells] if text)
+
+    def _check_archive_limits(self, content: bytes) -> None:
+        with ZipFile(BytesIO(content)) as archive:
+            entries = archive.infolist()
+            if len(entries) > self.max_entries:
+                raise TextExtractionError("docx_archive_too_large", status="skipped")
+            uncompressed_size = sum(entry.file_size for entry in entries)
+            if uncompressed_size > self.max_uncompressed_bytes:
+                raise TextExtractionError("docx_archive_too_large", status="skipped")
+
+
 def default_text_extractors() -> list[TextExtractor]:
-    return [Utf8TextExtractor(), PdfTextExtractor()]
+    return [Utf8TextExtractor(), PdfTextExtractor(), DocxTextExtractor()]

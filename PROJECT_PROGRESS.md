@@ -99,10 +99,10 @@
 - 搜索查询响应已返回 HTML 编码的 `<mark>` 高亮片段，当前覆盖 `name`、`normalized_name` 和 `content` 字段；内存搜索适配器同步模拟分页和高亮，便于单元测试覆盖。
 - 补充搜索查询测试，覆盖分页不重复、`next_cursor` 返回、游标绑定查询词和搜索高亮。
 - 新增搜索全文抽取入口：上传秒传和 multipart complete 成功后写入 `search.extract_requested` outbox event，`search.dispatch_outbox` 会消费该事件并调用 `SearchExtractionService`。
-- `file_versions` 新增 `search_status`、`search_error` 和 `search_text` 字段；当前抽取处理 MIME 或扩展名可判定为文本或 PDF 的小文件，读取上限由 `DRIVE_SEARCH_TEXT_EXTRACT_MAX_BYTES` 控制。
-- 文本/PDF 抽取成功后写入 `search_text` 并刷新 OpenSearch 索引 `content` 字段；不支持的格式、源文件过大或抽取后正文超过上限标记为 `skipped`，UTF-8 解码、PDF 解析失败或加密 PDF 标记为 `failed` 且不重试，对象存储读取失败标记为 `failed` 并让 outbox 退避重试。
-- 按 AGENT 规则保持抽取入口简洁可维护：本轮不自研 PDF/Office 解析器，PDF 正文抽取接入成熟开源库 `pypdf`，当前解析到版本 `6.14.2`，许可证元数据为 `BSD-3-Clause`，Python 要求 `>=3.9`，适配本项目 Python 3.12；PDF 默认最多抽取前 50 页，Office/OCR 等复杂格式后续继续使用成熟开源工具或标准适配层接入。
-- 新增 `TextExtractor` 协议、UTF-8 文本抽取器和 `PdfTextExtractor`，`SearchExtractionService` 只负责编排存储读取、状态更新和索引刷新，便于后续继续挂接 Office/OCR 抽取器。
+- `file_versions` 新增 `search_status`、`search_error` 和 `search_text` 字段；当前抽取处理 MIME 或扩展名可判定为文本、PDF 或 DOCX 的小文件，读取上限由 `DRIVE_SEARCH_TEXT_EXTRACT_MAX_BYTES` 控制。
+- 文本/PDF/DOCX 抽取成功后写入 `search_text` 并刷新 OpenSearch 索引 `content` 字段；不支持的格式、源文件过大、DOCX zip 条目/未压缩大小超限或抽取后正文超过上限标记为 `skipped`，UTF-8 解码、PDF/DOCX 解析失败或加密 PDF 标记为 `failed` 且不重试，对象存储读取失败标记为 `failed` 并让 outbox 退避重试。
+- 按 AGENT 规则保持抽取入口简洁可维护：本轮不自研 PDF/Office 解析器，PDF 正文抽取接入成熟开源库 `pypdf`，当前解析到版本 `6.14.2`，许可证元数据为 `BSD-3-Clause`，Python 要求 `>=3.9`，适配本项目 Python 3.12；PDF 默认最多抽取前 50 页；DOCX 正文抽取接入成熟开源库 `python-docx`，当前解析到版本 `1.2.0`，许可证元数据为 `MIT`，Python 要求 `>=3.9`，其依赖 `lxml 6.1.1` 许可证元数据为 `BSD-3-Clause`，适配本项目 Python 3.12；PPTX/XLSX/OCR 等复杂格式后续继续使用成熟开源工具或标准适配层接入。
+- 新增 `TextExtractor` 协议、UTF-8 文本抽取器、`PdfTextExtractor` 和 `DocxTextExtractor`，`SearchExtractionService` 只负责编排存储读取、状态更新和索引刷新，便于后续继续挂接 PPTX/XLSX/OCR 抽取器。
 - 补充搜索抽取测试，覆盖上传写入抽取事件、文本正文入索引、不支持格式跳过、解码失败终态和存储读取失败重试。
 - 建立分享模块基础数据模型和迁移：新增 `shares`、`share_items`、`share_recipients`、`share_access_logs`，覆盖内部分享、外链分享、提取码哈希、过期时间、访问/下载次数限制、撤销状态、分享项、内部接收人和访问日志。
 - 新增 `ShareService` 和 `ShareRepository`，创建分享时逐个校验 root 节点和全部分享项的节点级 `share` 权限，分享项必须与 root 节点属于同一空间；外链原始 token 只在创建响应中返回一次，数据库只保存 token hash，提取码只保存 Argon2id hash。
@@ -142,14 +142,14 @@
 
 ### 进行中
 
-- Sprint 5 分享、搜索和预览模块已开始；基础分享、外链访问/下载、搜索索引/抽取、PDF 正文抽取、图片 WebP 预览、PDF 首页 WebP 预览、Office 经 LibreOffice headless 转 PDF 的基础链路、preview worker 任务超时/限速、结构化失败日志、预览失败指标和资源配额部署说明已完成。下一步补充真实 LibreOffice 环境联调和 Office/OCR 等搜索复杂格式抽取工具适配。
+- Sprint 5 分享、搜索和预览模块已开始；基础分享、外链访问/下载、搜索索引/抽取、PDF 正文抽取、DOCX 正文抽取、图片 WebP 预览、PDF 首页 WebP 预览、Office 经 LibreOffice headless 转 PDF 的基础链路、preview worker 任务超时/限速、结构化失败日志、预览失败指标和资源配额部署说明已完成。下一步补充真实 LibreOffice 环境联调和 PPTX/XLSX/OCR 等搜索复杂格式抽取工具适配。
 
 ### 阻塞与风险
 
 - MinIO Python SDK 的 multipart create/complete/abort 在当前适配中需要调用客户端私有方法，已限定在 `infrastructure` 适配层；若后续出现兼容性、升级稳定性或批量吞吐问题，应评估更完整的开源 S3 兼容客户端或标准 HTTP/SigV4 实现。
 - 当前 Redis 限流仍是固定窗口策略，适用于上传初始化、分片签名和下载预签名的基础保护；若后续需要滑动窗口、令牌桶、多层级动态规则或管理端配置，应切换成熟限流库。
 - 当前空间、文件树、上传、下载、空间成员管理和节点 ACL 管理接口已接入权限检查；文件列表已返回当前页子节点的批量权限评估结果；权限变更 outbox 事件已接入 Redis 缓存失效 worker；org 部门/用户组 ACL 主体和搜索 ACL 重建事件已接入。
-- 搜索当前已完成 token builder、outbox 事件、文件索引文档构建、`search.index_requested` 写入 OpenSearch 入口、`search.acl_rebuild_requested` 的保守范围重建、`search.extract_requested` UTF-8 文本类和 PDF 可复制正文抽取入口、`/api/v1/search` 查询过滤、签名 cursor 分页、HTML 编码 highlight，以及上传完成、重命名、移动、删除、恢复和彻底删除后的索引同步；PDF 抽取当前依赖 `pypdf`，只覆盖可复制文本，不覆盖扫描件 OCR；Office、OCR 和大文件解析需后续使用成熟开源工具接入。
+- 搜索当前已完成 token builder、outbox 事件、文件索引文档构建、`search.index_requested` 写入 OpenSearch 入口、`search.acl_rebuild_requested` 的保守范围重建、`search.extract_requested` UTF-8 文本类、PDF 可复制正文和 DOCX 段落/表格抽取入口、`/api/v1/search` 查询过滤、签名 cursor 分页、HTML 编码 highlight，以及上传完成、重命名、移动、删除、恢复和彻底删除后的索引同步；PDF 抽取当前依赖 `pypdf`，只覆盖可复制文本，不覆盖扫描件 OCR；DOCX 抽取当前依赖 `python-docx`，只覆盖 `.docx`，不覆盖旧 `.doc`、PPTX、XLSX；PPTX/XLSX/OCR 和大文件解析需后续使用成熟开源工具接入。
 - 预览当前支持图片、PDF 首页和 Office 文档生成 WebP 产物；PDF 依赖 Poppler `pdftoppm`，Office 依赖 LibreOffice `soffice`。本机已发现 `pdftoppm` 可用但 LibreOffice/soffice 不可用，因此本轮只能通过 fake converter 和缺失工具测试验证 Office 代码路径，真实 Office 转码需在安装 LibreOffice 的环境中联调；当前已具备 preview 任务级超时、限速、结构化失败日志、`preview_failures_total` 指标和 systemd/Kubernetes 资源配额说明。
 - 部门/用户组 ACL 变更当前无法精确枚举所有受影响用户缓存，已采用通配模式保守失效租户内节点权限缓存；若后续权限缓存读路径启用并出现大租户性能压力，应补充 subject membership 反向索引或异步展开任务。
 - 当前 Redis 权限缓存已完成失效 worker，但权限判断读路径尚未启用 Redis 缓存；接入读缓存时必须保持数据库为事实来源，高危动作继续二次查库。
@@ -163,7 +163,7 @@
 
 ### 下一步
 
-- 补充真实 LibreOffice 环境联调；随后推进 Office/OCR 等搜索复杂格式抽取的成熟开源工具适配。
+- 补充真实 LibreOffice 环境联调；随后推进 PPTX/XLSX/OCR 等搜索复杂格式抽取的成熟开源工具适配。
 
 ### 涉及文件
 
@@ -325,6 +325,9 @@
 - 已运行 `uv add "pypdf>=5.0"`，新增并锁定 `pypdf==6.14.2`。
 - 已运行 `uv run python -` 通过 `importlib.metadata` 确认 `pypdf` 版本 `6.14.2`、许可证元数据 `BSD-3-Clause`、`Requires-Python >=3.9`。
 - 已运行 `uv run pytest tests/test_search_acl.py -q`，结果为 18 passed，覆盖 PDF 抽取器、PDF 页数上限、`search.extract_requested` PDF 正文入库/入索引和抽取后正文超限跳过。
+- 已运行 `uv add "python-docx>=1.2"`，新增并锁定 `python-docx==1.2.0` 和 `lxml==6.1.1`。
+- 已运行 `uv run python -` 通过 `importlib.metadata` 确认 `python-docx` 版本 `1.2.0`、许可证元数据 `MIT`、`Requires-Python >=3.9`，以及 `lxml` 版本 `6.1.1`、许可证元数据 `BSD-3-Clause`、`Requires-Python >=3.8`。
+- 已运行 `uv run pytest tests/test_search_acl.py -q`，结果为 21 passed，覆盖 DOCX 段落/表格抽取、`search.extract_requested` DOCX 正文入库/入索引和 DOCX zip 归档超限跳过。
 - 已运行 `uv run ruff format --check .`，结果为 146 files already formatted。
 - 已运行 `uv run ruff check .`，结果为 All checks passed。
 - 已再次运行 `uv run mypy app`，结果为 no issues found in 115 source files。
@@ -334,8 +337,8 @@
 - 已运行 `uv run ruff check .`，结果为 All checks passed。
 - 已运行 `uv run ruff format --check .`，结果为 181 files already formatted。
 - 已运行 `uv run mypy app`，结果为 no issues found in 139 source files。
-- 已运行 `uv run pytest`，结果为 127 passed。
-- 已运行 `uv run alembic upgrade head --sql`，确认新增搜索抽取依赖和代码不影响当前迁移链。
+- 已运行 `uv run pytest`，结果为 130 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认新增 PDF/DOCX 搜索抽取依赖和代码不影响当前迁移链。
 - 已运行 `git diff --check`，未发现空白错误。
 - 本轮未启动 API、Worker 或 Docker Compose 服务。
 - 已运行 `uv run pytest tests/test_share_service.py -q`，结果为 6 passed。

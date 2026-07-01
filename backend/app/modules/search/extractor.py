@@ -120,11 +120,11 @@ class SearchExtractionService:
             await self.repository.set_version_search_state(
                 tenant_id=tenant_id,
                 version_id=version_id,
-                status="failed",
+                status=exc.status,
                 text=None,
                 error=exc.reason,
             )
-            return SearchExtractionResult(status="failed", indexed=False, reason=exc.reason)
+            return SearchExtractionResult(status=exc.status, indexed=False, reason=exc.reason)
         except Exception:
             await self.repository.set_version_search_state(
                 tenant_id=tenant_id,
