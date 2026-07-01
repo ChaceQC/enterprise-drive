@@ -21,6 +21,7 @@ dependencies = [
   "minio>=7.2.20",
   "pillow>=10",
   "prometheus-client>=0.21",
+  "pypdf>=5.0",
 ]
 
 [dependency-groups]

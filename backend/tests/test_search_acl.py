@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from io import BytesIO
 from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
+from pypdf import PdfWriter
+from pypdf.generic import DecodedStreamObject, DictionaryObject, NameObject
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -28,6 +31,7 @@ from app.modules.search.events import (
     SEARCH_INDEX_REQUESTED,
 )
 from app.modules.search.extractor import SearchExtractionService
+from app.modules.search.extractors import PdfTextExtractor, TextExtractionContext, TextExtractor
 from app.modules.search.indexer import SearchIndexService
 from app.modules.search.repository import SearchRepository
 from app.workers import search_tasks
@@ -48,6 +52,36 @@ class FailingReadStorageAdapter(InMemoryStorageAdapter):
         max_bytes: int,
     ) -> bytes:
         raise RuntimeError("storage unavailable")
+
+
+class OversizedTextExtractor:
+    def supports(self, context: TextExtractionContext) -> bool:
+        return True
+
+    def extract(self, content: bytes, context: TextExtractionContext) -> str:
+        return "x" * 9
+
+
+def test_pdf_text_extractor_uses_pypdf_for_text_content() -> None:
+    pdf_bytes = _build_pdf_with_text("Hello PDF Search")
+
+    text = PdfTextExtractor().extract(
+        pdf_bytes,
+        TextExtractionContext(mime_type="application/pdf", name="document.pdf"),
+    )
+
+    assert text == "Hello PDF Search"
+
+
+def test_pdf_text_extractor_limits_pages() -> None:
+    pdf_bytes = _build_pdf_with_text("First Page", "Second Page")
+
+    text = PdfTextExtractor(max_pages=1).extract(
+        pdf_bytes,
+        TextExtractionContext(mime_type="application/pdf", name="document.pdf"),
+    )
+
+    assert text == "First Page"
 
 
 def test_build_index_acl_tokens_includes_roles_and_allowed_subjects() -> None:
@@ -476,6 +510,70 @@ async def test_search_extract_requested_indexes_text_content(
 
 
 @pytest.mark.asyncio
+async def test_search_extract_requested_indexes_pdf_text_content(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="search-pdf-extract-space")
+    tenant_id = UUID(str(space["tenant_id"]))
+    storage_key = "objects/test/pdf-content"
+    pdf_bytes = _build_pdf_with_text("PDF Searchable Body")
+    storage_adapter.object_contents[(settings.s3_bucket, storage_key)] = pdf_bytes
+    async with session_factory() as session:
+        session.add(
+            FileBlob(
+                tenant_id=tenant_id,
+                hash_algo="sha256",
+                content_hash="6" * 64,
+                size_bytes=len(pdf_bytes),
+                storage_key=storage_key,
+                mime_type="application/pdf",
+                ref_count=0,
+            )
+        )
+        await session.commit()
+
+    response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"X-CSRF-Token": token},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "file_name": "可搜索PDF.pdf",
+            "size_bytes": len(pdf_bytes),
+            "content_hash": "6" * 64,
+            "hash_algo": "sha256",
+            "mime_type": "application/pdf",
+        },
+    )
+    assert response.status_code == 201
+    node_id = response.json()["node_id"]
+    version_id = UUID(response.json()["version_id"])
+    index_adapter = InMemorySearchIndexAdapter()
+
+    await _dispatch_search_events(
+        session_factory=session_factory,
+        settings=settings,
+        index_adapter=index_adapter,
+        storage_adapter=storage_adapter,
+        batch_size=10,
+        event_types=[SEARCH_EXTRACT_REQUESTED],
+    )
+
+    async with session_factory() as session:
+        version = await session.get(FileVersion, version_id)
+    assert version is not None
+    assert version.search_status == "indexed"
+    assert version.search_text == "PDF Searchable Body"
+    assert version.search_error is None
+    assert index_adapter.documents[f"{tenant_id}:{node_id}"].content == "PDF Searchable Body"
+
+
+@pytest.mark.asyncio
 async def test_search_extract_requested_skips_unsupported_file(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
@@ -594,6 +692,70 @@ async def test_search_extract_requested_skips_large_text_file(
     assert version.search_status == "skipped"
     assert version.search_text is None
     assert version.search_error == "file_too_large"
+    assert index_adapter.documents == {}
+
+
+@pytest.mark.asyncio
+async def test_search_extract_requested_skips_oversized_extracted_text(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="search-extract-large-output-space")
+    tenant_id = UUID(str(space["tenant_id"]))
+    storage_key = "objects/test/small-source-large-output"
+    storage_adapter.object_contents[(settings.s3_bucket, storage_key)] = b"source"
+    async with session_factory() as session:
+        session.add(
+            FileBlob(
+                tenant_id=tenant_id,
+                hash_algo="sha256",
+                content_hash="7" * 64,
+                size_bytes=6,
+                storage_key=storage_key,
+                mime_type="text/plain",
+                ref_count=0,
+            )
+        )
+        await session.commit()
+
+    response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"X-CSRF-Token": token},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "file_name": "抽取结果过大.txt",
+            "size_bytes": 6,
+            "content_hash": "7" * 64,
+            "hash_algo": "sha256",
+            "mime_type": "text/plain",
+        },
+    )
+    assert response.status_code == 201
+    version_id = UUID(response.json()["version_id"])
+    index_adapter = InMemorySearchIndexAdapter()
+
+    await _dispatch_search_events(
+        session_factory=session_factory,
+        settings=settings,
+        index_adapter=index_adapter,
+        storage_adapter=storage_adapter,
+        batch_size=10,
+        event_types=[SEARCH_EXTRACT_REQUESTED],
+        max_bytes=8,
+        extractors=[OversizedTextExtractor()],
+    )
+
+    async with session_factory() as session:
+        version = await session.get(FileVersion, version_id)
+    assert version is not None
+    assert version.search_status == "skipped"
+    assert version.search_text is None
+    assert version.search_error == "extracted_text_too_large"
     assert index_adapter.documents == {}
 
 
@@ -941,6 +1103,7 @@ async def _dispatch_search_events(
     expected_failed: int = 0,
     expected_dead: int = 0,
     max_bytes: int | None = None,
+    extractors: list[TextExtractor] | None = None,
 ) -> OutboxDispatchResult:
     async with session_factory() as session:
         repository = SearchRepository(session)
@@ -959,6 +1122,7 @@ async def _dispatch_search_events(
                         storage=storage_adapter,
                         settings=settings,
                         max_bytes=max_bytes,
+                        extractors=extractors,
                     )
                     if storage_adapter is not None
                     else None
@@ -975,3 +1139,26 @@ async def _dispatch_search_events(
     assert result.failed == expected_failed
     assert result.dead == expected_dead
     return result
+
+
+def _build_pdf_with_text(*texts: str) -> bytes:
+    writer = PdfWriter()
+    font = DictionaryObject(
+        {
+            NameObject("/Type"): NameObject("/Font"),
+            NameObject("/Subtype"): NameObject("/Type1"),
+            NameObject("/BaseFont"): NameObject("/Helvetica"),
+        }
+    )
+    font_ref = writer._add_object(font)
+    for text in texts:
+        page = writer.add_blank_page(width=300, height=300)
+        page[NameObject("/Resources")] = DictionaryObject(
+            {NameObject("/Font"): DictionaryObject({NameObject("/F1"): font_ref})}
+        )
+        stream = DecodedStreamObject()
+        stream.set_data(f"BT /F1 12 Tf 50 250 Td ({text}) Tj ET".encode())
+        page[NameObject("/Contents")] = writer._add_object(stream)
+    buffer = BytesIO()
+    writer.write(buffer)
+    return buffer.getvalue()

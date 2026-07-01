@@ -5,33 +5,14 @@ from uuid import UUID
 
 from app.core.config import Settings
 from app.infrastructure.storage.base import StorageAdapter
+from app.modules.search.extractors import (
+    TextExtractionContext,
+    TextExtractionError,
+    TextExtractor,
+    default_text_extractors,
+)
 from app.modules.search.indexer import SearchIndexService
 from app.modules.search.repository import SearchRepository
-
-_TEXT_MIME_TYPES = {
-    "application/csv",
-    "application/json",
-    "application/ld+json",
-    "application/xml",
-    "application/yaml",
-    "text/csv",
-    "text/markdown",
-    "text/plain",
-    "text/tab-separated-values",
-    "text/xml",
-}
-_TEXT_EXTENSIONS = {
-    ".csv",
-    ".json",
-    ".log",
-    ".md",
-    ".markdown",
-    ".txt",
-    ".tsv",
-    ".xml",
-    ".yaml",
-    ".yml",
-}
 
 
 @dataclass(frozen=True)
@@ -51,6 +32,7 @@ class SearchExtractionService:
         storage: StorageAdapter,
         settings: Settings,
         max_bytes: int | None = None,
+        extractors: list[TextExtractor] | None = None,
     ) -> None:
         self.repository = repository
         self.index_service = index_service
@@ -59,6 +41,7 @@ class SearchExtractionService:
         self.max_bytes = (
             max_bytes if max_bytes is not None else settings.search_text_extract_max_bytes
         )
+        self.extractors = extractors if extractors is not None else default_text_extractors()
 
     async def extract_version(
         self,
@@ -75,7 +58,9 @@ class SearchExtractionService:
 
         version, blob, node = record
         mime_type = (version.mime_type or blob.mime_type or "").split(";", 1)[0].strip().lower()
-        if not _is_supported_text(mime_type=mime_type, name=node.name):
+        context = TextExtractionContext(mime_type=mime_type, name=node.name)
+        extractor = self._select_extractor(context)
+        if extractor is None:
             await self.repository.set_version_search_state(
                 tenant_id=tenant_id,
                 version_id=version_id,
@@ -117,16 +102,29 @@ class SearchExtractionService:
                 storage_key=blob.storage_key,
                 max_bytes=self.max_bytes,
             )
-            text = _decode_text(content_bytes)
-        except UnicodeDecodeError:
+            text = extractor.extract(content_bytes, context)
+            if len(text) > self.max_bytes:
+                await self.repository.set_version_search_state(
+                    tenant_id=tenant_id,
+                    version_id=version_id,
+                    status="skipped",
+                    text=None,
+                    error="extracted_text_too_large",
+                )
+                return SearchExtractionResult(
+                    status="skipped",
+                    indexed=False,
+                    reason="extracted_text_too_large",
+                )
+        except TextExtractionError as exc:
             await self.repository.set_version_search_state(
                 tenant_id=tenant_id,
                 version_id=version_id,
                 status="failed",
                 text=None,
-                error="decode_failed",
+                error=exc.reason,
             )
-            return SearchExtractionResult(status="failed", indexed=False, reason="decode_failed")
+            return SearchExtractionResult(status="failed", indexed=False, reason=exc.reason)
         except Exception:
             await self.repository.set_version_search_state(
                 tenant_id=tenant_id,
@@ -168,14 +166,7 @@ class SearchExtractionService:
             extracted_chars=len(text),
         )
 
-
-def _is_supported_text(*, mime_type: str, name: str) -> bool:
-    if mime_type.startswith("text/") or mime_type in _TEXT_MIME_TYPES:
-        return True
-    normalized_name = name.casefold()
-    return any(normalized_name.endswith(extension) for extension in _TEXT_EXTENSIONS)
-
-
-def _decode_text(content: bytes) -> str:
-    text = content.decode("utf-8-sig")
-    return text.replace("\x00", "")
+    def _select_extractor(self, context: TextExtractionContext) -> TextExtractor | None:
+        return next(
+            (extractor for extractor in self.extractors if extractor.supports(context)), None
+        )
