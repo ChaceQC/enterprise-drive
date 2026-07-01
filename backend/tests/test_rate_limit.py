@@ -249,3 +249,24 @@ async def test_download_presign_rate_limit_blocks_second_request(
         )
 
     assert len(download_audits) == 1
+
+
+@pytest.mark.asyncio
+async def test_search_query_rate_limit_blocks_second_request(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    settings.rate_limit_enabled = True
+    settings.search_query_rate_limit_count = 1
+    settings.search_query_rate_limit_window_seconds = 60
+    await seed_admin(session_factory, settings)
+    await login(client)
+
+    first_response = await client.get("/api/v1/search", params={"q": "first"})
+    second_response = await client.get("/api/v1/search", params={"q": "second"})
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 429
+    assert second_response.json()["code"] == "RATE_LIMITED"
+    assert second_response.json()["details"]["action"] == "search.query"

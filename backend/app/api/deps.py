@@ -11,6 +11,8 @@ from app.core.config import Settings, get_settings
 from app.db.session import get_db_session
 from app.infrastructure.rate_limit.base import RateLimiter, RateLimitRule
 from app.infrastructure.rate_limit.redis import RedisFixedWindowRateLimiter
+from app.infrastructure.search.base import SearchIndexAdapter
+from app.infrastructure.search.opensearch import OpenSearchIndexAdapter
 from app.infrastructure.storage.base import StorageAdapter
 from app.infrastructure.storage.s3 import S3StorageAdapter
 from app.modules.audit.schemas import AuditContext
@@ -66,6 +68,12 @@ def get_storage_adapter(
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> StorageAdapter:
     return S3StorageAdapter(settings=settings)
+
+
+def get_search_index_adapter(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> SearchIndexAdapter:
+    return OpenSearchIndexAdapter(settings=settings)
 
 
 def get_rate_limiter(
@@ -127,6 +135,12 @@ def _rate_limit_rule(*, settings: Settings, action: str) -> RateLimitRule:
             action=action,
             limit=settings.download_presign_rate_limit_count,
             window_seconds=settings.download_presign_rate_limit_window_seconds,
+        )
+    if action == "search.query":
+        return RateLimitRule(
+            action=action,
+            limit=settings.search_query_rate_limit_count,
+            window_seconds=settings.search_query_rate_limit_window_seconds,
         )
     raise ApiError("RATE_LIMIT_RULE_NOT_FOUND", "限流规则不存在", status_code=500)
 

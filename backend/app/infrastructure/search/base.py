@@ -52,7 +52,35 @@ class FileSearchDocument:
         }
 
 
+@dataclass(frozen=True)
+class SearchHit:
+    node_id: str
+    space_id: str
+    name: str
+    mime_type: str | None
+    size_bytes: int
+    updated_at: datetime
+    score: float | None = None
+
+
+@dataclass(frozen=True)
+class SearchQuery:
+    tenant_id: str
+    query: str
+    acl_tokens: list[str]
+    deny_acl_tokens: list[str]
+    limit: int
+
+
+@dataclass(frozen=True)
+class SearchResult:
+    total: int
+    hits: list[SearchHit]
+
+
 class SearchIndexAdapter(Protocol):
     async def upsert_file_document(self, document: FileSearchDocument) -> None: ...
 
     async def delete_file_document(self, *, tenant_id: str, node_id: str) -> None: ...
+
+    async def search_files(self, query: SearchQuery) -> SearchResult: ...

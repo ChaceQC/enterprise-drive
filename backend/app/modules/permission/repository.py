@@ -70,6 +70,25 @@ class PermissionRepository:
         )
         return list(result.scalars().all())
 
+    async def list_user_space_members(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+    ) -> list[SpaceMember]:
+        result = await self.session.execute(
+            select(SpaceMember)
+            .join(Space, Space.id == SpaceMember.space_id)
+            .where(
+                SpaceMember.tenant_id == tenant_id,
+                SpaceMember.user_id == user_id,
+                Space.tenant_id == tenant_id,
+                Space.is_active.is_(True),
+            )
+            .order_by(SpaceMember.space_id, SpaceMember.role, SpaceMember.id)
+        )
+        return list(result.scalars().all())
+
     async def get_space_member_for_update(
         self,
         *,

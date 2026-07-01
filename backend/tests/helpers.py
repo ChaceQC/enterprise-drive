@@ -10,12 +10,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from app.api.deps import get_rate_limiter, get_storage_adapter
+from app.api.deps import get_rate_limiter, get_search_index_adapter, get_storage_adapter
 from app.core.config import Settings, get_settings
 from app.core.security import hash_password
 from app.db.base import Base
 from app.db.session import get_db_session
 from app.infrastructure.rate_limit.testing import InMemoryFixedWindowRateLimiter
+from app.infrastructure.search.testing import InMemorySearchIndexAdapter
 from app.infrastructure.storage.testing import InMemoryStorageAdapter
 from app.main import create_app
 from app.modules.auth.models import User
@@ -44,6 +45,11 @@ def storage_adapter() -> InMemoryStorageAdapter:
     return InMemoryStorageAdapter()
 
 
+@pytest.fixture
+def search_index_adapter() -> InMemorySearchIndexAdapter:
+    return InMemorySearchIndexAdapter()
+
+
 @pytest_asyncio.fixture
 async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
     engine = create_async_engine(
@@ -61,12 +67,18 @@ async def session_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
 
 @pytest_asyncio.fixture
 async def client(
+    request: pytest.FixtureRequest,
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     storage_adapter: InMemoryStorageAdapter,
 ) -> AsyncIterator[AsyncClient]:
     app = create_app(settings)
     rate_limiter = InMemoryFixedWindowRateLimiter()
+    search_adapter = (
+        request.getfixturevalue("search_index_adapter")
+        if "search_index_adapter" in request.fixturenames
+        else InMemorySearchIndexAdapter()
+    )
 
     async def override_get_db_session() -> AsyncIterator[AsyncSession]:
         async with session_factory() as db_session:
@@ -75,8 +87,10 @@ async def client(
     app.dependency_overrides[get_db_session] = override_get_db_session
     app.dependency_overrides[get_settings] = lambda: settings
     app.dependency_overrides[get_storage_adapter] = lambda: storage_adapter
+    app.dependency_overrides[get_search_index_adapter] = lambda: search_adapter
     app.dependency_overrides[get_rate_limiter] = lambda: rate_limiter
     app.state.storage_adapter = storage_adapter
+    app.state.search_index_adapter = search_adapter
     app.state.rate_limiter = rate_limiter
 
     transport = ASGITransport(app=app)

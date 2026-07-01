@@ -28,6 +28,7 @@ from app.modules.permission.constants import (
     SPACE_ROLE_OWNER,
     SPACE_ROLE_VIEWER,
 )
+from app.modules.permission.models import SpaceMember
 from app.modules.permission.repository import PermissionRepository
 
 SPACE_ROLE_ACTIONS = {
@@ -120,6 +121,17 @@ class PermissionService:
         if ACL_EFFECT_ALLOW in matched_effects:
             return True
         return role_allows
+
+    async def list_user_space_members(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+    ) -> list[SpaceMember]:
+        return await self.repository.list_user_space_members(
+            tenant_id=tenant_id,
+            user_id=user_id,
+        )
 
     async def batch_check_nodes(
         self,

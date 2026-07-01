@@ -97,5 +97,23 @@ def build_index_acl_token_set(
     return SearchAclTokenSet(allow_tokens=sorted(allow_tokens), deny_tokens=sorted(deny_tokens))
 
 
+def build_query_acl_token_set(
+    *,
+    space_members: list[SpaceMember],
+    user_id: UUID,
+    department_ids: list[UUID],
+    group_ids: list[UUID],
+) -> SearchAclTokenSet:
+    subject_tokens = {user_acl_token(user_id)}
+    subject_tokens.update(department_acl_token(department_id) for department_id in department_ids)
+    subject_tokens.update(group_acl_token(group_id) for group_id in group_ids)
+
+    allow_tokens = set(subject_tokens)
+    allow_tokens.update(
+        space_role_acl_token(space_id=member.space_id, role=member.role) for member in space_members
+    )
+    return SearchAclTokenSet(allow_tokens=sorted(allow_tokens), deny_tokens=sorted(subject_tokens))
+
+
 def _is_search_visible_acl(entry: AclEntry) -> bool:
     return any(action in SEARCH_VISIBLE_ACTIONS for action in entry.actions)

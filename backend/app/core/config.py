@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     upload_part_presign_rate_limit_window_seconds: int = 60
     download_presign_rate_limit_count: int = 120
     download_presign_rate_limit_window_seconds: int = 60
+    search_query_rate_limit_count: int = 60
+    search_query_rate_limit_window_seconds: int = 60
 
     session_cookie_name: str = "drive_session"
     csrf_cookie_name: str = "drive_csrf"
