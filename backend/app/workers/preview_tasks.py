@@ -5,6 +5,7 @@ from uuid import UUID
 
 from app.core.config import get_settings
 from app.db.session import get_session_factory
+from app.infrastructure.preview.libreoffice import LibreOfficePreviewConverter
 from app.infrastructure.preview.poppler import PopplerPdfPreviewConverter
 from app.infrastructure.queue.celery_app import celery_app
 from app.infrastructure.storage.s3 import S3StorageAdapter
@@ -38,6 +39,11 @@ async def _dispatch_preview_outbox(batch_size: int | None = None) -> dict[str, i
                     dpi=settings.preview_pdf_dpi,
                     timeout_seconds=settings.preview_command_timeout_seconds,
                     max_rendered_bytes=settings.preview_pdf_max_rendered_bytes,
+                ),
+                office_converter=LibreOfficePreviewConverter(
+                    command=settings.preview_office_command,
+                    timeout_seconds=settings.preview_command_timeout_seconds,
+                    max_pdf_bytes=settings.preview_office_max_pdf_bytes,
                 ),
             ),
             fallback_publisher=LoggingOutboxPublisher(),

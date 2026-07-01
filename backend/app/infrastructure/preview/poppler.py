@@ -10,6 +10,7 @@ from app.modules.preview.converters import (
     PreviewRenderError,
     PreviewRenderTimeoutError,
     PreviewToolUnavailableError,
+    PreviewUnsupportedError,
 )
 
 
@@ -30,7 +31,10 @@ class PopplerPdfPreviewConverter:
     async def render_first_page_png(self, source: bytes) -> bytes:
         executable = _resolve_executable(self.command)
         if executable is None:
-            raise PreviewToolUnavailableError(f"{self.command} not found")
+            raise PreviewToolUnavailableError(
+                f"{self.command} not found",
+                reason="pdf_renderer_missing",
+            )
 
         with TemporaryDirectory(prefix="drive-preview-pdf-") as temp_dir:
             temp_path = Path(temp_dir)
@@ -59,17 +63,26 @@ class PopplerPdfPreviewConverter:
             except TimeoutError as exc:
                 process.kill()
                 await process.communicate()
-                raise PreviewRenderTimeoutError("pdf_render_timeout") from exc
+                raise PreviewRenderTimeoutError(
+                    "pdf_render_timeout",
+                    reason="pdf_render_timeout",
+                ) from exc
 
             if process.returncode != 0:
                 message = stderr.decode("utf-8", "replace").strip() or "pdftoppm failed"
-                raise PreviewRenderError(message[:500])
+                raise PreviewRenderError(message[:500], reason="pdf_render_failed")
 
             output_path = output_prefix.with_suffix(".png")
             if not output_path.exists():
-                raise PreviewRenderError("pdf_preview_output_missing")
+                raise PreviewRenderError(
+                    "pdf_preview_output_missing",
+                    reason="pdf_render_failed",
+                )
             if output_path.stat().st_size > self.max_rendered_bytes:
-                raise PreviewRenderError("pdf_preview_output_too_large")
+                raise PreviewUnsupportedError(
+                    "pdf_preview_output_too_large",
+                    reason="pdf_preview_output_too_large",
+                )
             return output_path.read_bytes()
 
 

@@ -12,7 +12,7 @@ from app.infrastructure.storage.testing import InMemoryStorageAdapter
 from app.modules.audit.dispatcher import LoggingOutboxPublisher, OutboxDispatcher
 from app.modules.audit.repository import AuditRepository
 from app.modules.file.models import FileBlob
-from app.modules.preview.converters import PdfPreviewConverter
+from app.modules.preview.converters import OfficePreviewConverter, PdfPreviewConverter
 from app.modules.preview.events import PREVIEW_RENDER_REQUESTED
 from app.modules.preview.renderer import PreviewRenderService
 from app.modules.preview.repository import PreviewRepository
@@ -25,6 +25,7 @@ async def dispatch_preview_events(
     settings: Settings,
     storage_adapter: InMemoryStorageAdapter,
     pdf_converter: PdfPreviewConverter | None = None,
+    office_converter: OfficePreviewConverter | None = None,
 ) -> None:
     async with session_factory() as session:
         repository = PreviewRepository(session)
@@ -36,6 +37,7 @@ async def dispatch_preview_events(
                     storage=storage_adapter,
                     settings=settings,
                     pdf_converter=pdf_converter,
+                    office_converter=office_converter,
                 ),
                 fallback_publisher=LoggingOutboxPublisher(),
             ),
@@ -105,6 +107,16 @@ class FakePdfPreviewConverter:
     async def render_first_page_png(self, source: bytes) -> bytes:
         self.sources.append(source)
         return png_bytes()
+
+
+class FakeOfficePreviewConverter:
+    def __init__(self, pdf: bytes = b"%PDF-1.7\n% converted\n") -> None:
+        self.pdf = pdf
+        self.calls: list[tuple[bytes, str]] = []
+
+    async def convert_to_pdf(self, source: bytes, *, file_extension: str) -> bytes:
+        self.calls.append((source, file_extension))
+        return self.pdf
 
 
 def png_bytes() -> bytes:

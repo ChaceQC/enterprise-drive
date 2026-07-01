@@ -69,6 +69,8 @@ class Settings(BaseSettings):
     search_text_extract_max_bytes: int = 512 * 1024
     preview_max_source_bytes: int = 20 * 1024 * 1024
     preview_image_max_side: int = 1600
+    preview_office_command: str = "soffice"
+    preview_office_max_pdf_bytes: int = 50 * 1024 * 1024
     preview_pdf_command: str = "pdftoppm"
     preview_pdf_dpi: int = 144
     preview_pdf_max_rendered_bytes: int = 50 * 1024 * 1024
