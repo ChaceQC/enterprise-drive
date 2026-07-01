@@ -145,6 +145,7 @@
 - 孤儿最终对象扫描以 PostgreSQL `file_blobs.storage_key` 为事实来源，不处理 `uploads/`、`previews/` 等非最终对象前缀，也会跳过不符合受控 key 形态的对象；dry-run、清理成功和对象存储删除失败均写入系统审计，审计 metadata 不记录原始 storage key。
 - 新增 `orphan_object_cleanup_total{status}` Prometheus counter，记录孤儿最终对象扫描、跳过、dry-run planned、清理成功和删除失败计数。
 - 补充孤儿最终对象清理测试，覆盖 dry-run 不删除、真实删除并写审计、已被 DB blob 引用的对象不删除、非受控 key 跳过、对象存储删除失败审计、worker 在 `limit=1` 下通过对象游标扫完整个租户前缀。
+- 按最新要求在 `PROJECT_PLAN.md` 增补独立的“上传下载企业级补强计划”小节，明确 MinIO SDK multipart 私有方法风险、孤儿最终对象持续治理、多维配额、维护任务调度告警、高密级下载代理、同 hash 首次上传并发测试和真实对象存储集成测试仍是上线前重点。
 
 ### 进行中
 
@@ -172,6 +173,10 @@
 ### 下一步
 
 - 优先补真实 MinIO 集成测试，覆盖 multipart 私有方法封装、copy/delete/list/presign/hash 校验、孤儿最终对象扫描和异常恢复；随后推进 MinIO multipart 私有方法替换评估、高密级下载代理、多维配额和维护任务调度告警。
+
+### 验证
+
+- 本轮为计划文档更新，执行 `git diff --check` 检查空白格式。
 
 ### 涉及文件
 
