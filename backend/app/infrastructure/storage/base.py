@@ -113,3 +113,12 @@ class StorageAdapter(Protocol):
         storage_key: str,
     ) -> None:
         """Delete one private object if it exists."""
+
+    async def read_object_bytes(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        max_bytes: int,
+    ) -> bytes:
+        """Read at most max_bytes from one private object."""

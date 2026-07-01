@@ -76,6 +76,56 @@ class SearchRepository:
             ),
         )
 
+    async def get_version_blob_node(
+        self,
+        *,
+        tenant_id: UUID,
+        version_id: UUID,
+    ) -> tuple[FileVersion, FileBlob, Node] | None:
+        result = await self.session.execute(
+            select(FileVersion, FileBlob, Node)
+            .join(
+                FileBlob,
+                (FileBlob.tenant_id == FileVersion.tenant_id)
+                & (FileBlob.id == FileVersion.blob_id),
+            )
+            .join(
+                Node,
+                (Node.tenant_id == FileVersion.tenant_id) & (Node.id == FileVersion.node_id),
+            )
+            .where(
+                FileVersion.tenant_id == tenant_id,
+                FileVersion.id == version_id,
+            )
+        )
+        row = result.one_or_none()
+        if row is None:
+            return None
+        return row[0], row[1], row[2]
+
+    async def set_version_search_state(
+        self,
+        *,
+        tenant_id: UUID,
+        version_id: UUID,
+        status: str,
+        text: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        result = await self.session.execute(
+            select(FileVersion).where(
+                FileVersion.tenant_id == tenant_id,
+                FileVersion.id == version_id,
+            )
+        )
+        version = result.scalar_one_or_none()
+        if version is None:
+            return
+        version.search_status = status
+        version.search_text = text
+        version.search_error = error
+        await self.session.flush()
+
     async def list_active_file_node_ids_for_space(
         self,
         *,
@@ -204,3 +254,9 @@ class SearchRepository:
             )
         )
         return list(result.scalars().all())
+
+    async def commit(self) -> None:
+        await self.session.commit()
+
+    async def rollback(self) -> None:
+        await self.session.rollback()

@@ -9,15 +9,25 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
 from app.infrastructure.search.testing import InMemorySearchIndexAdapter
-from app.modules.audit.dispatcher import LoggingOutboxPublisher, OutboxDispatcher
+from app.infrastructure.storage.testing import InMemoryStorageAdapter
+from app.modules.audit.dispatcher import (
+    LoggingOutboxPublisher,
+    OutboxDispatcher,
+    OutboxDispatchResult,
+)
 from app.modules.audit.models import OutboxEvent
 from app.modules.audit.repository import AuditRepository
 from app.modules.audit.service import AuditService
-from app.modules.file.models import FileBlob
+from app.modules.file.models import FileBlob, FileVersion
 from app.modules.permission.events import emit_permission_changed
 from app.modules.permission.models import AclEntry, SpaceMember
 from app.modules.search.acl import build_index_acl_token_set, build_index_acl_tokens
-from app.modules.search.events import SEARCH_ACL_REBUILD_REQUESTED, SEARCH_INDEX_REQUESTED
+from app.modules.search.events import (
+    SEARCH_ACL_REBUILD_REQUESTED,
+    SEARCH_EXTRACT_REQUESTED,
+    SEARCH_INDEX_REQUESTED,
+)
+from app.modules.search.extractor import SearchExtractionService
 from app.modules.search.indexer import SearchIndexService
 from app.modules.search.repository import SearchRepository
 from app.workers import search_tasks
@@ -27,6 +37,17 @@ from tests.helpers import session_factory as session_factory
 from tests.helpers import settings as settings
 from tests.helpers import storage_adapter as storage_adapter
 from tests.test_permission_cache import _get_seeded_tenant_and_user
+
+
+class FailingReadStorageAdapter(InMemoryStorageAdapter):
+    async def read_object_bytes(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        max_bytes: int,
+    ) -> bytes:
+        raise RuntimeError("storage unavailable")
 
 
 def test_build_index_acl_tokens_includes_roles_and_allowed_subjects() -> None:
@@ -308,6 +329,17 @@ async def test_instant_upload_writes_search_index_event(
     assert event.payload["node_id"] == node_id
     assert event.payload["reason"] == "upload_instant"
 
+    async with session_factory() as session:
+        extract_event = (
+            await session.execute(
+                select(OutboxEvent).where(OutboxEvent.event_type == SEARCH_EXTRACT_REQUESTED)
+            )
+        ).scalar_one()
+
+    assert extract_event.aggregate_type == "file_version"
+    assert extract_event.payload["node_id"] == node_id
+    assert extract_event.payload["reason"] == "upload_instant"
+
 
 @pytest.mark.asyncio
 async def test_search_index_requested_event_indexes_file_document(
@@ -376,6 +408,333 @@ async def test_search_index_requested_event_indexes_file_document(
     assert document.content_hash == "d" * 64
     assert document.acl_tokens == [f"space:{space['id']}:role:owner"]
     assert document.deny_acl_tokens == []
+
+
+@pytest.mark.asyncio
+async def test_search_extract_requested_indexes_text_content(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="search-text-extract-space")
+    tenant_id = UUID(str(space["tenant_id"]))
+    storage_key = "objects/test/text-content"
+    storage_adapter.object_contents[(settings.s3_bucket, storage_key)] = (
+        "标题\n可搜索正文内容".encode()
+    )
+    async with session_factory() as session:
+        session.add(
+            FileBlob(
+                tenant_id=tenant_id,
+                hash_algo="sha256",
+                content_hash="1" * 64,
+                size_bytes=128,
+                storage_key=storage_key,
+                mime_type="text/plain",
+                ref_count=0,
+            )
+        )
+        await session.commit()
+
+    response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"X-CSRF-Token": token},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "file_name": "正文.txt",
+            "size_bytes": 128,
+            "content_hash": "1" * 64,
+            "hash_algo": "sha256",
+            "mime_type": "text/plain",
+        },
+    )
+    assert response.status_code == 201
+    node_id = response.json()["node_id"]
+    version_id = UUID(response.json()["version_id"])
+    index_adapter = InMemorySearchIndexAdapter()
+
+    await _dispatch_search_events(
+        session_factory=session_factory,
+        settings=settings,
+        index_adapter=index_adapter,
+        storage_adapter=storage_adapter,
+        batch_size=10,
+        event_types=[SEARCH_EXTRACT_REQUESTED],
+    )
+
+    async with session_factory() as session:
+        version = await session.get(FileVersion, version_id)
+    assert version is not None
+    assert version.search_status == "indexed"
+    assert version.search_text == "标题\n可搜索正文内容"
+    assert version.search_error is None
+    assert index_adapter.documents[f"{tenant_id}:{node_id}"].content == "标题\n可搜索正文内容"
+
+
+@pytest.mark.asyncio
+async def test_search_extract_requested_skips_unsupported_file(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="search-extract-skip-space")
+    tenant_id = UUID(str(space["tenant_id"]))
+    async with session_factory() as session:
+        session.add(
+            FileBlob(
+                tenant_id=tenant_id,
+                hash_algo="sha256",
+                content_hash="2" * 64,
+                size_bytes=256,
+                storage_key="objects/test/image",
+                mime_type="image/png",
+                ref_count=0,
+            )
+        )
+        await session.commit()
+
+    response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"X-CSRF-Token": token},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "file_name": "图片.png",
+            "size_bytes": 256,
+            "content_hash": "2" * 64,
+            "hash_algo": "sha256",
+            "mime_type": "image/png",
+        },
+    )
+    assert response.status_code == 201
+    version_id = UUID(response.json()["version_id"])
+    index_adapter = InMemorySearchIndexAdapter()
+
+    await _dispatch_search_events(
+        session_factory=session_factory,
+        settings=settings,
+        index_adapter=index_adapter,
+        storage_adapter=storage_adapter,
+        batch_size=10,
+        event_types=[SEARCH_EXTRACT_REQUESTED],
+    )
+
+    async with session_factory() as session:
+        version = await session.get(FileVersion, version_id)
+    assert version is not None
+    assert version.search_status == "skipped"
+    assert version.search_text is None
+    assert version.search_error == "unsupported_mime_type"
+
+
+@pytest.mark.asyncio
+async def test_search_extract_requested_skips_large_text_file(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="search-extract-large-text-space")
+    tenant_id = UUID(str(space["tenant_id"]))
+    storage_key = "objects/test/large-text"
+    storage_adapter.object_contents[(settings.s3_bucket, storage_key)] = b"x" * 9
+    async with session_factory() as session:
+        session.add(
+            FileBlob(
+                tenant_id=tenant_id,
+                hash_algo="sha256",
+                content_hash="5" * 64,
+                size_bytes=9,
+                storage_key=storage_key,
+                mime_type="text/plain",
+                ref_count=0,
+            )
+        )
+        await session.commit()
+
+    response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"X-CSRF-Token": token},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "file_name": "过大文本.txt",
+            "size_bytes": 9,
+            "content_hash": "5" * 64,
+            "hash_algo": "sha256",
+            "mime_type": "text/plain",
+        },
+    )
+    assert response.status_code == 201
+    version_id = UUID(response.json()["version_id"])
+    index_adapter = InMemorySearchIndexAdapter()
+
+    await _dispatch_search_events(
+        session_factory=session_factory,
+        settings=settings,
+        index_adapter=index_adapter,
+        storage_adapter=storage_adapter,
+        batch_size=10,
+        event_types=[SEARCH_EXTRACT_REQUESTED],
+        max_bytes=8,
+    )
+
+    async with session_factory() as session:
+        version = await session.get(FileVersion, version_id)
+    assert version is not None
+    assert version.search_status == "skipped"
+    assert version.search_text is None
+    assert version.search_error == "file_too_large"
+    assert index_adapter.documents == {}
+
+
+@pytest.mark.asyncio
+async def test_search_extract_requested_marks_decode_failure_without_retry(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="search-extract-decode-failed-space")
+    tenant_id = UUID(str(space["tenant_id"]))
+    storage_key = "objects/test/binary-text"
+    storage_adapter.object_contents[(settings.s3_bucket, storage_key)] = b"\xff\xfe\x00"
+    async with session_factory() as session:
+        session.add(
+            FileBlob(
+                tenant_id=tenant_id,
+                hash_algo="sha256",
+                content_hash="3" * 64,
+                size_bytes=3,
+                storage_key=storage_key,
+                mime_type="text/plain",
+                ref_count=0,
+            )
+        )
+        await session.commit()
+
+    response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"X-CSRF-Token": token},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "file_name": "坏编码.txt",
+            "size_bytes": 3,
+            "content_hash": "3" * 64,
+            "hash_algo": "sha256",
+            "mime_type": "text/plain",
+        },
+    )
+    assert response.status_code == 201
+    version_id = UUID(response.json()["version_id"])
+    index_adapter = InMemorySearchIndexAdapter()
+
+    result = await _dispatch_search_events(
+        session_factory=session_factory,
+        settings=settings,
+        index_adapter=index_adapter,
+        storage_adapter=storage_adapter,
+        batch_size=10,
+        event_types=[SEARCH_EXTRACT_REQUESTED],
+    )
+
+    assert result.to_dict() == {"claimed": 1, "sent": 1, "failed": 0, "dead": 0}
+    async with session_factory() as session:
+        version = await session.get(FileVersion, version_id)
+        event = (
+            await session.execute(
+                select(OutboxEvent).where(OutboxEvent.event_type == SEARCH_EXTRACT_REQUESTED)
+            )
+        ).scalar_one()
+
+    assert version is not None
+    assert version.search_status == "failed"
+    assert version.search_text is None
+    assert version.search_error == "decode_failed"
+    assert event.status == "sent"
+    assert event.retry_count == 0
+    assert index_adapter.documents == {}
+
+
+@pytest.mark.asyncio
+async def test_search_extract_requested_retries_storage_read_failure(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="search-extract-storage-failed-space")
+    tenant_id = UUID(str(space["tenant_id"]))
+    async with session_factory() as session:
+        session.add(
+            FileBlob(
+                tenant_id=tenant_id,
+                hash_algo="sha256",
+                content_hash="4" * 64,
+                size_bytes=8,
+                storage_key="objects/test/storage-failed",
+                mime_type="text/plain",
+                ref_count=0,
+            )
+        )
+        await session.commit()
+
+    response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"X-CSRF-Token": token},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "file_name": "存储失败.txt",
+            "size_bytes": 8,
+            "content_hash": "4" * 64,
+            "hash_algo": "sha256",
+            "mime_type": "text/plain",
+        },
+    )
+    assert response.status_code == 201
+    version_id = UUID(response.json()["version_id"])
+    index_adapter = InMemorySearchIndexAdapter()
+
+    result = await _dispatch_search_events(
+        session_factory=session_factory,
+        settings=settings,
+        index_adapter=index_adapter,
+        storage_adapter=FailingReadStorageAdapter(),
+        batch_size=10,
+        event_types=[SEARCH_EXTRACT_REQUESTED],
+        expected_failed=1,
+    )
+
+    assert result.to_dict() == {"claimed": 1, "sent": 0, "failed": 1, "dead": 0}
+    async with session_factory() as session:
+        version = await session.get(FileVersion, version_id)
+        event = (
+            await session.execute(
+                select(OutboxEvent).where(OutboxEvent.event_type == SEARCH_EXTRACT_REQUESTED)
+            )
+        ).scalar_one()
+
+    assert version is not None
+    assert version.search_status == "failed"
+    assert version.search_text is None
+    assert version.search_error == "storage_read_failed"
+    assert event.status == "failed"
+    assert event.retry_count == 1
+    assert index_adapter.documents == {}
 
 
 @pytest.mark.asyncio
@@ -577,14 +936,32 @@ async def _dispatch_search_events(
     settings: Settings,
     index_adapter: InMemorySearchIndexAdapter,
     batch_size: int,
-) -> None:
+    storage_adapter: InMemoryStorageAdapter | None = None,
+    event_types: list[str] | None = None,
+    expected_failed: int = 0,
+    expected_dead: int = 0,
+    max_bytes: int | None = None,
+) -> OutboxDispatchResult:
     async with session_factory() as session:
+        repository = SearchRepository(session)
+        index_service = SearchIndexService(
+            repository=repository,
+            index_adapter=index_adapter,
+        )
         dispatcher = OutboxDispatcher(
             repository=AuditRepository(session),
             publisher=search_tasks.SearchOutboxPublisher(
-                index_service=SearchIndexService(
-                    repository=SearchRepository(session),
-                    index_adapter=index_adapter,
+                index_service=index_service,
+                extraction_service=(
+                    SearchExtractionService(
+                        repository=repository,
+                        index_service=index_service,
+                        storage=storage_adapter,
+                        settings=settings,
+                        max_bytes=max_bytes,
+                    )
+                    if storage_adapter is not None
+                    else None
                 ),
                 fallback_publisher=LoggingOutboxPublisher(),
             ),
@@ -592,8 +969,9 @@ async def _dispatch_search_events(
         )
         result = await dispatcher.dispatch_pending(
             batch_size=batch_size,
-            event_types=[SEARCH_INDEX_REQUESTED],
+            event_types=event_types or [SEARCH_INDEX_REQUESTED],
         )
         await session.commit()
-    assert result.failed == 0
-    assert result.dead == 0
+    assert result.failed == expected_failed
+    assert result.dead == expected_dead
+    return result

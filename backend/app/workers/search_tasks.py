@@ -7,10 +7,16 @@ from app.core.config import get_settings
 from app.db.session import get_session_factory
 from app.infrastructure.queue.celery_app import celery_app
 from app.infrastructure.search.opensearch import OpenSearchIndexAdapter
+from app.infrastructure.storage.s3 import S3StorageAdapter
 from app.modules.audit.dispatcher import LoggingOutboxPublisher, OutboxDispatcher, OutboxPublisher
 from app.modules.audit.models import OutboxEvent
 from app.modules.audit.repository import AuditRepository
-from app.modules.search.events import SEARCH_ACL_REBUILD_REQUESTED, SEARCH_INDEX_REQUESTED
+from app.modules.search.events import (
+    SEARCH_ACL_REBUILD_REQUESTED,
+    SEARCH_EXTRACT_REQUESTED,
+    SEARCH_INDEX_REQUESTED,
+)
+from app.modules.search.extractor import SearchExtractionService
 from app.modules.search.indexer import SearchIndexService
 from app.modules.search.repository import SearchRepository
 
@@ -26,10 +32,19 @@ async def _dispatch_search_outbox(batch_size: int | None = None) -> dict[str, in
     settings = get_settings()
     session_factory = get_session_factory()
     async with session_factory() as session:
+        search_repository = SearchRepository(session)
+        index_adapter = OpenSearchIndexAdapter(settings=settings)
+        index_service = SearchIndexService(
+            repository=search_repository,
+            index_adapter=index_adapter,
+        )
         publisher = SearchOutboxPublisher(
-            index_service=SearchIndexService(
-                repository=SearchRepository(session),
-                index_adapter=OpenSearchIndexAdapter(settings=settings),
+            index_service=index_service,
+            extraction_service=SearchExtractionService(
+                repository=search_repository,
+                index_service=index_service,
+                storage=S3StorageAdapter(settings=settings),
+                settings=settings,
             ),
             fallback_publisher=LoggingOutboxPublisher(),
         )
@@ -40,7 +55,11 @@ async def _dispatch_search_outbox(batch_size: int | None = None) -> dict[str, in
         )
         result = await dispatcher.dispatch_pending(
             batch_size=batch_size or settings.outbox_batch_size,
-            event_types=[SEARCH_INDEX_REQUESTED, SEARCH_ACL_REBUILD_REQUESTED],
+            event_types=[
+                SEARCH_INDEX_REQUESTED,
+                SEARCH_ACL_REBUILD_REQUESTED,
+                SEARCH_EXTRACT_REQUESTED,
+            ],
         )
         await session.commit()
         return result.to_dict()
@@ -51,9 +70,11 @@ class SearchOutboxPublisher:
         self,
         *,
         index_service: SearchIndexService,
+        extraction_service: SearchExtractionService | None = None,
         fallback_publisher: OutboxPublisher,
     ) -> None:
         self.index_service = index_service
+        self.extraction_service = extraction_service
         self.fallback_publisher = fallback_publisher
 
     async def publish(self, event: OutboxEvent) -> None:
@@ -62,6 +83,9 @@ class SearchOutboxPublisher:
             return
         if event.event_type == SEARCH_ACL_REBUILD_REQUESTED:
             await self._publish_acl_rebuild_requested(event)
+            return
+        if event.event_type == SEARCH_EXTRACT_REQUESTED:
+            await self._publish_extract_requested(event)
             return
         if event.event_type.startswith("search."):
             raise ValueError(f"unsupported search event type: {event.event_type}")
@@ -85,4 +109,15 @@ class SearchOutboxPublisher:
             tenant_id=event.tenant_id,
             scope=scope,
             resource_id=UUID(resource_id),
+        )
+
+    async def _publish_extract_requested(self, event: OutboxEvent) -> None:
+        if self.extraction_service is None:
+            raise ValueError("search extraction service is not configured")
+        version_id = event.payload.get("version_id")
+        if not isinstance(version_id, str):
+            raise ValueError("search extract event missing version_id")
+        await self.extraction_service.extract_version(
+            tenant_id=event.tenant_id,
+            version_id=UUID(version_id),
         )

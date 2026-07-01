@@ -183,6 +183,15 @@ class S3StorageAdapter:
             storage_key,
         )
 
+    async def read_object_bytes(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        max_bytes: int,
+    ) -> bytes:
+        return await asyncio.to_thread(self._read_object_bytes, bucket, storage_key, max_bytes)
+
     def _ensure_bucket(self, bucket: str) -> None:
         if self._client.bucket_exists(bucket):
             return
@@ -199,3 +208,20 @@ class S3StorageAdapter:
             response.close()
             response.release_conn()
         return digest.hexdigest()
+
+    def _read_object_bytes(self, bucket: str, storage_key: str, max_bytes: int) -> bytes:
+        response = self._client.get_object(bucket, storage_key)
+        chunks: list[bytes] = []
+        remaining = max(max_bytes, 0)
+        try:
+            for chunk in response.stream(64 * 1024):
+                if remaining <= 0:
+                    break
+                if not chunk:
+                    continue
+                chunks.append(chunk[:remaining])
+                remaining -= len(chunks[-1])
+        finally:
+            response.close()
+            response.release_conn()
+        return b"".join(chunks)

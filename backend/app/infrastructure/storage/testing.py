@@ -137,6 +137,21 @@ class InMemoryStorageAdapter:
         self.deleted_objects.append((bucket, storage_key))
         self.object_contents.pop((bucket, storage_key), None)
 
+    async def read_object_bytes(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        max_bytes: int,
+    ) -> bytes:
+        content = self.object_contents.get((bucket, storage_key))
+        if content is None:
+            content = self._object_content_from_completed_parts(
+                bucket=bucket,
+                storage_key=storage_key,
+            )
+        return content[:max_bytes]
+
     def _completed_parts_for(
         self,
         *,

@@ -86,4 +86,5 @@ def build_file_search_document(record: FileIndexRecord) -> FileSearchDocument:
         created_at=record.node.created_at,
         updated_at=record.node.updated_at,
         is_deleted=record.node.is_deleted,
+        content=record.version.search_text or "",
     )

@@ -98,17 +98,22 @@
 - 搜索查询已支持签名 cursor 分页：OpenSearch 适配器使用 `search_after`，cursor 绑定查询词和排序值，篡改或跨查询复用返回 `CURSOR_INVALID`。
 - 搜索查询响应已返回 HTML 编码的 `<mark>` 高亮片段，当前覆盖 `name`、`normalized_name` 和 `content` 字段；内存搜索适配器同步模拟分页和高亮，便于单元测试覆盖。
 - 补充搜索查询测试，覆盖分页不重复、`next_cursor` 返回、游标绑定查询词和搜索高亮。
+- 新增搜索全文抽取入口：上传秒传和 multipart complete 成功后写入 `search.extract_requested` outbox event，`search.dispatch_outbox` 会消费该事件并调用 `SearchExtractionService`。
+- `file_versions` 新增 `search_status`、`search_error` 和 `search_text` 字段；当前抽取只处理 MIME 或扩展名可判定为文本的 UTF-8 小文件，读取上限由 `DRIVE_SEARCH_TEXT_EXTRACT_MAX_BYTES` 控制。
+- 文本抽取成功后写入 `search_text` 并刷新 OpenSearch 索引 `content` 字段；不支持的格式标记为 `skipped`，UTF-8 解码失败标记为 `failed` 且不重试，对象存储读取失败标记为 `failed` 并让 outbox 退避重试。
+- 按 AGENT 规则保持抽取入口简洁可维护：本轮不自研 PDF/Office 解析器，复杂格式后续使用成熟开源工具或标准适配层接入。
+- 补充搜索抽取测试，覆盖上传写入抽取事件、文本正文入索引、不支持格式跳过、解码失败终态和存储读取失败重试。
 
 ### 进行中
 
-- Sprint 4 权限系统已开始；空间成员事实表、owner 成员自动写入、空间级成员角色检查、空间成员管理 API、用户/部门/用户组节点 ACL 基础闭环、文件列表批量权限评估、`permission.changed` outbox 事件写入、Redis 权限缓存失效 worker、org 部门/用户组主体展开、搜索文件索引写入、ACL 变更范围重建、搜索查询过滤、文件变更索引同步、搜索分页 cursor 和 highlight 已完成，下一步补齐搜索全文抽取入口。
+- Sprint 4 权限系统已开始；空间成员事实表、owner 成员自动写入、空间级成员角色检查、空间成员管理 API、用户/部门/用户组节点 ACL 基础闭环、文件列表批量权限评估、`permission.changed` outbox 事件写入、Redis 权限缓存失效 worker、org 部门/用户组主体展开、搜索文件索引写入、ACL 变更范围重建、搜索查询过滤、文件变更索引同步、搜索分页 cursor、highlight 和 UTF-8 文本类全文抽取入口已完成，下一步推进分享模块基础数据模型与接口。
 
 ### 阻塞与风险
 
 - MinIO Python SDK 的 multipart create/complete/abort 在当前适配中需要调用客户端私有方法，已限定在 `infrastructure` 适配层；若后续出现兼容性、升级稳定性或批量吞吐问题，应评估更完整的开源 S3 兼容客户端或标准 HTTP/SigV4 实现。
 - 当前 Redis 限流仍是固定窗口策略，适用于上传初始化、分片签名和下载预签名的基础保护；若后续需要滑动窗口、令牌桶、多层级动态规则或管理端配置，应切换成熟限流库。
 - 当前空间、文件树、上传、下载、空间成员管理和节点 ACL 管理接口已接入权限检查；文件列表已返回当前页子节点的批量权限评估结果；权限变更 outbox 事件已接入 Redis 缓存失效 worker；org 部门/用户组 ACL 主体和搜索 ACL 重建事件已接入。
-- 搜索当前已完成 token builder、outbox 事件、文件索引文档构建、`search.index_requested` 写入 OpenSearch 入口、`search.acl_rebuild_requested` 的保守范围重建、`/api/v1/search` 查询过滤、签名 cursor 分页、HTML 编码 highlight，以及上传完成、重命名、移动、删除、恢复和彻底删除后的索引同步；全文抽取仍需后续补齐。
+- 搜索当前已完成 token builder、outbox 事件、文件索引文档构建、`search.index_requested` 写入 OpenSearch 入口、`search.acl_rebuild_requested` 的保守范围重建、`search.extract_requested` UTF-8 文本类抽取入口、`/api/v1/search` 查询过滤、签名 cursor 分页、HTML 编码 highlight，以及上传完成、重命名、移动、删除、恢复和彻底删除后的索引同步；Office/PDF、OCR 和大文件解析需后续使用成熟开源工具接入。
 - 部门/用户组 ACL 变更当前无法精确枚举所有受影响用户缓存，已采用通配模式保守失效租户内节点权限缓存；若后续权限缓存读路径启用并出现大租户性能压力，应补充 subject membership 反向索引或异步展开任务。
 - 当前 Redis 权限缓存已完成失效 worker，但权限判断读路径尚未启用 Redis 缓存；接入读缓存时必须保持数据库为事实来源，高危动作继续二次查库。
 - 当前节点 ACL 路径加载采用逐级父节点查询并限制最大深度 64，适合一期目录深度可控场景；若后续目录深度、列表批量权限展示或搜索过滤压力升高，应引入递归 CTE、closure table 或批量权限评估缓存。
@@ -120,7 +125,7 @@
 
 ### 下一步
 
-- 补齐搜索全文抽取入口：为上传完成后的文件版本建立文本抽取任务/状态流转，把可抽取正文写入搜索索引 `content` 字段，并保持失败可重试和不阻塞上传完成。
+- 建立分享模块基础数据模型和迁移：内部分享、外链分享、提取码哈希、过期时间、访问次数限制、撤销状态和审计/outbox 事件。
 
 ### 涉及文件
 
@@ -173,12 +178,17 @@
 - `backend/app/modules/search/acl.py`
 - `backend/app/modules/search/cursor.py`
 - `backend/app/modules/search/events.py`
+- `backend/app/modules/search/extractor.py`
 - `backend/app/modules/search/router.py`
 - `backend/app/modules/search/schemas.py`
 - `backend/app/modules/search/service.py`
+- `backend/app/modules/search/indexer.py`
+- `backend/app/modules/search/repository.py`
 - `backend/app/infrastructure/search/base.py`
 - `backend/app/infrastructure/search/opensearch.py`
 - `backend/app/infrastructure/search/testing.py`
+- `backend/app/infrastructure/storage/testing.py`
+- `backend/migrations/versions/20260701_0010_file_version_search_state.py`
 - `backend/app/modules/space/members.py`
 - `backend/app/modules/space/router.py`
 - `backend/app/modules/space/member_audit.py`
@@ -219,6 +229,7 @@
 - `backend/tests/test_quota_reconciliation.py`
 - `backend/tests/test_blob_cleanup.py`
 - `backend/tests/helpers.py`
+- `backend/.env.example`
 - `README.md`
 - `backend/README.md`
 - `AGENT.md`
@@ -232,6 +243,17 @@
 - 已运行 `uv run ruff check app/infrastructure/search/base.py app/infrastructure/search/opensearch.py app/infrastructure/search/testing.py app/modules/search/cursor.py app/modules/search/router.py app/modules/search/schemas.py app/modules/search/service.py tests/test_search_query.py`，结果为 All checks passed。
 - 已运行 `uv run mypy app`，结果为 no issues found in 114 source files。
 - 已运行 `uv run pytest tests/test_search_query.py -q`，结果为 4 passed。
+- 已运行 `uv run ruff format app/modules/search/extractor.py app/workers/search_tasks.py tests/test_search_acl.py`，格式化搜索文本抽取相关文件。
+- 已运行 `uv run pytest tests/test_search_acl.py tests/test_search_query.py -q`，结果为 18 passed。
+- 已运行 `uv run ruff check app/modules/search/extractor.py app/workers/search_tasks.py tests/test_search_acl.py`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 115 source files。
+- 已运行 `uv run ruff format --check .`，结果为 146 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已再次运行 `uv run mypy app`，结果为 no issues found in 115 source files。
+- 已运行 `uv run pytest -q`，结果为 93 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认 `20260701_0010_file_version_search_state.py` 会按“加 nullable 列、回填 pending、加 not null”的顺序生成 PostgreSQL SQL。
+- 已运行 `git diff --check`，未发现空白错误。
+- 本轮未启动 API、Worker 或 Docker Compose 服务。
 - 已运行 `uv run ruff format --check .`，结果为 144 files already formatted。
 - 已运行 `uv run ruff check .`，结果为 All checks passed。
 - 已再次运行 `uv run mypy app`，结果为 no issues found in 114 source files。

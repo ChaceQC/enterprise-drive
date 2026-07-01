@@ -16,7 +16,7 @@ from app.modules.file.validators import node_name_conflict_error
 from app.modules.permission.actions import ACTION_UPLOAD
 from app.modules.permission.service import PermissionService
 from app.modules.quota.service import QuotaService
-from app.modules.search.events import emit_search_index_requested
+from app.modules.search.events import emit_search_extract_requested, emit_search_index_requested
 from app.modules.space.repository import SpaceRepository
 from app.modules.upload.audit import (
     aborted_upload_metadata,
@@ -242,6 +242,14 @@ class UploadLifecycleService:
                 space_id=upload_session.space_id,
                 reason="upload_completed",
                 metadata={"version_id": str(version.id), "blob_id": str(blob.id)},
+            )
+            await emit_search_extract_requested(
+                audit_service=self.audit_service,
+                tenant_id=tenant_id,
+                node_id=node.id,
+                version_id=version.id,
+                blob_id=blob.id,
+                reason="upload_completed",
             )
             await self.repository.commit()
             if should_delete_temp_object:
