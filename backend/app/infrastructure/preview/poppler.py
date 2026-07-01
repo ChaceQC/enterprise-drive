@@ -77,7 +77,7 @@ def _resolve_executable(command: str) -> str | None:
     executable = shutil.which(command)
     if executable is None:
         return None
-    if os.name != "nt":
+    if not _is_windows():
         return executable
 
     executable_path = Path(executable)
@@ -88,6 +88,10 @@ def _resolve_executable(command: str) -> str | None:
         if candidate.exists():
             return str(candidate)
     return executable
+
+
+def _is_windows() -> bool:
+    return os.name == "nt"
 
 
 def _windows_poppler_exe_candidates(wrapper_path: Path) -> list[Path]:

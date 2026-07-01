@@ -35,6 +35,6 @@ def test_resolve_executable_prefers_windows_poppler_exe(
     wrapper.write_text("@echo off\n", encoding="utf-8")
     executable.write_bytes(b"")
     monkeypatch.setattr(poppler_module.shutil, "which", lambda command: str(wrapper))
-    monkeypatch.setattr(poppler_module.os, "name", "nt")
+    monkeypatch.setattr(poppler_module, "_is_windows", lambda: True)
 
     assert poppler_module._resolve_executable("pdftoppm") == str(executable)

@@ -345,6 +345,17 @@
 - 已运行 `git diff --check`，未发现空白错误；仅有 Windows 工作区 LF/CRLF 提示。
 - 已检查本机预览工具：`pdftoppm` 可用，适配器已解析到真实 `pdftoppm.exe` 并通过 `-v` smoke test；`libreoffice` / `soffice` 缺失，Office 预览接入时需安装 LibreOffice 或记录不可用原因。
 - 本轮未启动 API、Worker、Docker Compose 或其他常驻服务，并已确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 未监听。
+- GitHub Actions `backend-ci` 在提交 `a9c8e73` 的 pytest 步骤失败，原因是 `test_resolve_executable_prefers_windows_poppler_exe` 为模拟 Windows 直接 monkeypatch `os.name='nt'`，导致 Linux CI 上 `pathlib` 尝试实例化 `WindowsPath` 并抛出 `NotImplementedError`。
+- 已修复 Poppler 适配器测试边界：新增 `_is_windows()` 封装平台判断，测试改为 monkeypatch 模块内函数，不再改写全局 `os.name`。
+- 已运行 `uv run pytest tests/test_preview_poppler.py -q`，结果为 2 passed。
+- 已运行 `uv run ruff format .`，结果为 175 files left unchanged。
+- 已运行 `uv run ruff format --check .`，结果为 175 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 136 source files。
+- 已运行 `uv run pytest`，结果为 113 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认迁移链仍可生成 PostgreSQL SQL。
+- 已运行 `git diff --check`，未发现空白错误；仅有 Windows 工作区 LF/CRLF 提示。
+- 本轮未启动 API、Worker、Docker Compose 或其他常驻服务，并已确认项目常用端口未监听。
 - 已运行 `git diff --check`，未发现空白错误。
 - 已运行 `uv run pytest tests/test_share_router.py -q`，结果为 3 passed。
 - 已运行 `uv run ruff format --check .`，结果为 156 files already formatted。
