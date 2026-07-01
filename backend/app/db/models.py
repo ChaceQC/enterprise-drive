@@ -6,6 +6,7 @@ from app.modules.file import models as file_models
 from app.modules.org import models as org_models
 from app.modules.permission import models as permission_models
 from app.modules.quota import models as quota_models
+from app.modules.share import models as share_models
 from app.modules.space import models as space_models
 from app.modules.upload import models as upload_models
 
@@ -16,6 +17,7 @@ __all__ = [
     "org_models",
     "permission_models",
     "quota_models",
+    "share_models",
     "space_models",
     "upload_models",
 ]

@@ -103,10 +103,14 @@
 - 文本抽取成功后写入 `search_text` 并刷新 OpenSearch 索引 `content` 字段；不支持的格式标记为 `skipped`，UTF-8 解码失败标记为 `failed` 且不重试，对象存储读取失败标记为 `failed` 并让 outbox 退避重试。
 - 按 AGENT 规则保持抽取入口简洁可维护：本轮不自研 PDF/Office 解析器，复杂格式后续使用成熟开源工具或标准适配层接入。
 - 补充搜索抽取测试，覆盖上传写入抽取事件、文本正文入索引、不支持格式跳过、解码失败终态和存储读取失败重试。
+- 建立分享模块基础数据模型和迁移：新增 `shares`、`share_items`、`share_recipients`、`share_access_logs`，覆盖内部分享、外链分享、提取码哈希、过期时间、访问/下载次数限制、撤销状态、分享项、内部接收人和访问日志。
+- 新增 `ShareService` 和 `ShareRepository`，创建分享时逐个校验 root 节点和全部分享项的节点级 `share` 权限，分享项必须与 root 节点属于同一空间；外链原始 token 只在创建响应中返回一次，数据库只保存 token hash，提取码只保存 Argon2id hash。
+- 分享创建和撤销会写入 `share.created` / `share.revoked` 审计事件，并通过既有审计 outbox 生成 `audit.share.created` / `audit.share.revoked` 事件。
+- 补充分享服务测试，覆盖外链 token/passcode 哈希存储、内部分享接收人、撤销审计、仅创建者可查看/撤销、无 `share` 权限拒绝，以及额外分享项跨空间拒绝。
 
 ### 进行中
 
-- Sprint 4 权限系统已开始；空间成员事实表、owner 成员自动写入、空间级成员角色检查、空间成员管理 API、用户/部门/用户组节点 ACL 基础闭环、文件列表批量权限评估、`permission.changed` outbox 事件写入、Redis 权限缓存失效 worker、org 部门/用户组主体展开、搜索文件索引写入、ACL 变更范围重建、搜索查询过滤、文件变更索引同步、搜索分页 cursor、highlight 和 UTF-8 文本类全文抽取入口已完成，下一步推进分享模块基础数据模型与接口。
+- Sprint 5 分享模块已开始；基础表、迁移和服务层已完成，下一步接入分享 HTTP API、外链访问校验、提取码校验、并发次数扣减和下载策略。
 
 ### 阻塞与风险
 
@@ -122,10 +126,11 @@
 - `file.cleanup_unreferenced_blobs` 只清理仍有 DB blob 元数据且已无版本引用的最终对象；对象存储里没有 DB 元数据的孤儿对象扫描仍需后续治理任务兜底。
 - 当前清理任务按批次扫描租户内过期会话，尚未接入定时调度配置、任务监控指标和失败告警。
 - 当前基础限流覆盖上传初始化、分片签名、下载预签名和搜索查询；登录失败、外链访问和管理接口限流仍需随对应模块接入。
+- 分享模块当前只完成基础数据模型和服务层，尚未开放 `/api/v1/shares` 路由，外链访问、提取码校验、过期/撤销/次数耗尽错误映射、并发次数扣减和下载策略仍需下一步补齐。
 
 ### 下一步
 
-- 建立分享模块基础数据模型和迁移：内部分享、外链分享、提取码哈希、过期时间、访问次数限制、撤销状态和审计/outbox 事件。
+- 接入分享 HTTP API：`POST /api/v1/shares`、`GET /api/v1/shares/{share_id}`、`POST /api/v1/shares/{share_id}/revoke`，并补充契约测试、CSRF 校验和权限拒绝审计。
 
 ### 涉及文件
 
@@ -184,6 +189,12 @@
 - `backend/app/modules/search/service.py`
 - `backend/app/modules/search/indexer.py`
 - `backend/app/modules/search/repository.py`
+- `backend/app/modules/share/constants.py`
+- `backend/app/modules/share/models.py`
+- `backend/app/modules/share/repository.py`
+- `backend/app/modules/share/schemas.py`
+- `backend/app/modules/share/service.py`
+- `backend/migrations/versions/20260701_0011_share_base.py`
 - `backend/app/infrastructure/search/base.py`
 - `backend/app/infrastructure/search/opensearch.py`
 - `backend/app/infrastructure/search/testing.py`
@@ -226,6 +237,7 @@
 - `backend/tests/test_permission_cache.py`
 - `backend/tests/test_search_acl.py`
 - `backend/tests/test_search_query.py`
+- `backend/tests/test_share_service.py`
 - `backend/tests/test_quota_reconciliation.py`
 - `backend/tests/test_blob_cleanup.py`
 - `backend/tests/helpers.py`
@@ -254,6 +266,14 @@
 - 已运行 `uv run alembic upgrade head --sql`，确认 `20260701_0010_file_version_search_state.py` 会按“加 nullable 列、回填 pending、加 not null”的顺序生成 PostgreSQL SQL。
 - 已运行 `git diff --check`，未发现空白错误。
 - 本轮未启动 API、Worker 或 Docker Compose 服务。
+- 已运行 `uv run pytest tests/test_share_service.py -q`，结果为 6 passed。
+- 已运行 `uv run ruff format app/modules/share app/db/models.py migrations/versions/20260701_0011_share_base.py tests/test_share_service.py`，格式化分享模块基础实现。
+- 已运行 `uv run ruff format --check .`，结果为 154 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 121 source files。
+- 已运行 `uv run pytest -q`，结果通过，共 99 个测试点。
+- 已运行 `uv run alembic upgrade head --sql`，确认新增分享迁移 `20260701_0011_share_base.py` 可生成 PostgreSQL SQL。
+- 已运行 `git diff --check`，未发现空白错误。
 - 已运行 `uv run ruff format --check .`，结果为 144 files already formatted。
 - 已运行 `uv run ruff check .`，结果为 All checks passed。
 - 已再次运行 `uv run mypy app`，结果为 no issues found in 114 source files。

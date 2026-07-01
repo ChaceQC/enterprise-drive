@@ -34,6 +34,8 @@ Sprint 3 已落地上传会话基础：`upload_sessions`、`upload_parts` 迁移
 
 当前已进入 Sprint 4 权限系统，已新增 `space_members` 基础表，创建空间时会自动写入当前用户的 `owner` 角色成员关系。空间列表、文件树、上传初始化、multipart complete 和下载已通过 `PermissionService` 做空间级成员角色检查：`viewer` 可列表和下载，`editor` 可上传与修改，`owner/admin` 可执行全部空间级动作。空间成员管理 API 已接入，支持 owner/admin 添加、调整和移除成员，权限变更会递增空间权限版本并写入审计。节点 ACL 已支持 `user`、`department`、`group` 三类主体，基于 org 事实表展开用户部门和用户组，支持 allow/deny、继承开关和 deny 优先，并已覆盖文件列表、创建文件夹、上传初始化、multipart complete 和下载入口；文件列表响应会通过批量权限评估返回每个子节点的常用动作权限，避免列表页逐项查询。空间成员和节点 ACL 变更都会写入 `permission.changed` outbox event，`permission.invalidate_cache` 会消费该事件并删除匹配的 Redis 权限缓存 key；部门/用户组 ACL 变更当前保守失效租户内节点权限缓存。搜索 ACL 已新增 token builder 和 `search.acl_rebuild_requested` outbox event；秒传、multipart complete、重命名、移动、删除、恢复和彻底删除会写入 `search.index_requested`，上传完成还会写入 `search.extract_requested`。`search.dispatch_outbox` 会从 PostgreSQL 重新构建文件索引文档写入 OpenSearch，不再活跃或已彻底删除的文件会删除索引文档，并在 ACL 变更后按 space 或 node 子树保守重建索引 token；文本抽取入口当前只处理安全的小型 UTF-8 文本类文件，把正文写入 `file_versions.search_text` 并刷新索引 `content` 字段，解码失败标记为 `failed`，对象存储读取失败交给 outbox 重试。`GET /api/v1/search` 已接入查询层 `acl_tokens` allow 过滤、`deny_acl_tokens` 排除过滤、签名 cursor 分页、HTML 编码的 `<mark>` 高亮片段、`search.query` 限流和 `read_meta` 二次权限校验。最终对象的 DB 驱动清理已由 `file.cleanup_unreferenced_blobs` 承担；对象存储中没有 DB 元数据的孤儿对象扫描仍作为后续治理任务处理。
 
+分享模块已建立基础数据模型、迁移和服务层：支持内部分享、外链分享、提取码哈希、过期时间、访问/下载次数上限、撤销状态、分享项、内部接收人和访问日志表。创建分享会逐个校验节点级 `share` 权限，外链只返回一次原始随机 token，数据库只保存 token hash 和提取码 hash；创建和撤销会写入审计与 outbox。当前尚未开放 `/api/v1/shares` 路由，也未接入外链访问、并发次数扣减和下载策略，下一步会补齐分享 API 与访问控制。
+
 本地后端验证：
 
 若本机缺少 `uv`、Python 3.12、Docker、GitHub CLI 或后端依赖包等必要工具，可按命令提示自行安装或补齐；确因权限、网络或平台限制无法安装时，需要记录到 `PROJECT_PROGRESS.md`。
