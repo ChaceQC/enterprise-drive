@@ -14,13 +14,22 @@ from app.modules.auth.repository import AuthRepository
 from app.modules.file.blob_cleanup import BlobCleanupService
 from app.modules.file.repository import FileRepository
 
-_COUNTER_KEYS = (
+_BLOB_COUNTER_KEYS = (
     "scanned",
     "claimed",
     "cleaned",
     "skipped",
     "storage_errors",
     "db_conflicts",
+)
+
+_ORPHAN_OBJECT_COUNTER_KEYS = (
+    "scanned",
+    "orphaned",
+    "cleaned",
+    "dry_run",
+    "skipped",
+    "storage_errors",
 )
 
 
@@ -41,6 +50,29 @@ def cleanup_unreferenced_blobs(
 celery_app.task(name="file.cleanup_unreferenced_blobs")(cleanup_unreferenced_blobs)
 
 
+def cleanup_orphaned_objects(
+    tenant_id: str | None = None,
+    limit: int = 100,
+    after_storage_key: str | None = None,
+    dry_run: bool = True,
+    request_id: str | None = None,
+    scan_all: bool = True,
+) -> dict[str, object]:
+    return asyncio.run(
+        _cleanup_orphaned_objects(
+            tenant_id=UUID(tenant_id) if tenant_id else None,
+            limit=limit,
+            after_storage_key=after_storage_key,
+            dry_run=dry_run,
+            request_id=request_id,
+            scan_all=scan_all,
+        )
+    )
+
+
+celery_app.task(name="file.cleanup_orphaned_objects")(cleanup_orphaned_objects)
+
+
 async def _cleanup_unreferenced_blobs(
     *,
     tenant_id: UUID | None,
@@ -51,7 +83,7 @@ async def _cleanup_unreferenced_blobs(
     session_factory = get_session_factory()
     async with session_factory() as session:
         tenant_ids = [tenant_id] if tenant_id else await AuthRepository(session).list_tenant_ids()
-        total = {key: 0 for key in _COUNTER_KEYS}
+        total = {key: 0 for key in _BLOB_COUNTER_KEYS}
         for current_tenant_id in tenant_ids:
             service = BlobCleanupService(
                 repository=FileRepository(session),
@@ -65,6 +97,53 @@ async def _cleanup_unreferenced_blobs(
                 audit_context=AuditContext(request_id=request_id),
             )
             payload = result.to_dict()
-            for key in _COUNTER_KEYS:
+            for key in _BLOB_COUNTER_KEYS:
                 total[key] += payload[key]
         return total
+
+
+async def _cleanup_orphaned_objects(
+    *,
+    tenant_id: UUID | None,
+    limit: int,
+    dry_run: bool,
+    request_id: str | None,
+    after_storage_key: str | None = None,
+    scan_all: bool = True,
+) -> dict[str, object]:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        tenant_ids = [tenant_id] if tenant_id else await AuthRepository(session).list_tenant_ids()
+        total: dict[str, object] = {key: 0 for key in _ORPHAN_OBJECT_COUNTER_KEYS}
+        total["next_storage_key"] = after_storage_key
+        for current_tenant_id in tenant_ids:
+            service = BlobCleanupService(
+                repository=FileRepository(session),
+                storage=S3StorageAdapter(settings=settings),
+                bucket=settings.s3_bucket,
+                audit_service=AuditService(repository=AuditRepository(session)),
+            )
+            current_after_storage_key = after_storage_key if tenant_id is not None else None
+            while True:
+                result = await service.cleanup_orphaned_objects(
+                    tenant_id=current_tenant_id,
+                    limit=limit,
+                    after_storage_key=current_after_storage_key,
+                    dry_run=dry_run,
+                    audit_context=AuditContext(request_id=request_id),
+                )
+                payload = result.to_dict()
+                for key in _ORPHAN_OBJECT_COUNTER_KEYS:
+                    total[key] = _counter(total, key) + _counter(payload, key)
+                total["next_storage_key"] = result.next_storage_key
+                if not scan_all or result.next_storage_key is None:
+                    break
+                current_after_storage_key = result.next_storage_key
+        return total
+
+
+def _counter(payload: dict[str, object], key: str) -> int:
+    value = payload[key]
+    assert isinstance(value, int)
+    return value

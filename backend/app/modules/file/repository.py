@@ -254,6 +254,22 @@ class FileRepository:
         )
         return list(result.scalars().all())
 
+    async def list_existing_blob_storage_keys(
+        self,
+        *,
+        tenant_id: UUID,
+        storage_keys: list[str],
+    ) -> set[str]:
+        if not storage_keys:
+            return set()
+        result = await self.session.execute(
+            select(FileBlob.storage_key).where(
+                FileBlob.tenant_id == tenant_id,
+                FileBlob.storage_key.in_(storage_keys),
+            )
+        )
+        return set(result.scalars().all())
+
     async def mark_blob_deleting(
         self,
         *,

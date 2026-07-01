@@ -42,6 +42,17 @@ class FailingDeleteStorageAdapter(InMemoryStorageAdapter):
         raise RuntimeError("delete failed")
 
 
+class SelectiveFailingDeleteStorageAdapter(InMemoryStorageAdapter):
+    def __init__(self, *, failing_key: str) -> None:
+        super().__init__()
+        self.failing_key = failing_key
+
+    async def delete_object(self, *, bucket: str, storage_key: str) -> None:
+        if storage_key == self.failing_key:
+            raise RuntimeError("delete failed")
+        await super().delete_object(bucket=bucket, storage_key=storage_key)
+
+
 async def create_blob(
     session_factory: async_sessionmaker[AsyncSession],
     *,
@@ -50,6 +61,7 @@ async def create_blob(
     size_bytes: int = 1024,
     ref_count: int = 0,
     status: str = "active",
+    storage_key: str | None = None,
 ) -> UUID:
     async with session_factory() as session:
         blob = FileBlob(
@@ -57,7 +69,7 @@ async def create_blob(
             hash_algo="sha256",
             content_hash=content_hash,
             size_bytes=size_bytes,
-            storage_key=f"objects/test/{content_hash[:2]}/{content_hash}",
+            storage_key=storage_key or f"objects/test/{content_hash[:2]}/{content_hash}",
             mime_type="application/octet-stream",
             ref_count=ref_count,
             status=status,
@@ -264,6 +276,234 @@ async def test_cleanup_unreferenced_blobs_skips_blob_with_versions(
 
 
 @pytest.mark.asyncio
+async def test_cleanup_orphaned_objects_dry_run_reports_orphan_without_deleting(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
+) -> None:
+    await seed_admin(session_factory, settings)
+    csrf_token = await login(client)
+    space = await create_space(client, csrf_token, slug="orphan-dry-run-space")
+    tenant_id = str(space["tenant_id"])
+    orphan_hash = "6" * 64
+    orphan_key = f"objects/{tenant_id}/{orphan_hash[:2]}/{orphan_hash}"
+    storage_adapter.object_contents[(settings.s3_bucket, orphan_key)] = b"orphan"
+
+    async with session_factory() as session:
+        service = BlobCleanupService(
+            repository=FileRepository(session),
+            storage=storage_adapter,
+            bucket=settings.s3_bucket,
+            audit_service=AuditService(repository=AuditRepository(session)),
+        )
+        result = await service.cleanup_orphaned_objects(
+            tenant_id=UUID(tenant_id),
+            limit=10,
+            dry_run=True,
+            audit_context=AuditContext(request_id="req_orphan_dry_run"),
+        )
+
+    assert result.to_dict() == {
+        "scanned": 1,
+        "orphaned": 1,
+        "cleaned": 0,
+        "dry_run": 1,
+        "skipped": 0,
+        "storage_errors": 0,
+        "next_storage_key": None,
+    }
+    assert (settings.s3_bucket, orphan_key) in storage_adapter.object_contents
+    assert storage_adapter.deleted_objects == []
+
+    async with session_factory() as session:
+        audit = (
+            await session.execute(
+                select(AuditLog).where(AuditLog.action == "file.object.orphan_cleanup_planned")
+            )
+        ).scalar_one()
+
+    assert audit.request_id == "req_orphan_dry_run"
+    assert audit.resource_type == "storage_object"
+    assert audit.metadata_json["orphaned"] == 1
+    assert "storage_key" not in audit.metadata_json
+    assert "next_storage_key" not in audit.metadata_json
+
+
+@pytest.mark.asyncio
+async def test_cleanup_orphaned_objects_deletes_orphan_and_writes_audit(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
+) -> None:
+    await seed_admin(session_factory, settings)
+    csrf_token = await login(client)
+    space = await create_space(client, csrf_token, slug="orphan-cleanup-space")
+    tenant_id = str(space["tenant_id"])
+    orphan_hash = "7" * 64
+    orphan_key = f"objects/{tenant_id}/{orphan_hash[:2]}/{orphan_hash}"
+    storage_adapter.object_contents[(settings.s3_bucket, orphan_key)] = b"orphan"
+
+    async with session_factory() as session:
+        service = BlobCleanupService(
+            repository=FileRepository(session),
+            storage=storage_adapter,
+            bucket=settings.s3_bucket,
+            audit_service=AuditService(repository=AuditRepository(session)),
+        )
+        result = await service.cleanup_orphaned_objects(
+            tenant_id=UUID(tenant_id),
+            limit=10,
+            dry_run=False,
+            audit_context=AuditContext(request_id="req_orphan_cleaned"),
+        )
+
+    assert result.to_dict() == {
+        "scanned": 1,
+        "orphaned": 1,
+        "cleaned": 1,
+        "dry_run": 0,
+        "skipped": 0,
+        "storage_errors": 0,
+        "next_storage_key": None,
+    }
+    assert storage_adapter.deleted_objects == [(settings.s3_bucket, orphan_key)]
+    assert (settings.s3_bucket, orphan_key) not in storage_adapter.object_contents
+
+    async with session_factory() as session:
+        audit = (
+            await session.execute(
+                select(AuditLog).where(AuditLog.action == "file.object.orphan_cleaned")
+            )
+        ).scalar_one()
+        outbox_event = (
+            await session.execute(
+                select(OutboxEvent).where(
+                    OutboxEvent.event_type == "audit.file.object.orphan_cleaned"
+                )
+            )
+        ).scalar_one()
+
+    assert audit.request_id == "req_orphan_cleaned"
+    assert audit.result == "allowed"
+    assert audit.metadata_json["cleanup_status"] == "cleaned"
+    assert audit.metadata_json["size_bytes"] == len(b"orphan")
+    assert "storage_key" not in audit.metadata_json
+    assert "storage_key_hash" in audit.metadata_json
+    assert outbox_event.aggregate_type == "audit_log"
+
+
+@pytest.mark.asyncio
+async def test_cleanup_orphaned_objects_keeps_referenced_and_skips_unmanaged_keys(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
+) -> None:
+    await seed_admin(session_factory, settings)
+    csrf_token = await login(client)
+    space = await create_space(client, csrf_token, slug="orphan-skip-space")
+    tenant_id = str(space["tenant_id"])
+    referenced_hash = "8" * 64
+    referenced_key = f"objects/{tenant_id}/{referenced_hash[:2]}/{referenced_hash}"
+    invalid_key = f"objects/{tenant_id}/not-managed"
+    await create_blob(
+        session_factory,
+        tenant_id=tenant_id,
+        content_hash=referenced_hash,
+        storage_key=referenced_key,
+    )
+    storage_adapter.object_contents[(settings.s3_bucket, referenced_key)] = b"referenced"
+    storage_adapter.object_contents[(settings.s3_bucket, invalid_key)] = b"invalid"
+
+    async with session_factory() as session:
+        service = BlobCleanupService(
+            repository=FileRepository(session),
+            storage=storage_adapter,
+            bucket=settings.s3_bucket,
+            audit_service=AuditService(repository=AuditRepository(session)),
+        )
+        result = await service.cleanup_orphaned_objects(
+            tenant_id=UUID(tenant_id),
+            limit=10,
+            dry_run=False,
+        )
+
+    assert result.to_dict() == {
+        "scanned": 2,
+        "orphaned": 0,
+        "cleaned": 0,
+        "dry_run": 0,
+        "skipped": 1,
+        "storage_errors": 0,
+        "next_storage_key": None,
+    }
+    assert storage_adapter.deleted_objects == []
+    assert (settings.s3_bucket, referenced_key) in storage_adapter.object_contents
+    assert (settings.s3_bucket, invalid_key) in storage_adapter.object_contents
+
+    async with session_factory() as session:
+        audits = (await session.execute(select(AuditLog))).scalars().all()
+
+    assert "file.object.orphan_cleaned" not in {audit.action for audit in audits}
+
+
+@pytest.mark.asyncio
+async def test_cleanup_orphaned_objects_records_storage_failure(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    csrf_token = await login(client)
+    space = await create_space(client, csrf_token, slug="orphan-failure-space")
+    tenant_id = str(space["tenant_id"])
+    orphan_hash = "9" * 64
+    orphan_key = f"objects/{tenant_id}/{orphan_hash[:2]}/{orphan_hash}"
+    storage = SelectiveFailingDeleteStorageAdapter(failing_key=orphan_key)
+    storage.object_contents[(settings.s3_bucket, orphan_key)] = b"orphan"
+
+    async with session_factory() as session:
+        service = BlobCleanupService(
+            repository=FileRepository(session),
+            storage=storage,
+            bucket=settings.s3_bucket,
+            audit_service=AuditService(repository=AuditRepository(session)),
+        )
+        result = await service.cleanup_orphaned_objects(
+            tenant_id=UUID(tenant_id),
+            limit=10,
+            dry_run=False,
+            audit_context=AuditContext(request_id="req_orphan_failed"),
+        )
+
+    assert result.to_dict() == {
+        "scanned": 1,
+        "orphaned": 1,
+        "cleaned": 0,
+        "dry_run": 0,
+        "skipped": 0,
+        "storage_errors": 1,
+        "next_storage_key": None,
+    }
+    assert (settings.s3_bucket, orphan_key) in storage.object_contents
+
+    async with session_factory() as session:
+        audit = (
+            await session.execute(
+                select(AuditLog).where(AuditLog.action == "file.object.orphan_cleanup_failed")
+            )
+        ).scalar_one()
+
+    assert audit.request_id == "req_orphan_failed"
+    assert audit.result == "error"
+    assert audit.metadata_json["reason"] == "storage_delete_failed"
+    assert "storage_key" not in audit.metadata_json
+    assert "storage_key_hash" in audit.metadata_json
+
+
+@pytest.mark.asyncio
 async def test_blob_cleanup_worker_aggregates_tenant_results(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
@@ -310,6 +550,65 @@ async def test_blob_cleanup_worker_aggregates_tenant_results(
         ).scalar_one()
 
     assert audit.request_id == "req_blob_cleanup_worker"
+
+
+@pytest.mark.asyncio
+async def test_orphan_object_cleanup_worker_scans_all_batches(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await seed_admin(session_factory, settings)
+    csrf_token = await login(client)
+    space = await create_space(client, csrf_token, slug="orphan-worker-space")
+    tenant_id = str(space["tenant_id"])
+    referenced_hash = "a" * 64
+    orphan_hash = "b" * 64
+    referenced_key = f"objects/{tenant_id}/{referenced_hash[:2]}/{referenced_hash}"
+    orphan_key = f"objects/{tenant_id}/{orphan_hash[:2]}/{orphan_hash}"
+    await create_blob(
+        session_factory,
+        tenant_id=tenant_id,
+        content_hash=referenced_hash,
+        storage_key=referenced_key,
+    )
+    storage_adapter.object_contents[(settings.s3_bucket, referenced_key)] = b"referenced"
+    storage_adapter.object_contents[(settings.s3_bucket, orphan_key)] = b"orphan"
+
+    monkeypatch.setattr(file_tasks, "get_settings", lambda: settings)
+    monkeypatch.setattr(file_tasks, "get_session_factory", lambda: session_factory)
+    monkeypatch.setattr(file_tasks, "S3StorageAdapter", lambda *, settings: storage_adapter)
+
+    result = await file_tasks._cleanup_orphaned_objects(
+        tenant_id=UUID(tenant_id),
+        limit=1,
+        dry_run=False,
+        request_id="req_orphan_worker",
+    )
+
+    assert result == {
+        "scanned": 2,
+        "orphaned": 1,
+        "cleaned": 1,
+        "dry_run": 0,
+        "skipped": 0,
+        "storage_errors": 0,
+        "next_storage_key": None,
+    }
+    assert storage_adapter.deleted_objects == [(settings.s3_bucket, orphan_key)]
+    assert (settings.s3_bucket, referenced_key) in storage_adapter.object_contents
+    assert (settings.s3_bucket, orphan_key) not in storage_adapter.object_contents
+
+    async with session_factory() as session:
+        audit = (
+            await session.execute(
+                select(AuditLog).where(AuditLog.action == "file.object.orphan_cleaned")
+            )
+        ).scalar_one()
+
+    assert audit.request_id == "req_orphan_worker"
 
 
 @pytest.mark.asyncio

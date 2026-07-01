@@ -38,6 +38,12 @@ class PresignedDownload:
     headers: dict[str, str]
 
 
+@dataclass(frozen=True)
+class StorageObject:
+    storage_key: str
+    size_bytes: int | None = None
+
+
 class StorageAdapter(Protocol):
     async def create_multipart_upload(
         self,
@@ -132,3 +138,13 @@ class StorageAdapter(Protocol):
         content_type: str,
     ) -> None:
         """Write one private object from bytes."""
+
+    async def list_objects(
+        self,
+        *,
+        bucket: str,
+        prefix: str,
+        limit: int,
+        start_after: str | None = None,
+    ) -> list[StorageObject]:
+        """List private objects by prefix, returning at most limit keys."""

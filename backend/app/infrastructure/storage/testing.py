@@ -11,6 +11,7 @@ from app.infrastructure.storage.base import (
     MultipartUpload,
     PresignedDownload,
     PresignedUploadPart,
+    StorageObject,
 )
 
 
@@ -161,6 +162,25 @@ class InMemoryStorageAdapter:
         content_type: str,
     ) -> None:
         self.object_contents[(bucket, storage_key)] = content
+
+    async def list_objects(
+        self,
+        *,
+        bucket: str,
+        prefix: str,
+        limit: int,
+        start_after: str | None = None,
+    ) -> list[StorageObject]:
+        if limit <= 0:
+            return []
+        objects = [
+            StorageObject(storage_key=storage_key, size_bytes=len(content))
+            for (object_bucket, storage_key), content in sorted(self.object_contents.items())
+            if object_bucket == bucket
+            and storage_key.startswith(prefix)
+            and (start_after is None or storage_key > start_after)
+        ]
+        return objects[:limit]
 
     def _completed_parts_for(
         self,

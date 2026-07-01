@@ -70,6 +70,7 @@ uv run pytest
 - Redis Lua 原子固定窗口基础限流，覆盖上传初始化、分片签名、下载预签名、搜索查询、外链访问和外链下载。
 - `quota.reconcile_space_usage` 维护任务，支持空间容量只读报告和修复模式。
 - `file.cleanup_unreferenced_blobs` 维护任务，清理 ref_count 为 0 且无版本引用的最终对象和 blob 元数据。
+- `file.cleanup_orphaned_objects` 维护任务，默认 dry-run，按对象存储游标扫描受控 `objects/{tenant_id}/{hash_prefix}/{sha256}` key，清理没有 DB blob 元数据引用的孤儿最终对象。
 - `permission.invalidate_cache` 任务，消费 `permission.changed` outbox event 并失效 Redis 权限缓存 key；审计 dispatcher 只消费 `audit.*`，避免抢占权限事件。
 - 搜索 ACL token builder、`search.acl_rebuild_requested` outbox event、`search.index_requested` 文件索引事件、`search.extract_requested` 文本抽取事件和 `GET /api/v1/search` 查询接口；`search.dispatch_outbox` 会从 PostgreSQL 重新加载文件、版本、blob、空间成员和节点 ACL 事实后写入 OpenSearch，不再活跃或已彻底删除的文件会删除索引文档，并在 ACL 变更后按 space 或 node 子树保守重建索引 token；当前抽取支持 UTF-8 文本类文件、PDF 可复制正文、DOCX 段落/表格文本、PPTX 文本框/表格文本和 XLSX 单元格文本，PDF 使用 `pypdf` 解析，DOCX 使用 `python-docx` 解析，PPTX 使用 `python-pptx` 解析，XLSX 使用 `openpyxl` 解析，写入 `file_versions.search_text` 后刷新索引 `content` 字段；图片 OCR 等复杂格式后续继续接入成熟开源解析工具；查询接口使用 `acl_tokens` allow 过滤、`deny_acl_tokens` 排除过滤、签名 cursor 分页、HTML 编码高亮和 `read_meta` 二次权限校验。
 - 预览基础链路：上传成功后写入 `preview.render_requested` outbox event，`preview.dispatch_outbox` 消费事件并使用 Pillow 生成图片 WebP 预览产物；PDF 会通过 Poppler `pdftoppm` 在临时目录中渲染第一页 PNG，再复用 Pillow 生成 WebP；Office 文档会通过 LibreOffice headless 转换为 PDF，再复用 PDF/图片链路。产物写入私有对象存储 `previews/{tenant_id}/{node_id}/{version_id}/image.webp`；`GET /api/v1/files/{node_id}/preview` 会校验节点级 `preview` 权限并返回短期私有预览 URL。缺少 `pdftoppm` 或 `soffice` 时会标记为 `unsupported` 并写入明确错误原因，避免无意义重试；`preview.dispatch_outbox` 已配置独立 Celery 软/硬超时、速率限制、结构化失败日志和 `preview_failures_total` 指标，便于后续接入日志告警与指标看板。
@@ -188,12 +189,13 @@ uv run pytest
 - `DRIVE_PREVIEW_TASK_RATE_LIMIT`
 - `DRIVE_PREVIEW_PRESIGN_EXPIRES_SECONDS`
 
-当前上传接口已通过 `PermissionService` 校验父目录节点级 `upload` 权限；初始化和 multipart complete 都会重新检查，避免会话创建后权限收紧仍可完成上传。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除到回收站不释放容量；彻底删除回收站节点时通过原子 update 扣减 `quota_accounts.used_bytes`，并写入 `reason=file_purged`、`ref_type=node` 的负向容量流水。容量校准任务 `quota.reconcile_space_usage` 使用 PostgreSQL 中的文件版本记录作为事实来源，默认按 `limit` 批大小和 cursor 扫完整个租户，只报告空间容量快照和账本漂移；传入 `repair=true` 时会修复缺失的空间容量账户，已有账户修复前会锁定账户行并重新聚合实际用量和账本合计，再校准 `quota_accounts.used_bytes`，仅按最新差额写入 `reason=quota_reconciled` 账本流水和 `quota.reconciled` 系统审计。彻底删除接口不在用户请求事务中同步删除最终对象；`file.cleanup_unreferenced_blobs` 会扫描 active、`ref_count=0` 且无 `file_versions` 引用的 blob，先标记为 `deleting`，再删除对象存储内容和 DB 元数据。对象存储删除失败会恢复为 `active` 并计入 `storage_errors`；对象存储中没有 DB 元数据的孤儿对象扫描仍需后续治理任务补齐。用户/租户维度配额将在后续步骤补齐。
+当前上传接口已通过 `PermissionService` 校验父目录节点级 `upload` 权限；初始化和 multipart complete 都会重新检查，避免会话创建后权限收紧仍可完成上传。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除到回收站不释放容量；彻底删除回收站节点时通过原子 update 扣减 `quota_accounts.used_bytes`，并写入 `reason=file_purged`、`ref_type=node` 的负向容量流水。容量校准任务 `quota.reconcile_space_usage` 使用 PostgreSQL 中的文件版本记录作为事实来源，默认按 `limit` 批大小和 cursor 扫完整个租户，只报告空间容量快照和账本漂移；传入 `repair=true` 时会修复缺失的空间容量账户，已有账户修复前会锁定账户行并重新聚合实际用量和账本合计，再校准 `quota_accounts.used_bytes`，仅按最新差额写入 `reason=quota_reconciled` 账本流水和 `quota.reconciled` 系统审计。彻底删除接口不在用户请求事务中同步删除最终对象；`file.cleanup_unreferenced_blobs` 会扫描 active、`ref_count=0` 且无 `file_versions` 引用的 blob，先标记为 `deleting`，再删除对象存储内容和 DB 元数据。对象存储删除失败会恢复为 `active` 并计入 `storage_errors`。`file.cleanup_orphaned_objects` 用于对象复制成功但 DB 最终化失败后的反向治理，只扫描受控 `objects/{tenant_id}/{hash_prefix}/{sha256}` key，跳过非受控 key，默认 dry-run，显式 `dry_run=False` 才删除对象；删除成功、失败和 dry-run 计划均写入系统审计，审计 metadata 不保存原始 storage key，并通过 `orphan_object_cleanup_total{status}` 暴露扫描、计划、清理、失败和跳过计数。用户/租户维度配额将在后续步骤补齐。
 
 维护任务可通过 Celery 任务调用：
 
 - `quota.reconcile_space_usage(tenant_id=None, limit=100, repair=False, request_id=None, scan_all=True, max_items=1000)`
 - `file.cleanup_unreferenced_blobs(tenant_id=None, limit=100, request_id=None)`
+- `file.cleanup_orphaned_objects(tenant_id=None, limit=100, after_storage_key=None, dry_run=True, request_id=None, scan_all=True)`
 - `permission.invalidate_cache(batch_size=None)`
 
 ## 下载接口

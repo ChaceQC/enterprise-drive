@@ -18,6 +18,7 @@ from app.infrastructure.storage.base import (
     MultipartUpload,
     PresignedDownload,
     PresignedUploadPart,
+    StorageObject,
 )
 
 
@@ -203,6 +204,18 @@ class S3StorageAdapter:
     ) -> None:
         await asyncio.to_thread(self._put_object_bytes, bucket, storage_key, content, content_type)
 
+    async def list_objects(
+        self,
+        *,
+        bucket: str,
+        prefix: str,
+        limit: int,
+        start_after: str | None = None,
+    ) -> list[StorageObject]:
+        if limit <= 0:
+            return []
+        return await asyncio.to_thread(self._list_objects, bucket, prefix, limit, start_after)
+
     def _ensure_bucket(self, bucket: str) -> None:
         if self._client.bucket_exists(bucket):
             return
@@ -252,3 +265,30 @@ class S3StorageAdapter:
             length=len(content),
             content_type=content_type,
         )
+
+    def _list_objects(
+        self,
+        bucket: str,
+        prefix: str,
+        limit: int,
+        start_after: str | None,
+    ) -> list[StorageObject]:
+        objects: list[StorageObject] = []
+        for item in self._client.list_objects(
+            bucket,
+            prefix=prefix,
+            recursive=True,
+            start_after=start_after,
+        ):
+            object_name = item.object_name
+            if object_name is None:
+                continue
+            objects.append(
+                StorageObject(
+                    storage_key=object_name,
+                    size_bytes=int(item.size) if item.size is not None else None,
+                )
+            )
+            if len(objects) >= limit:
+                break
+        return objects

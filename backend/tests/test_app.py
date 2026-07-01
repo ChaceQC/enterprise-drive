@@ -54,6 +54,7 @@ async def test_metrics_endpoint_exposes_prometheus_text(client: AsyncClient) -> 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/plain")
     assert "preview_failures_total" in response.text
+    assert "orphan_object_cleanup_total" in response.text
 
 
 @pytest.mark.asyncio

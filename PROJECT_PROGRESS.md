@@ -140,10 +140,15 @@
 - 新增 `docs/deployment-preview-worker.md`，明确生产 Nginx 继续使用宿主机安装和管理，不放入 Docker Compose；补充 preview Worker 独立队列、LibreOffice/Poppler 工具检查、systemd 和 Kubernetes 下的 CPU、内存、临时磁盘配额示例，以及 `/metrics` 告警建议。
 - 升级 `backend-ci` workflow 使用的 `actions/checkout`、`actions/setup-python` 和 `astral-sh/setup-uv` 版本；其中 `setup-uv` 固定到已发布 tag `v8.2.0`，避免 GitHub Actions 无法解析不存在的浮动主版本。
 - 已将上传/下载链路的企业级补强缺口写入 `PROJECT_PLAN.md` 和《企业网盘开发者技术计划书.md》：MinIO SDK multipart 私有方法风险、孤儿最终对象扫描、用户/租户/策略化配额、维护任务调度告警和清理指标、高密级下载代理与 Range/审计/水印/DLP、同 hash 首次上传竞争测试、真实对象存储集成测试。
+- 新增对象存储反向扫描能力：`StorageAdapter.list_objects` 支持按 prefix 和 `start_after` 游标列出私有对象，MinIO 适配器复用 SDK 公开 `list_objects`，测试适配器按 key 排序模拟分页。
+- 新增 `file.cleanup_orphaned_objects` 维护任务并路由到 `maintenance` 队列，默认 `dry_run=True`，按对象存储游标扫描受控 `objects/{tenant_id}/{hash_prefix}/{sha256}` key，显式 `dry_run=False` 时才删除没有 DB blob 元数据引用的孤儿最终对象。
+- 孤儿最终对象扫描以 PostgreSQL `file_blobs.storage_key` 为事实来源，不处理 `uploads/`、`previews/` 等非最终对象前缀，也会跳过不符合受控 key 形态的对象；dry-run、清理成功和对象存储删除失败均写入系统审计，审计 metadata 不记录原始 storage key。
+- 新增 `orphan_object_cleanup_total{status}` Prometheus counter，记录孤儿最终对象扫描、跳过、dry-run planned、清理成功和删除失败计数。
+- 补充孤儿最终对象清理测试，覆盖 dry-run 不删除、真实删除并写审计、已被 DB blob 引用的对象不删除、非受控 key 跳过、对象存储删除失败审计、worker 在 `limit=1` 下通过对象游标扫完整个租户前缀。
 
 ### 进行中
 
-- Sprint 5 分享、搜索和预览模块已开始；基础分享、外链访问/下载、搜索索引/抽取、PDF 正文抽取、DOCX 正文抽取、PPTX 正文抽取、XLSX 正文抽取、图片 WebP 预览、PDF 首页 WebP 预览、Office 经 LibreOffice headless 转 PDF 的基础链路、preview worker 任务超时/限速、结构化失败日志、预览失败指标和资源配额部署说明已完成。上传/下载链路下一步优先补齐孤儿最终对象扫描和真实对象存储集成测试，再推进高密级下载代理、多维配额和维护任务调度告警；搜索/预览侧继续补充真实 LibreOffice 环境联调和 OCR 等复杂格式抽取工具适配。
+- Sprint 5 分享、搜索和预览模块已开始；基础分享、外链访问/下载、搜索索引/抽取、PDF 正文抽取、DOCX 正文抽取、PPTX 正文抽取、XLSX 正文抽取、图片 WebP 预览、PDF 首页 WebP 预览、Office 经 LibreOffice headless 转 PDF 的基础链路、preview worker 任务超时/限速、结构化失败日志、预览失败指标和资源配额部署说明已完成。上传/下载链路下一步优先补真实对象存储集成测试，再推进 MinIO multipart 私有方法稳定性替换评估、高密级下载代理、多维配额和维护任务调度告警；搜索/预览侧继续补充真实 LibreOffice 环境联调和 OCR 等复杂格式抽取工具适配。
 
 ### 阻塞与风险
 
@@ -155,9 +160,9 @@
 - 部门/用户组 ACL 变更当前无法精确枚举所有受影响用户缓存，已采用通配模式保守失效租户内节点权限缓存；若后续权限缓存读路径启用并出现大租户性能压力，应补充 subject membership 反向索引或异步展开任务。
 - 当前 Redis 权限缓存已完成失效 worker，但权限判断读路径尚未启用 Redis 缓存；接入读缓存时必须保持数据库为事实来源，高危动作继续二次查库。
 - 当前节点 ACL 路径加载采用逐级父节点查询并限制最大深度 64，适合一期目录深度可控场景；若后续目录深度、列表批量权限展示或搜索过滤压力升高，应引入递归 CTE、closure table 或批量权限评估缓存。
-- 过期上传清理已覆盖数据库会话终态、multipart abort 和 `uploads/...` 临时对象删除；对象复制成功但数据库最终化失败后的 `objects/...` 孤儿最终对象扫描还没完成，这是当前最明显的数据治理缺口。
+- 过期上传清理已覆盖数据库会话终态、multipart abort 和 `uploads/...` 临时对象删除；对象复制成功但数据库最终化失败后的 `objects/...` 孤儿最终对象扫描已由 `file.cleanup_orphaned_objects` 兜底，后续需要真实 MinIO 集成测试和生产调度告警验证。
 - 当前容量实现已覆盖空间维度的文件版本创建、彻底删除释放、空间容量校准和 DB 驱动的 blob/object 清理；用户维度、租户维度和基于策略的配额仍需后续补齐。
-- `file.cleanup_unreferenced_blobs` 只清理仍有 DB blob 元数据且已无版本引用的最终对象；对象存储里没有 DB 元数据的孤儿对象扫描仍需后续治理任务兜底，扫描必须只处理受控 `objects/{tenant_id}/{hash_prefix}/{sha256}` key。
+- `file.cleanup_unreferenced_blobs` 只清理仍有 DB blob 元数据且已无版本引用的最终对象；对象存储里没有 DB 元数据的孤儿最终对象由 `file.cleanup_orphaned_objects` 反向扫描，当前仍需补真实对象存储集成测试。
 - 当前维护任务仍偏“可手动跑/worker 可消费”的阶段，尚未系统接入定时调度配置、失败告警、清理指标和治理看板。
 - 并发下同 hash 首次上传主要依赖唯一约束和补偿路径，已有基础处理，但仍需补更细的竞争测试、对象归档幂等检查和失败恢复路径。
 - 真实对象存储集成测试不足，当前更多依赖 `InMemoryStorageAdapter` 验证；后续应补充 MinIO 或等价 S3 兼容服务覆盖 multipart、copy、delete、list、presign、hash 校验和异常恢复。
@@ -166,7 +171,7 @@
 
 ### 下一步
 
-- 优先完成孤儿最终对象扫描：只扫描受控 `objects/{tenant_id}/{hash_prefix}/{sha256}`，默认 dry-run，补充删除、跳过非受控 key、审计、指标和 worker 聚合测试；随后补真实 MinIO 集成测试，覆盖 multipart 私有方法封装、copy/delete/list/presign/hash 校验和异常恢复。
+- 优先补真实 MinIO 集成测试，覆盖 multipart 私有方法封装、copy/delete/list/presign/hash 校验、孤儿最终对象扫描和异常恢复；随后推进 MinIO multipart 私有方法替换评估、高密级下载代理、多维配额和维护任务调度告警。
 
 ### 涉及文件
 

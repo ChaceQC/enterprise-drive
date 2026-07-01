@@ -13,9 +13,22 @@ preview_failures_total = Counter(
     registry=METRICS_REGISTRY,
 )
 
+orphan_object_cleanup_total = Counter(
+    "orphan_object_cleanup_total",
+    "孤儿最终对象扫描和清理计数",
+    ("status",),
+    registry=METRICS_REGISTRY,
+)
+
 
 def record_preview_failure(*, status: str, reason: str) -> None:
     preview_failures_total.labels(status=status, reason=reason).inc()
+
+
+def record_orphan_object_cleanup(*, status: str, count: int = 1) -> None:
+    if count <= 0:
+        return
+    orphan_object_cleanup_total.labels(status=status).inc(count)
 
 
 def register_metrics_route(app: FastAPI) -> None:

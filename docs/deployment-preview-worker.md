@@ -142,11 +142,13 @@ spec:
 
 ```text
 preview_failures_total{status="failed|unsupported",reason="..."}
+orphan_object_cleanup_total{status="scanned|skipped|planned|cleaned|failed"}
 ```
 
 建议至少配置以下告警：
 
 - `preview_failures_total` 在 10 分钟内持续增长。
+- `orphan_object_cleanup_total{status="failed"}` 在维护窗口内持续增长。
 - `preview` 队列积压超过阈值。
 - Worker 内存接近限制或频繁 OOM。
 - 临时磁盘使用率超过 80%。

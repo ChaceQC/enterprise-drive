@@ -40,6 +40,7 @@ celery_app.conf.update(
         "preview.dispatch_outbox": {"queue": "preview"},
         "search.dispatch_outbox": {"queue": "search"},
         "file.cleanup_unreferenced_blobs": {"queue": "maintenance"},
+        "file.cleanup_orphaned_objects": {"queue": "maintenance"},
         "upload.expire_sessions": {"queue": "maintenance"},
         "quota.reconcile_space_usage": {"queue": "maintenance"},
     },
