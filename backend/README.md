@@ -69,6 +69,7 @@ uv run pytest
 - `file.cleanup_unreferenced_blobs` 维护任务，清理 ref_count 为 0 且无版本引用的最终对象和 blob 元数据。
 - `permission.invalidate_cache` 任务，消费 `permission.changed` outbox event 并失效 Redis 权限缓存 key；审计 dispatcher 只消费 `audit.*`，避免抢占权限事件。
 - 搜索 ACL token builder、`search.acl_rebuild_requested` outbox event、`search.index_requested` 文件索引事件、`search.extract_requested` 文本抽取事件和 `GET /api/v1/search` 查询接口；`search.dispatch_outbox` 会从 PostgreSQL 重新加载文件、版本、blob、空间成员和节点 ACL 事实后写入 OpenSearch，不再活跃或已彻底删除的文件会删除索引文档，并在 ACL 变更后按 space 或 node 子树保守重建索引 token；当前文本抽取只处理 UTF-8 文本类文件，写入 `file_versions.search_text` 后刷新索引 `content` 字段，Office/PDF 等复杂格式后续接入成熟开源解析工具；查询接口使用 `acl_tokens` allow 过滤、`deny_acl_tokens` 排除过滤、签名 cursor 分页、HTML 编码高亮和 `read_meta` 二次权限校验。
+- 预览基础链路：上传成功后写入 `preview.render_requested` outbox event，`preview.dispatch_outbox` 消费事件并使用 Pillow 生成图片 WebP 预览产物，产物写入私有对象存储 `previews/{tenant_id}/{node_id}/{version_id}/image.webp`；`GET /api/v1/files/{node_id}/preview` 会校验节点级 `preview` 权限并返回短期私有预览 URL。当前只支持图片预览，Office/PDF 等复杂格式后续接入成熟开源工具。
 - `shares`、`share_items`、`share_recipients`、`share_access_logs` 基础表和迁移；服务层支持内部分享、外链分享、提取码哈希、过期时间、访问/下载次数上限和撤销状态。
 - 分享创建会校验 root 节点和全部分享项的节点级 `share` 权限，分享项必须与 root 节点属于同一空间；外链原始 token 只返回一次，数据库只保存全局唯一 token hash，提取码只保存 Argon2id hash。
 - 分享创建和撤销会写入 `share.created` / `share.revoked` 审计事件和 `audit.share.*` outbox event；`POST /api/v1/shares`、`GET /api/v1/shares/{share_id}`、`POST /api/v1/shares/{share_id}/revoke` 已接入 Cookie Session、CSRF 和创建者边界；`POST /api/v1/public/shares/access` 已接入 `tenant_slug`、外链 token、提取码、状态、过期、访问次数校验，以及 IP 总量和 `token + IP` 维度限流，会带租户边界查询分享、原子增加 `view_count` 并写入 `share_access_logs`；`POST /api/v1/public/shares/download` 已接入外链下载，会校验分享状态、提取码、下载权限、分享项范围、文件当前版本和下载次数限制，原子增加 `download_count`，返回短期私有对象下载 URL，并写入 `share_access_logs` 和 `share.external.downloaded` 审计。
@@ -106,6 +107,7 @@ uv run pytest
 - `DELETE /api/v1/files/{node_id}`
 - `DELETE /api/v1/files/{node_id}/purge`
 - `POST /api/v1/files/{node_id}/restore`
+- `GET /api/v1/files/{node_id}/preview`
 - `GET /api/v1/search?q=...&limit=...&cursor=...`
 
 当前空间和文件树接口已使用 `PermissionService` 的空间级成员角色和节点 ACL 检查：空间列表按 `space_members` 成员关系返回；成员管理需要 `manage`/`grant`，文件列表需要 `list`，创建文件夹和上传需要 `upload`，重命名和移动需要 `update`，删除和彻底删除需要 `delete`，恢复需要 `restore`。节点 ACL 创建请求使用 `subject_type` 和 `subject_id`，`subject_type` 支持 `user`、`department`、`group`；权限判断会通过 org 模块展开当前用户所属活跃部门和用户组，ACL 显式 deny 仍优先于 allow 和空间角色。文件列表会复用已校验的父路径，为当前页子节点批量评估 `list`、`read_meta`、`preview`、`download`、`upload`、`update`、`delete`、`restore`、`share`、`grant`、`manage` 常用动作，并在每个节点的 `permissions` 字段返回结果；高危操作仍在对应接口二次调用权限引擎确认。成员变更会递增 `spaces.permission_version` 并写入 `permission.space_member.*` 审计事件；节点 ACL 变更会递增 `nodes.permission_version` 并写入 `permission.node_acl.*` 审计事件；两类权限变更都会写入 `permission.changed` outbox event，payload 包含 scope、resource_id、permission_version、reason、主体信息和必要时的 affected_user_id。`permission.invalidate_cache` 会消费该事件并删除匹配的 Redis 权限缓存 key；部门/用户组 ACL 变更当前保守失效租户内节点权限缓存。缓存只用于加速，不作为权限事实来源。权限变更还会写入独立的 `search.acl_rebuild_requested` outbox event，由 `search.dispatch_outbox` 按 space 或 node 子树保守重建 OpenSearch 索引 token；文件重命名、移动、删除、恢复和彻底删除会写入 `search.index_requested`，由搜索 worker 重新加载 PostgreSQL 事实后更新或删除文件索引。上传完成会写入 `search.extract_requested`，搜索 worker 对 MIME 或扩展名判定为文本的 UTF-8 小文件读取对象内容，更新 `file_versions.search_status/search_error/search_text`，并刷新索引 `content` 字段；不支持的格式标记为 `skipped`，解码失败标记为 `failed` 但不重试，存储读取失败标记为 `failed` 并由 outbox 退避重试。搜索查询接口会先根据当前用户的空间成员角色、用户主体、部门主体和用户组主体构建查询 token，并在 OpenSearch 查询层同时加入租户、未删除、`acl_tokens` allow 和 `deny_acl_tokens` 排除过滤；分页使用绑定查询词和排序值的签名 cursor，响应返回 `next_cursor`；命中文件返回 HTML 编码的 `<mark>` 高亮片段。返回前再按 PostgreSQL 节点路径调用 `PermissionService.can_access_node(..., action=read_meta)` 二次校验，避免 ACL 变更后索引尚未刷新时泄露文件名和元数据。搜索查询已接入 `search.query` 基础限流，按 `tenant + user + search + IP` 维度计数；触发限流时返回 HTTP 429 和 `RATE_LIMITED`。
@@ -170,6 +172,9 @@ uv run pytest
 - `DRIVE_SHARE_EXTERNAL_DOWNLOAD_RATE_LIMIT_COUNT`
 - `DRIVE_SHARE_EXTERNAL_DOWNLOAD_RATE_LIMIT_WINDOW_SECONDS`
 - `DRIVE_SEARCH_TEXT_EXTRACT_MAX_BYTES`
+- `DRIVE_PREVIEW_MAX_SOURCE_BYTES`
+- `DRIVE_PREVIEW_IMAGE_MAX_SIDE`
+- `DRIVE_PREVIEW_PRESIGN_EXPIRES_SECONDS`
 
 当前上传接口已通过 `PermissionService` 校验父目录节点级 `upload` 权限；初始化和 multipart complete 都会重新检查，避免会话创建后权限收紧仍可完成上传。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除到回收站不释放容量；彻底删除回收站节点时通过原子 update 扣减 `quota_accounts.used_bytes`，并写入 `reason=file_purged`、`ref_type=node` 的负向容量流水。容量校准任务 `quota.reconcile_space_usage` 使用 PostgreSQL 中的文件版本记录作为事实来源，默认按 `limit` 批大小和 cursor 扫完整个租户，只报告空间容量快照和账本漂移；传入 `repair=true` 时会修复缺失的空间容量账户，已有账户修复前会锁定账户行并重新聚合实际用量和账本合计，再校准 `quota_accounts.used_bytes`，仅按最新差额写入 `reason=quota_reconciled` 账本流水和 `quota.reconciled` 系统审计。彻底删除接口不在用户请求事务中同步删除最终对象；`file.cleanup_unreferenced_blobs` 会扫描 active、`ref_count=0` 且无 `file_versions` 引用的 blob，先标记为 `deleting`，再删除对象存储内容和 DB 元数据。对象存储删除失败会恢复为 `active` 并计入 `storage_errors`；对象存储中没有 DB 元数据的孤儿对象扫描仍需后续治理任务补齐。用户/租户维度配额将在后续步骤补齐。
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 from datetime import timedelta
+from io import BytesIO
 from urllib.parse import quote, urlsplit
 
 from minio import Minio
@@ -192,6 +193,16 @@ class S3StorageAdapter:
     ) -> bytes:
         return await asyncio.to_thread(self._read_object_bytes, bucket, storage_key, max_bytes)
 
+    async def put_object_bytes(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        content: bytes,
+        content_type: str,
+    ) -> None:
+        await asyncio.to_thread(self._put_object_bytes, bucket, storage_key, content, content_type)
+
     def _ensure_bucket(self, bucket: str) -> None:
         if self._client.bucket_exists(bucket):
             return
@@ -225,3 +236,19 @@ class S3StorageAdapter:
             response.close()
             response.release_conn()
         return b"".join(chunks)
+
+    def _put_object_bytes(
+        self,
+        bucket: str,
+        storage_key: str,
+        content: bytes,
+        content_type: str,
+    ) -> None:
+        self._ensure_bucket(bucket)
+        self._client.put_object(
+            bucket,
+            storage_key,
+            BytesIO(content),
+            length=len(content),
+            content_type=content_type,
+        )

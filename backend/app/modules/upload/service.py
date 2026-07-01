@@ -18,6 +18,7 @@ from app.modules.file.repository import FileRepository
 from app.modules.file.validators import node_name_conflict_error, normalize_node_name
 from app.modules.permission.actions import ACTION_UPLOAD
 from app.modules.permission.service import PermissionService
+from app.modules.preview.events import emit_preview_render_requested
 from app.modules.quota.service import QuotaService
 from app.modules.search.events import emit_search_extract_requested, emit_search_index_requested
 from app.modules.space.repository import SpaceRepository
@@ -261,6 +262,14 @@ class UploadService:
                 metadata={"version_id": str(version.id), "blob_id": str(blob_id)},
             )
             await emit_search_extract_requested(
+                audit_service=self.audit_service,
+                tenant_id=current_user.tenant_id,
+                node_id=node.id,
+                version_id=version.id,
+                blob_id=blob_id,
+                reason="upload_instant",
+            )
+            await emit_preview_render_requested(
                 audit_service=self.audit_service,
                 tenant_id=current_user.tenant_id,
                 node_id=node.id,

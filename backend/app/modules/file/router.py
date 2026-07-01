@@ -38,6 +38,9 @@ from app.modules.org.repository import OrgRepository
 from app.modules.org.service import OrgService
 from app.modules.permission.repository import PermissionRepository
 from app.modules.permission.service import PermissionService
+from app.modules.preview.repository import PreviewRepository
+from app.modules.preview.schemas import FilePreviewResponse
+from app.modules.preview.service import PreviewAccessService
 from app.modules.quota.repository import QuotaRepository
 from app.modules.quota.service import QuotaService
 from app.modules.space.repository import SpaceRepository
@@ -84,6 +87,26 @@ def get_file_download_service(
         storage=storage,
         settings=settings,
         audit_service=AuditService(repository=AuditRepository(session)),
+    )
+
+
+def get_preview_access_service(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    storage: Annotated[StorageAdapter, Depends(get_storage_adapter)],
+) -> PreviewAccessService:
+    permission_repository = PermissionRepository(session)
+    org_service = OrgService(repository=OrgRepository(session))
+    return PreviewAccessService(
+        repository=PreviewRepository(session),
+        file_repository=FileRepository(session),
+        space_repository=SpaceRepository(session),
+        permission_service=PermissionService(
+            repository=permission_repository,
+            org_service=org_service,
+        ),
+        storage=storage,
+        settings=settings,
     )
 
 
@@ -204,6 +227,15 @@ async def create_download_url(
         node_id=node_id,
         audit_context=build_audit_context(http_request),
     )
+
+
+@router.get("/{node_id}/preview", response_model=FilePreviewResponse)
+async def create_preview_url(
+    node_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[PreviewAccessService, Depends(get_preview_access_service)],
+) -> FilePreviewResponse:
+    return await service.create_preview_url(current_user=current_user, node_id=node_id)
 
 
 @router.post("/{node_id}/restore", response_model=FileNodeResponse)

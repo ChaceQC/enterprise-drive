@@ -158,6 +158,8 @@ class FileVersion(Base):
     version_no: Mapped[int] = mapped_column(Integer, nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     mime_type: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    preview_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
+    preview_error: Mapped[str | None] = mapped_column(String(255), nullable=True)
     search_status: Mapped[str] = mapped_column(String(32), nullable=False, default="pending")
     search_error: Mapped[str | None] = mapped_column(String(255), nullable=True)
     search_text: Mapped[str | None] = mapped_column(Text, nullable=True)

@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     share_external_download_rate_limit_count: int = 120
     share_external_download_rate_limit_window_seconds: int = 60
     search_text_extract_max_bytes: int = 512 * 1024
+    preview_max_source_bytes: int = 20 * 1024 * 1024
+    preview_image_max_side: int = 1600
+    preview_presign_expires_seconds: int = 300
 
     session_cookie_name: str = "drive_session"
     csrf_cookie_name: str = "drive_csrf"

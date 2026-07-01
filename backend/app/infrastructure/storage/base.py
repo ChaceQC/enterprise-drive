@@ -122,3 +122,13 @@ class StorageAdapter(Protocol):
         max_bytes: int,
     ) -> bytes:
         """Read at most max_bytes from one private object."""
+
+    async def put_object_bytes(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        content: bytes,
+        content_type: str,
+    ) -> None:
+        """Write one private object from bytes."""

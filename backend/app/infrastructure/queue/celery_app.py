@@ -14,6 +14,7 @@ celery_app = Celery(
         "app.workers.audit_tasks",
         "app.workers.file_tasks",
         "app.workers.permission_tasks",
+        "app.workers.preview_tasks",
         "app.workers.search_tasks",
         "app.workers.upload_tasks",
         "app.workers.quota_tasks",
@@ -25,6 +26,7 @@ celery_app.conf.update(
     task_routes={
         "audit.dispatch_outbox": {"queue": "audit"},
         "permission.invalidate_cache": {"queue": "permission"},
+        "preview.dispatch_outbox": {"queue": "preview"},
         "search.dispatch_outbox": {"queue": "search"},
         "file.cleanup_unreferenced_blobs": {"queue": "maintenance"},
         "upload.expire_sessions": {"queue": "maintenance"},

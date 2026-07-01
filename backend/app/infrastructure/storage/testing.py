@@ -152,6 +152,16 @@ class InMemoryStorageAdapter:
             )
         return content[:max_bytes]
 
+    async def put_object_bytes(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        content: bytes,
+        content_type: str,
+    ) -> None:
+        self.object_contents[(bucket, storage_key)] = content
+
     def _completed_parts_for(
         self,
         *,
