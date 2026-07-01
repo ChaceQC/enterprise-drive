@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
 from app.core.security import utc_now
+from app.infrastructure.storage.testing import InMemoryStorageAdapter
+from app.modules.audit.models import AuditLog
 from app.modules.file.models import FileBlob
 from app.modules.share.models import Share, ShareAccessLog
 from tests.helpers import client as client
@@ -399,3 +401,191 @@ async def test_external_share_access_rejects_expired_revoked_and_view_limit(
     assert second_limited_access.json()["code"] == "SHARE_VIEW_LIMIT_EXCEEDED"
     assert revoked_access.status_code == 410
     assert revoked_access.json()["code"] == "SHARE_REVOKED"
+
+
+@pytest.mark.asyncio
+async def test_external_share_download_returns_url_and_records_count(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
+) -> None:
+    await seed_admin(session_factory, settings)
+    csrf_token = await login(client)
+    space = await create_space(client, csrf_token, slug="external-download-space")
+    file_payload = await create_instant_file(
+        client,
+        session_factory,
+        csrf_token,
+        tenant_id=str(space["tenant_id"]),
+        space_id=str(space["id"]),
+        parent_id=str(space["root_node_id"]),
+        file_name="外链下载.txt",
+        content_hash="8" * 64,
+    )
+    create_response = await client.post(
+        "/api/v1/shares",
+        headers={"X-CSRF-Token": csrf_token},
+        json={
+            "share_type": "external",
+            "root_node_id": file_payload["node_id"],
+            "passcode": "download-me",
+            "max_downloads": 2,
+        },
+    )
+    assert create_response.status_code == 201
+    raw_token = create_response.json()["raw_token"]
+
+    response = await client.post(
+        "/api/v1/public/shares/download",
+        headers={"X-Request-ID": "req_external_download"},
+        json={
+            "tenant_slug": "default",
+            "raw_token": raw_token,
+            "passcode": "download-me",
+            "node_id": file_payload["node_id"],
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["share_id"] == create_response.json()["id"]
+    assert payload["node_id"] == file_payload["node_id"]
+    assert payload["file_name"] == "外链下载.txt"
+    assert payload["size_bytes"] == 128
+    assert payload["mime_type"] == "text/plain"
+    assert payload["download_url"].startswith("https://storage.test/")
+    assert payload["download_count"] == 1
+    assert storage_adapter.presigned_downloads[0][1].startswith("objects/test/")
+
+    async with session_factory() as session:
+        share = (await session.execute(select(Share))).scalar_one()
+        access_log = (
+            await session.execute(select(ShareAccessLog).where(ShareAccessLog.action == "download"))
+        ).scalar_one()
+        audit = (
+            await session.execute(
+                select(AuditLog).where(AuditLog.action == "share.external.downloaded")
+            )
+        ).scalar_one()
+
+    assert share.download_count == 1
+    assert access_log.result == "allowed"
+    assert access_log.bytes_sent == 128
+    assert audit.result == "allowed"
+    assert audit.request_id == "req_external_download"
+    assert audit.resource_id == UUID(file_payload["node_id"])
+    assert audit.metadata_json["share_id"] == create_response.json()["id"]
+
+
+@pytest.mark.asyncio
+async def test_external_share_download_rejects_limit_preview_and_unshared_node(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
+) -> None:
+    await seed_admin(session_factory, settings)
+    csrf_token = await login(client)
+    space = await create_space(client, csrf_token, slug="external-download-state-space")
+    file_payload = await create_instant_file(
+        client,
+        session_factory,
+        csrf_token,
+        tenant_id=str(space["tenant_id"]),
+        space_id=str(space["id"]),
+        parent_id=str(space["root_node_id"]),
+        file_name="外链下载次数.txt",
+        content_hash="9" * 64,
+    )
+    other_payload = await create_instant_file(
+        client,
+        session_factory,
+        csrf_token,
+        tenant_id=str(space["tenant_id"]),
+        space_id=str(space["id"]),
+        parent_id=str(space["root_node_id"]),
+        file_name="未分享.txt",
+        content_hash="a" * 64,
+    )
+    limited_response = await client.post(
+        "/api/v1/shares",
+        headers={"X-CSRF-Token": csrf_token},
+        json={
+            "share_type": "external",
+            "root_node_id": file_payload["node_id"],
+            "max_downloads": 1,
+        },
+    )
+    preview_response = await client.post(
+        "/api/v1/shares",
+        headers={"X-CSRF-Token": csrf_token},
+        json={
+            "share_type": "external",
+            "root_node_id": file_payload["node_id"],
+            "permission": "preview",
+        },
+    )
+    assert limited_response.status_code == 201
+    assert preview_response.status_code == 201
+    limited_token = limited_response.json()["raw_token"]
+    preview_token = preview_response.json()["raw_token"]
+
+    first_limited = await client.post(
+        "/api/v1/public/shares/download",
+        json={
+            "tenant_slug": "default",
+            "raw_token": limited_token,
+            "node_id": file_payload["node_id"],
+        },
+    )
+    second_limited = await client.post(
+        "/api/v1/public/shares/download",
+        json={
+            "tenant_slug": "default",
+            "raw_token": limited_token,
+            "node_id": file_payload["node_id"],
+        },
+    )
+    preview_download = await client.post(
+        "/api/v1/public/shares/download",
+        json={
+            "tenant_slug": "default",
+            "raw_token": preview_token,
+            "node_id": file_payload["node_id"],
+        },
+    )
+    unshared_download = await client.post(
+        "/api/v1/public/shares/download",
+        json={
+            "tenant_slug": "default",
+            "raw_token": limited_token,
+            "node_id": other_payload["node_id"],
+        },
+    )
+
+    assert first_limited.status_code == 200
+    assert second_limited.status_code == 410
+    assert second_limited.json()["code"] == "SHARE_DOWNLOAD_LIMIT_EXCEEDED"
+    assert preview_download.status_code == 403
+    assert preview_download.json()["code"] == "SHARE_DOWNLOAD_FORBIDDEN"
+    assert unshared_download.status_code == 404
+    assert unshared_download.json()["code"] == "SHARE_ITEM_NOT_FOUND"
+    assert len(storage_adapter.presigned_downloads) == 1
+
+    async with session_factory() as session:
+        shares = (await session.execute(select(Share).order_by(Share.created_at))).scalars().all()
+        logs = (
+            (
+                await session.execute(
+                    select(ShareAccessLog)
+                    .where(ShareAccessLog.action == "download")
+                    .order_by(ShareAccessLog.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert [share.download_count for share in shares] == [1, 0]
+    assert [log.result for log in logs] == ["allowed", "denied", "denied", "denied"]

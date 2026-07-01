@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     search_query_rate_limit_window_seconds: int = 60
     share_external_access_rate_limit_count: int = 60
     share_external_access_rate_limit_window_seconds: int = 60
+    share_external_download_rate_limit_count: int = 120
+    share_external_download_rate_limit_window_seconds: int = 60
     search_text_extract_max_bytes: int = 512 * 1024
 
     session_cookie_name: str = "drive_session"

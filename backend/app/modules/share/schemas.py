@@ -84,3 +84,23 @@ class ExternalShareAccessResponse(BaseModel):
     view_count: int
     download_count: int
     item_node_ids: list[UUID]
+
+
+class ExternalShareDownloadRequest(BaseModel):
+    tenant_slug: str = Field(min_length=1, max_length=64)
+    raw_token: str = Field(min_length=32, max_length=256)
+    node_id: UUID
+    passcode: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class ExternalShareDownloadResponse(BaseModel):
+    share_id: UUID
+    node_id: UUID
+    version_id: UUID
+    file_name: str
+    size_bytes: int
+    mime_type: str | None
+    download_url: str
+    expires_at: datetime
+    headers: dict[str, str]
+    download_count: int

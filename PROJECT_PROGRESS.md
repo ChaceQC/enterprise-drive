@@ -114,10 +114,15 @@
 - 外链访问成功时通过数据库条件 update 原子增加 `view_count`，返回分享基础信息和分享项节点 ID；成功和失败都会写入 `share_access_logs`，并通过审计服务写入 `share.external.accessed` outbox 事件。
 - 外链访问已复用 Redis Lua 固定窗口限流，按 IP 总量和 `token + IP` 维度计数；新增 `DRIVE_SHARE_EXTERNAL_ACCESS_RATE_LIMIT_COUNT` 和 `DRIVE_SHARE_EXTERNAL_ACCESS_RATE_LIMIT_WINDOW_SECONDS` 配置。
 - 补充外链访问测试，覆盖提取码错误、成功访问写日志、过期、撤销、访问次数耗尽和外链访问限流。
+- 接入外链分享下载入口 `POST /api/v1/public/shares/download`：请求体使用 `tenant_slug`、`raw_token`、`node_id` 和可选 `passcode`，按租户边界加载外链分享。
+- 外链下载会校验分享状态、过期时间、提取码、分享权限是否为 `download`、请求节点是否属于 root 或分享项、节点是否仍是同一空间内的文件、当前版本和 blob 是否存在。
+- 外链下载成功时通过数据库条件 update 原子增加 `download_count`，再通过既有 `StorageAdapter.presign_download` 返回短期私有对象下载 URL；成功和失败都会写入 `share_access_logs`，并通过审计服务写入 `share.external.downloaded` outbox 事件。
+- 外链下载已复用 Redis Lua 固定窗口限流，按 IP 总量和 `token + node + IP` 维度计数；新增 `DRIVE_SHARE_EXTERNAL_DOWNLOAD_RATE_LIMIT_COUNT` 和 `DRIVE_SHARE_EXTERNAL_DOWNLOAD_RATE_LIMIT_WINDOW_SECONDS` 配置。
+- 补充外链下载测试，覆盖成功下载写日志和计数、下载次数耗尽、preview 权限拒绝和未分享节点隐藏；本轮按 AGENT 规则复用 `StorageAdapter`、`FileRepository` 和 SQLAlchemy 条件更新，没有引入云服务 SDK 或自研下载协议。
 
 ### 进行中
 
-- Sprint 5 分享模块已开始；基础表、迁移、服务层、创建/详情/撤销 HTTP API、外链访问校验入口和外链访问限流已完成，下一步接入外链下载、下载次数并发扣减和 external subject 下载策略。
+- Sprint 5 分享模块已开始；基础表、迁移、服务层、创建/详情/撤销 HTTP API、外链访问校验入口、外链下载入口、访问/下载次数原子扣减和公共限流已完成。下一步进入预览链路，优先使用成熟开源工具补齐 Office/PDF 等复杂文档解析与预览产物生成。
 
 ### 阻塞与风险
 
@@ -132,12 +137,12 @@
 - 当前容量实现已覆盖空间维度的文件版本创建、彻底删除释放、空间容量校准和 DB 驱动的 blob/object 清理；用户/租户维度配额、定时调度配置和监控告警仍需后续补齐。
 - `file.cleanup_unreferenced_blobs` 只清理仍有 DB blob 元数据且已无版本引用的最终对象；对象存储里没有 DB 元数据的孤儿对象扫描仍需后续治理任务兜底。
 - 当前清理任务按批次扫描租户内过期会话，尚未接入定时调度配置、任务监控指标和失败告警。
-- 当前基础限流覆盖上传初始化、分片签名、下载预签名、搜索查询和外链访问；登录失败和管理接口限流仍需随对应模块接入。
-- 分享模块当前已开放创建/详情/撤销 API 和带限流的外链访问校验入口，但外链下载、下载次数原子扣减、Range/预签名策略和 external subject 下载权限仍需下一步补齐。
+- 当前基础限流覆盖上传初始化、分片签名、下载预签名、搜索查询、外链访问和外链下载；登录失败和管理接口限流仍需随对应模块接入。
+- 分享模块当前已开放创建/详情/撤销 API、带限流的外链访问入口和外链下载入口；外链下载现阶段返回短期预签名 URL，高密级文件的 Range 后端代理、水印导出和更细的 external subject 策略仍需后续补齐。
 
 ### 下一步
 
-- 接入外链下载入口：基于已校验外链分享加载 root/item 文件，校验分享权限、文件状态和下载次数限制，原子增加 `download_count`，并返回短期私有下载 URL 或后端代理策略。
+- 接入预览任务基础：选用成熟开源工具处理 Office/PDF/图片等格式，建立预览任务状态、私有预览产物写入和权限控制访问入口，避免自研复杂文档解析器。
 
 ### 涉及文件
 
@@ -200,6 +205,7 @@
 - `backend/app/modules/share/models.py`
 - `backend/app/modules/share/repository.py`
 - `backend/app/modules/share/external_access.py`
+- `backend/app/modules/share/external_download.py`
 - `backend/app/modules/share/router.py`
 - `backend/app/modules/share/schemas.py`
 - `backend/app/modules/share/service.py`
@@ -283,6 +289,16 @@
 - 已运行 `uv run mypy app`，结果为 no issues found in 121 source files。
 - 已运行 `uv run pytest -q`，结果通过，共 99 个测试点。
 - 已运行 `uv run alembic upgrade head --sql`，确认新增分享迁移 `20260701_0011_share_base.py` 可生成 PostgreSQL SQL。
+- 已运行 `uv run ruff format app/api/deps.py app/core/config.py app/modules/share tests/test_share_router.py`，格式化外链下载相关文件。
+- 已运行 `uv run pytest tests/test_share_service.py tests/test_share_router.py -q`，结果为 14 passed。
+- 已运行 `uv run mypy app/modules/share app/api/deps.py app/core/config.py`，结果为 Success。
+- 已运行 `uv run ruff format --check .`，结果为 158 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 124 source files。
+- 已运行 `uv run pytest -q`，结果为 107 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认当前迁移仍可生成 PostgreSQL SQL。
+- 已运行 `git diff --check`，未发现空白错误；仅有 Windows 工作区 LF/CRLF 提示。
+- 本轮未启动 API、Worker、Docker Compose 或其他常驻服务。
 - 已运行 `git diff --check`，未发现空白错误。
 - 已运行 `uv run pytest tests/test_share_router.py -q`，结果为 3 passed。
 - 已运行 `uv run ruff format --check .`，结果为 156 files already formatted。

@@ -64,14 +64,14 @@ uv run pytest
 - 删除到回收站保留空间容量占用；彻底删除回收站节点时释放对应文件版本容量，并写入 `file_purged` 负向容量流水。
 - 上传初始化、秒传、complete、abort 和 hash 不匹配等失败审计事件。
 - `upload.expire_sessions` 维护任务，按租户清理过期上传会话并写入 `upload.expired` 审计事件。
-- Redis Lua 原子固定窗口基础限流，覆盖上传初始化、分片签名、下载预签名、搜索查询和外链访问。
+- Redis Lua 原子固定窗口基础限流，覆盖上传初始化、分片签名、下载预签名、搜索查询、外链访问和外链下载。
 - `quota.reconcile_space_usage` 维护任务，支持空间容量只读报告和修复模式。
 - `file.cleanup_unreferenced_blobs` 维护任务，清理 ref_count 为 0 且无版本引用的最终对象和 blob 元数据。
 - `permission.invalidate_cache` 任务，消费 `permission.changed` outbox event 并失效 Redis 权限缓存 key；审计 dispatcher 只消费 `audit.*`，避免抢占权限事件。
 - 搜索 ACL token builder、`search.acl_rebuild_requested` outbox event、`search.index_requested` 文件索引事件、`search.extract_requested` 文本抽取事件和 `GET /api/v1/search` 查询接口；`search.dispatch_outbox` 会从 PostgreSQL 重新加载文件、版本、blob、空间成员和节点 ACL 事实后写入 OpenSearch，不再活跃或已彻底删除的文件会删除索引文档，并在 ACL 变更后按 space 或 node 子树保守重建索引 token；当前文本抽取只处理 UTF-8 文本类文件，写入 `file_versions.search_text` 后刷新索引 `content` 字段，Office/PDF 等复杂格式后续接入成熟开源解析工具；查询接口使用 `acl_tokens` allow 过滤、`deny_acl_tokens` 排除过滤、签名 cursor 分页、HTML 编码高亮和 `read_meta` 二次权限校验。
 - `shares`、`share_items`、`share_recipients`、`share_access_logs` 基础表和迁移；服务层支持内部分享、外链分享、提取码哈希、过期时间、访问/下载次数上限和撤销状态。
 - 分享创建会校验 root 节点和全部分享项的节点级 `share` 权限，分享项必须与 root 节点属于同一空间；外链原始 token 只返回一次，数据库只保存全局唯一 token hash，提取码只保存 Argon2id hash。
-- 分享创建和撤销会写入 `share.created` / `share.revoked` 审计事件和 `audit.share.*` outbox event；`POST /api/v1/shares`、`GET /api/v1/shares/{share_id}`、`POST /api/v1/shares/{share_id}/revoke` 已接入 Cookie Session、CSRF 和创建者边界；`POST /api/v1/public/shares/access` 已接入 `tenant_slug`、外链 token、提取码、状态、过期、访问次数校验，以及 IP 总量和 `token + IP` 维度限流，会带租户边界查询分享、原子增加 `view_count` 并写入 `share_access_logs`；外链下载、下载次数并发扣减和 external subject 下载策略将在下一步接入。
+- 分享创建和撤销会写入 `share.created` / `share.revoked` 审计事件和 `audit.share.*` outbox event；`POST /api/v1/shares`、`GET /api/v1/shares/{share_id}`、`POST /api/v1/shares/{share_id}/revoke` 已接入 Cookie Session、CSRF 和创建者边界；`POST /api/v1/public/shares/access` 已接入 `tenant_slug`、外链 token、提取码、状态、过期、访问次数校验，以及 IP 总量和 `token + IP` 维度限流，会带租户边界查询分享、原子增加 `view_count` 并写入 `share_access_logs`；`POST /api/v1/public/shares/download` 已接入外链下载，会校验分享状态、提取码、下载权限、分享项范围、文件当前版本和下载次数限制，原子增加 `download_count`，返回短期私有对象下载 URL，并写入 `share_access_logs` 和 `share.external.downloaded` 审计。
 - 文件下载预签名 URL 接口，按当前文件版本生成短期私有对象下载地址。
 - 下载成功和拒绝均写入 `file.downloaded` 审计事件与 outbox event。
 - 管理员 seed 脚本。
@@ -120,8 +120,11 @@ uv run pytest
 - `GET /api/v1/shares/{share_id}`
 - `POST /api/v1/shares/{share_id}/revoke`
 - `POST /api/v1/public/shares/access`
+- `POST /api/v1/public/shares/download`
 
-创建分享接口支持 `internal` 和 `external` 类型。内部分享必须指定用户、部门或用户组接收人；外链分享会返回一次性明文 `raw_token`，数据库只保存全局唯一 token hash。分享创建会检查 root 节点和全部分享项的 `share` 权限，分享项必须与 root 节点属于同一空间。详情和撤销当前只允许创建者访问。公开外链访问接口不需要登录，请求体需要提供 `tenant_slug`、`raw_token` 和可选 `passcode`；后端先解析租户，再按 `tenant_id + token_hash` 查询外链，校验状态、过期时间、提取码和访问次数限制，并按 IP 总量和 `token + IP` 维度限流。校验通过后原子增加 `view_count`，返回分享基础信息和分享项节点 ID，并写入 `share_access_logs` 和 `share.external.accessed` 审计。当前 API 尚未提供外链下载、下载次数原子扣减和 external subject 下载策略。
+创建分享接口支持 `internal` 和 `external` 类型。内部分享必须指定用户、部门或用户组接收人；外链分享会返回一次性明文 `raw_token`，数据库只保存全局唯一 token hash。分享创建会检查 root 节点和全部分享项的 `share` 权限，分享项必须与 root 节点属于同一空间。详情和撤销当前只允许创建者访问。公开外链访问接口不需要登录，请求体需要提供 `tenant_slug`、`raw_token` 和可选 `passcode`；后端先解析租户，再按 `tenant_id + token_hash` 查询外链，校验状态、过期时间、提取码和访问次数限制，并按 IP 总量和 `token + IP` 维度限流。校验通过后原子增加 `view_count`，返回分享基础信息和分享项节点 ID，并写入 `share_access_logs` 和 `share.external.accessed` 审计。
+
+公开外链下载接口不需要登录，请求体需要提供 `tenant_slug`、`raw_token`、`node_id` 和可选 `passcode`。后端按外链 token 和租户边界加载分享，校验状态、过期时间、提取码、分享权限是否为 `download`、请求节点是否为 root 或分享项、节点是否仍是同一空间内的文件、当前版本和 blob 是否存在；通过后用数据库条件 update 原子增加 `download_count`，再通过 `StorageAdapter.presign_download` 返回短期私有对象下载 URL。外链下载限流同时覆盖 IP 总量和 `token + node + IP` 维度；成功和失败都会记录 `share_access_logs`，审计 actor_type 为 `external`。当前公开下载使用预签名 URL，后端 Range 代理、水印导出和更细的 external subject 策略将在高密级下载或预览链路中继续补齐。
 
 ## 上传接口
 
@@ -164,6 +167,8 @@ uv run pytest
 - `DRIVE_SEARCH_QUERY_RATE_LIMIT_WINDOW_SECONDS`
 - `DRIVE_SHARE_EXTERNAL_ACCESS_RATE_LIMIT_COUNT`
 - `DRIVE_SHARE_EXTERNAL_ACCESS_RATE_LIMIT_WINDOW_SECONDS`
+- `DRIVE_SHARE_EXTERNAL_DOWNLOAD_RATE_LIMIT_COUNT`
+- `DRIVE_SHARE_EXTERNAL_DOWNLOAD_RATE_LIMIT_WINDOW_SECONDS`
 - `DRIVE_SEARCH_TEXT_EXTRACT_MAX_BYTES`
 
 当前上传接口已通过 `PermissionService` 校验父目录节点级 `upload` 权限；初始化和 multipart complete 都会重新检查，避免会话创建后权限收紧仍可完成上传。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除到回收站不释放容量；彻底删除回收站节点时通过原子 update 扣减 `quota_accounts.used_bytes`，并写入 `reason=file_purged`、`ref_type=node` 的负向容量流水。容量校准任务 `quota.reconcile_space_usage` 使用 PostgreSQL 中的文件版本记录作为事实来源，默认按 `limit` 批大小和 cursor 扫完整个租户，只报告空间容量快照和账本漂移；传入 `repair=true` 时会修复缺失的空间容量账户，已有账户修复前会锁定账户行并重新聚合实际用量和账本合计，再校准 `quota_accounts.used_bytes`，仅按最新差额写入 `reason=quota_reconciled` 账本流水和 `quota.reconciled` 系统审计。彻底删除接口不在用户请求事务中同步删除最终对象；`file.cleanup_unreferenced_blobs` 会扫描 active、`ref_count=0` 且无 `file_versions` 引用的 blob，先标记为 `deleting`，再删除对象存储内容和 DB 元数据。对象存储删除失败会恢复为 `active` 并计入 `storage_errors`；对象存储中没有 DB 元数据的孤儿对象扫描仍需后续治理任务补齐。用户/租户维度配额将在后续步骤补齐。

@@ -11,12 +11,14 @@ from app.api.deps import (
     enforce_public_rate_limit,
     get_current_user,
     get_rate_limiter,
+    get_storage_adapter,
 )
 from app.api.errors import ApiError
 from app.core.config import Settings, get_settings
 from app.core.security import hash_token
 from app.db.session import get_db_session
 from app.infrastructure.rate_limit.base import RateLimiter
+from app.infrastructure.storage.base import StorageAdapter
 from app.modules.audit.repository import AuditRepository
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
@@ -28,12 +30,15 @@ from app.modules.org.service import OrgService
 from app.modules.permission.repository import PermissionRepository
 from app.modules.permission.service import PermissionService
 from app.modules.share.external_access import ShareExternalAccessService
+from app.modules.share.external_download import ShareExternalDownloadService
 from app.modules.share.repository import ShareRepository
 from app.modules.share.schemas import (
     CreateShareRequest,
     CreateShareResponse,
     ExternalShareAccessRequest,
     ExternalShareAccessResponse,
+    ExternalShareDownloadRequest,
+    ExternalShareDownloadResponse,
     RevokeShareResponse,
     ShareDetail,
 )
@@ -70,6 +75,20 @@ def get_share_external_access_service(
 ) -> ShareExternalAccessService:
     return ShareExternalAccessService(
         repository=ShareRepository(session),
+        audit_service=AuditService(repository=AuditRepository(session)),
+    )
+
+
+def get_share_external_download_service(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    storage: Annotated[StorageAdapter, Depends(get_storage_adapter)],
+) -> ShareExternalDownloadService:
+    return ShareExternalDownloadService(
+        repository=ShareRepository(session),
+        file_repository=FileRepository(session),
+        storage=storage,
+        settings=settings,
         audit_service=AuditService(repository=AuditRepository(session)),
     )
 
@@ -156,6 +175,44 @@ async def access_external_share(
     return await service.access_external_share(
         tenant_id=tenant_id,
         raw_token=request.raw_token,
+        passcode=request.passcode,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@public_router.post("/download", response_model=ExternalShareDownloadResponse)
+async def create_external_download_url(
+    http_request: Request,
+    request: ExternalShareDownloadRequest,
+    settings: Annotated[Settings, Depends(get_settings)],
+    rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
+    service: Annotated[
+        ShareExternalDownloadService,
+        Depends(get_share_external_download_service),
+    ],
+) -> ExternalShareDownloadResponse:
+    await enforce_public_rate_limit(
+        settings=settings,
+        rate_limiter=rate_limiter,
+        action="share.external_download",
+        request=http_request,
+        resource_key="share-download",
+    )
+    await enforce_public_rate_limit(
+        settings=settings,
+        rate_limiter=rate_limiter,
+        action="share.external_download",
+        request=http_request,
+        resource_key=f"share-download-token:{hash_token(request.raw_token)}:node:{request.node_id}",
+    )
+    tenant_id = await auth_service.get_tenant_id_by_slug(request.tenant_slug)
+    if tenant_id is None:
+        raise ApiError("SHARE_NOT_FOUND", "分享不存在", status_code=404)
+    return await service.create_external_download_url(
+        tenant_id=tenant_id,
+        raw_token=request.raw_token,
+        node_id=request.node_id,
         passcode=request.passcode,
         audit_context=build_audit_context(http_request),
     )

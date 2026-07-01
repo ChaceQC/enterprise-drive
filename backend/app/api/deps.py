@@ -162,6 +162,12 @@ def _rate_limit_rule(*, settings: Settings, action: str) -> RateLimitRule:
             limit=settings.share_external_access_rate_limit_count,
             window_seconds=settings.share_external_access_rate_limit_window_seconds,
         )
+    if action == "share.external_download":
+        return RateLimitRule(
+            action=action,
+            limit=settings.share_external_download_rate_limit_count,
+            window_seconds=settings.share_external_download_rate_limit_window_seconds,
+        )
     raise ApiError("RATE_LIMIT_RULE_NOT_FOUND", "限流规则不存在", status_code=500)
 
 
