@@ -86,17 +86,18 @@
 - 新增 `search.dispatch_outbox` Celery 任务并路由到 `search` 队列；当前只消费已实现的 `search.index_requested` 事件，避免把尚未实现处理器的 `search.acl_rebuild_requested` 提前标记为 sent。
 - 新增搜索适配层 `SearchIndexAdapter` 和 OpenSearch 实现，文件索引文档从 PostgreSQL 重新加载 `nodes`、当前 `file_versions`、`file_blobs`、`space_members` 和节点路径 ACL 后构建，不依赖 outbox payload 拼业务对象。
 - 秒传和 multipart complete 成功后会在同一事务中写入 `search.index_requested` outbox event；`search.dispatch_outbox` 会写入 OpenSearch `drive_files_v1`，索引字段包含 `acl_tokens` 与 `deny_acl_tokens`。
+- `search.dispatch_outbox` 已消费 `search.acl_rebuild_requested` 事件：`scope=space` 时重建空间内活跃文件，`scope=node` 时重建该文件或目录子树下活跃文件，确保 ACL token 随权限变更刷新。
 
 ### 进行中
 
-- Sprint 4 权限系统已开始；空间成员事实表、owner 成员自动写入、空间级成员角色检查、空间成员管理 API、用户/部门/用户组节点 ACL 基础闭环、文件列表批量权限评估、`permission.changed` outbox 事件写入、Redis 权限缓存失效 worker、org 部门/用户组主体展开、搜索 ACL 重建事件和上传完成后的文件索引写入入口已完成，下一步接 ACL 变更索引重建和搜索查询过滤。
+- Sprint 4 权限系统已开始；空间成员事实表、owner 成员自动写入、空间级成员角色检查、空间成员管理 API、用户/部门/用户组节点 ACL 基础闭环、文件列表批量权限评估、`permission.changed` outbox 事件写入、Redis 权限缓存失效 worker、org 部门/用户组主体展开、搜索文件索引写入和 ACL 变更范围重建已完成，下一步接搜索查询过滤。
 
 ### 阻塞与风险
 
 - MinIO Python SDK 的 multipart create/complete/abort 在当前适配中需要调用客户端私有方法，已限定在 `infrastructure` 适配层；若后续出现兼容性、升级稳定性或批量吞吐问题，应评估更完整的开源 S3 兼容客户端或标准 HTTP/SigV4 实现。
 - 当前 Redis 限流仍是固定窗口策略，适用于上传初始化、分片签名和下载预签名的基础保护；若后续需要滑动窗口、令牌桶、多层级动态规则或管理端配置，应切换成熟限流库。
 - 当前空间、文件树、上传、下载、空间成员管理和节点 ACL 管理接口已接入权限检查；文件列表已返回当前页子节点的批量权限评估结果；权限变更 outbox 事件已接入 Redis 缓存失效 worker；org 部门/用户组 ACL 主体和搜索 ACL 重建事件已接入。
-- 搜索当前已完成 token builder、outbox 事件、文件索引文档构建和 `search.index_requested` 写入 OpenSearch 的入口，但 `search.acl_rebuild_requested` 尚未执行范围重建，删除/恢复/移动/重命名后的索引同步尚未接入，也尚未提供 `/search` 查询 API；后续查询必须同时使用 `acl_tokens` allow 过滤和 `deny_acl_tokens` 排除过滤，继续以 PostgreSQL 为事实来源并做应用层二次权限校验。
+- 搜索当前已完成 token builder、outbox 事件、文件索引文档构建、`search.index_requested` 写入 OpenSearch 入口和 `search.acl_rebuild_requested` 的保守范围重建；删除/恢复/移动/重命名后的索引同步尚未接入，也尚未提供 `/search` 查询 API；后续查询必须同时使用 `acl_tokens` allow 过滤和 `deny_acl_tokens` 排除过滤，继续以 PostgreSQL 为事实来源并做应用层二次权限校验。
 - 部门/用户组 ACL 变更当前无法精确枚举所有受影响用户缓存，已采用通配模式保守失效租户内节点权限缓存；若后续权限缓存读路径启用并出现大租户性能压力，应补充 subject membership 反向索引或异步展开任务。
 - 当前 Redis 权限缓存已完成失效 worker，但权限判断读路径尚未启用 Redis 缓存；接入读缓存时必须保持数据库为事实来源，高危动作继续二次查库。
 - 当前节点 ACL 路径加载采用逐级父节点查询并限制最大深度 64，适合一期目录深度可控场景；若后续目录深度、列表批量权限展示或搜索过滤压力升高，应引入递归 CTE、closure table 或批量权限评估缓存。
@@ -108,7 +109,7 @@
 
 ### 下一步
 
-- 接入 ACL 变更后的索引范围重建和 `/search` 查询 API，使用 `acl_tokens` / `deny_acl_tokens` 做查询层过滤，并对返回结果做二次权限校验。
+- 接入 `/search` 查询 API，使用 `acl_tokens` / `deny_acl_tokens` 做查询层过滤，并对返回结果做二次权限校验。
 
 ### 涉及文件
 
@@ -308,11 +309,12 @@
 - 本轮未启动 API、Worker 或 Docker Compose 服务。
 - 已运行 `uv run pytest tests/test_search_acl.py tests/test_permission_cache.py tests/test_node_acl.py tests/test_space_members.py tests/test_quota_reconciliation.py -q`，结果为 19 passed，覆盖搜索 ACL token 构建、search outbox 独立消费、权限变更写入搜索重建事件、权限缓存、节点/空间 ACL 既有行为和容量校准复原状态。
 - 已运行 `uv run pytest tests/test_search_acl.py tests/test_upload.py tests/test_permission_cache.py -q`，结果为 21 passed，覆盖 `search.index_requested` 写入、文件索引文档构建、search worker 消费索引事件、上传既有行为和权限缓存事件边界。
+- 已运行 `uv run pytest tests/test_search_acl.py tests/test_permission_cache.py tests/test_node_acl.py tests/test_space_members.py -q`，结果为 18 passed，覆盖 `search.acl_rebuild_requested` 消费、ACL token 范围重建、权限缓存、节点 ACL 和空间成员既有行为。
 - 已运行 `uv run ruff format app/modules/search app/workers/search_tasks.py app/modules/permission/events.py app/infrastructure/queue/celery_app.py tests/test_search_acl.py`，格式化本轮涉及的 Python 文件。
 - 已运行 `uv run ruff format --check .`，结果为 139 files already formatted。
 - 已运行 `uv run ruff check .`，结果为 All checks passed。
 - 已运行 `uv run mypy app`，结果为 no issues found in 110 source files。
-- 已运行 `uv run pytest`，结果为 78 passed。
+- 已运行 `uv run pytest`，结果为 79 passed。
 - 已运行 `uv run alembic upgrade head --sql`，确认当前迁移链仍可生成 PostgreSQL SQL。
 - 本轮未启动 API、Worker 或 Docker Compose 服务。
 - 已运行 `uv run pytest tests/test_node_acl.py tests/test_space_file.py -q`，结果为 10 passed，覆盖文件列表批量权限字段和节点 ACL 继承 deny 行为。

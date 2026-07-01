@@ -1,10 +1,17 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from uuid import UUID
 
 from app.infrastructure.search.base import FileSearchDocument, SearchIndexAdapter
 from app.modules.search.acl import build_index_acl_token_set
 from app.modules.search.repository import FileIndexRecord, SearchRepository
+
+
+@dataclass(frozen=True)
+class SearchAclRebuildResult:
+    scanned: int
+    indexed: int
 
 
 class SearchIndexService:
@@ -22,6 +29,32 @@ class SearchIndexService:
             return False
         await self.index_adapter.upsert_file_document(build_file_search_document(record))
         return True
+
+    async def rebuild_acl_tokens(
+        self,
+        *,
+        tenant_id: UUID,
+        scope: str,
+        resource_id: UUID,
+    ) -> SearchAclRebuildResult:
+        if scope == "space":
+            node_ids = await self.repository.list_active_file_node_ids_for_space(
+                tenant_id=tenant_id,
+                space_id=resource_id,
+            )
+        elif scope == "node":
+            node_ids = await self.repository.list_active_file_node_ids_under_node(
+                tenant_id=tenant_id,
+                node_id=resource_id,
+            )
+        else:
+            raise ValueError(f"unsupported search acl rebuild scope: {scope}")
+
+        indexed = 0
+        for node_id in node_ids:
+            if await self.index_file(tenant_id=tenant_id, node_id=node_id):
+                indexed += 1
+        return SearchAclRebuildResult(scanned=len(node_ids), indexed=indexed)
 
 
 def build_file_search_document(record: FileIndexRecord) -> FileSearchDocument:

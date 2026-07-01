@@ -169,7 +169,7 @@ def test_build_index_acl_token_set_returns_deny_tokens_for_query_exclusion() -> 
 
 
 @pytest.mark.asyncio
-async def test_search_dispatcher_leaves_acl_rebuild_until_handler_exists(
+async def test_search_dispatcher_consumes_acl_rebuild_events(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
@@ -209,13 +209,13 @@ async def test_search_dispatcher_leaves_acl_rebuild_until_handler_exists(
 
     result = await search_tasks._dispatch_search_outbox(batch_size=10)
 
-    assert result == {"claimed": 0, "sent": 0, "failed": 0, "dead": 0}
+    assert result == {"claimed": 1, "sent": 1, "failed": 0, "dead": 0}
     async with session_factory() as session:
         stored_search_event = await session.get(OutboxEvent, search_event.id)
         stored_permission_event = await session.get(OutboxEvent, permission_event.id)
 
     assert stored_search_event is not None
-    assert stored_search_event.status == "pending"
+    assert stored_search_event.status == "sent"
     assert stored_permission_event is not None
     assert stored_permission_event.status == "pending"
 
@@ -376,3 +376,116 @@ async def test_search_index_requested_event_indexes_file_document(
     assert document.content_hash == "d" * 64
     assert document.acl_tokens == [f"space:{space['id']}:role:owner"]
     assert document.deny_acl_tokens == []
+
+
+@pytest.mark.asyncio
+async def test_acl_rebuild_event_reindexes_file_acl_tokens(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="search-acl-rebuild-space")
+    tenant_id = UUID(str(space["tenant_id"]))
+    _, actor_id = await _get_seeded_tenant_and_user(session_factory)
+    subject_id = uuid4()
+    async with session_factory() as session:
+        session.add(
+            FileBlob(
+                tenant_id=tenant_id,
+                hash_algo="sha256",
+                content_hash="e" * 64,
+                size_bytes=512,
+                storage_key="objects/test/ee",
+                mime_type="text/plain",
+                ref_count=0,
+            )
+        )
+        await session.commit()
+
+    response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"X-CSRF-Token": token},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "file_name": "ACL重建.txt",
+            "size_bytes": 512,
+            "content_hash": "e" * 64,
+            "hash_algo": "sha256",
+            "mime_type": "text/plain",
+        },
+    )
+    assert response.status_code == 201
+    node_id = UUID(response.json()["node_id"])
+    index_adapter = InMemorySearchIndexAdapter()
+
+    async with session_factory() as session:
+        dispatcher = OutboxDispatcher(
+            repository=AuditRepository(session),
+            publisher=search_tasks.SearchOutboxPublisher(
+                index_service=SearchIndexService(
+                    repository=SearchRepository(session),
+                    index_adapter=index_adapter,
+                ),
+                fallback_publisher=LoggingOutboxPublisher(),
+            ),
+            max_retries=settings.outbox_max_retries,
+        )
+        await dispatcher.dispatch_pending(batch_size=10, event_types=[SEARCH_INDEX_REQUESTED])
+        await session.commit()
+
+    document_id = f"{tenant_id}:{node_id}"
+    assert index_adapter.documents[document_id].acl_tokens == [f"space:{space['id']}:role:owner"]
+
+    async with session_factory() as session:
+        session.add(
+            AclEntry(
+                tenant_id=tenant_id,
+                node_id=node_id,
+                subject_type="user",
+                subject_id=subject_id,
+                effect="allow",
+                actions=["download"],
+                inherit=True,
+                created_by=actor_id,
+            )
+        )
+        await AuditRepository(session).add_outbox_event(
+            tenant_id=tenant_id,
+            event_type=SEARCH_ACL_REBUILD_REQUESTED,
+            aggregate_type="node",
+            aggregate_id=node_id,
+            payload={
+                "scope": "node",
+                "resource_id": str(node_id),
+                "permission_version": 2,
+                "reason": "node_acl_created",
+            },
+        )
+        await session.commit()
+
+    async with session_factory() as session:
+        dispatcher = OutboxDispatcher(
+            repository=AuditRepository(session),
+            publisher=search_tasks.SearchOutboxPublisher(
+                index_service=SearchIndexService(
+                    repository=SearchRepository(session),
+                    index_adapter=index_adapter,
+                ),
+                fallback_publisher=LoggingOutboxPublisher(),
+            ),
+            max_retries=settings.outbox_max_retries,
+        )
+        result = await dispatcher.dispatch_pending(
+            batch_size=10,
+            event_types=[SEARCH_ACL_REBUILD_REQUESTED],
+        )
+        await session.commit()
+
+    assert result.to_dict() == {"claimed": 1, "sent": 1, "failed": 0, "dead": 0}
+    rebuilt_document = index_adapter.documents[document_id]
+    assert rebuilt_document.acl_tokens == sorted(
+        [f"space:{space['id']}:role:owner", f"user:{subject_id}"]
+    )

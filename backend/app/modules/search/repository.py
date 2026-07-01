@@ -76,6 +76,64 @@ class SearchRepository:
             ),
         )
 
+    async def list_active_file_node_ids_for_space(
+        self,
+        *,
+        tenant_id: UUID,
+        space_id: UUID,
+    ) -> list[UUID]:
+        result = await self.session.execute(
+            select(Node.id)
+            .where(
+                Node.tenant_id == tenant_id,
+                Node.space_id == space_id,
+                Node.node_type == "file",
+                Node.is_deleted.is_(False),
+            )
+            .order_by(Node.updated_at, Node.id)
+        )
+        return list(result.scalars().all())
+
+    async def list_active_file_node_ids_under_node(
+        self,
+        *,
+        tenant_id: UUID,
+        node_id: UUID,
+    ) -> list[UUID]:
+        result = await self.session.execute(
+            select(Node).where(
+                Node.tenant_id == tenant_id,
+                Node.id == node_id,
+                Node.is_deleted.is_(False),
+            )
+        )
+        root = result.scalar_one_or_none()
+        if root is None:
+            return []
+        if root.node_type == "file":
+            return [root.id]
+
+        file_ids: list[UUID] = []
+        folder_ids = [root.id]
+        cursor = 0
+        while cursor < len(folder_ids):
+            parent_id = folder_ids[cursor]
+            cursor += 1
+            child_result = await self.session.execute(
+                select(Node).where(
+                    Node.tenant_id == tenant_id,
+                    Node.space_id == root.space_id,
+                    Node.parent_id == parent_id,
+                    Node.is_deleted.is_(False),
+                )
+            )
+            for child in child_result.scalars().all():
+                if child.node_type == "file":
+                    file_ids.append(child.id)
+                elif child.node_type == "folder":
+                    folder_ids.append(child.id)
+        return file_ids
+
     async def get_node_path_ids(
         self,
         *,
