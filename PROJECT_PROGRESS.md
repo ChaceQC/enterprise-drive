@@ -139,14 +139,15 @@
 - 补充 metrics 和 preview worker 测试，覆盖 `/metrics` 可访问、`preview_failures_total` 暴露、预览终态失败和异常失败都会写入对应指标。
 - 新增 `docs/deployment-preview-worker.md`，明确生产 Nginx 继续使用宿主机安装和管理，不放入 Docker Compose；补充 preview Worker 独立队列、LibreOffice/Poppler 工具检查、systemd 和 Kubernetes 下的 CPU、内存、临时磁盘配额示例，以及 `/metrics` 告警建议。
 - 升级 `backend-ci` workflow 使用的 `actions/checkout`、`actions/setup-python` 和 `astral-sh/setup-uv` 版本；其中 `setup-uv` 固定到已发布 tag `v8.2.0`，避免 GitHub Actions 无法解析不存在的浮动主版本。
+- 已将上传/下载链路的企业级补强缺口写入 `PROJECT_PLAN.md` 和《企业网盘开发者技术计划书.md》：MinIO SDK multipart 私有方法风险、孤儿最终对象扫描、用户/租户/策略化配额、维护任务调度告警和清理指标、高密级下载代理与 Range/审计/水印/DLP、同 hash 首次上传竞争测试、真实对象存储集成测试。
 
 ### 进行中
 
-- Sprint 5 分享、搜索和预览模块已开始；基础分享、外链访问/下载、搜索索引/抽取、PDF 正文抽取、DOCX 正文抽取、PPTX 正文抽取、XLSX 正文抽取、图片 WebP 预览、PDF 首页 WebP 预览、Office 经 LibreOffice headless 转 PDF 的基础链路、preview worker 任务超时/限速、结构化失败日志、预览失败指标和资源配额部署说明已完成。下一步补充真实 LibreOffice 环境联调和 OCR 等搜索复杂格式抽取工具适配。
+- Sprint 5 分享、搜索和预览模块已开始；基础分享、外链访问/下载、搜索索引/抽取、PDF 正文抽取、DOCX 正文抽取、PPTX 正文抽取、XLSX 正文抽取、图片 WebP 预览、PDF 首页 WebP 预览、Office 经 LibreOffice headless 转 PDF 的基础链路、preview worker 任务超时/限速、结构化失败日志、预览失败指标和资源配额部署说明已完成。上传/下载链路下一步优先补齐孤儿最终对象扫描和真实对象存储集成测试，再推进高密级下载代理、多维配额和维护任务调度告警；搜索/预览侧继续补充真实 LibreOffice 环境联调和 OCR 等复杂格式抽取工具适配。
 
 ### 阻塞与风险
 
-- MinIO Python SDK 的 multipart create/complete/abort 在当前适配中需要调用客户端私有方法，已限定在 `infrastructure` 适配层；若后续出现兼容性、升级稳定性或批量吞吐问题，应评估更完整的开源 S3 兼容客户端或标准 HTTP/SigV4 实现。
+- MinIO Python SDK 的 multipart create/complete/abort 在当前适配中需要调用 `_create_multipart_upload`、`_complete_multipart_upload`、`_abort_multipart_upload` 私有方法，已限定在 `infrastructure` 适配层；这不是业务层随意自研，但 SDK 升级稳定性不够企业级，后续应评估公开 API、稳定开源 S3 兼容客户端或标准 HTTP/SigV4 实现，并用真实对象存储集成测试锁定行为。
 - 当前 Redis 限流仍是固定窗口策略，适用于上传初始化、分片签名和下载预签名的基础保护；若后续需要滑动窗口、令牌桶、多层级动态规则或管理端配置，应切换成熟限流库。
 - 当前空间、文件树、上传、下载、空间成员管理和节点 ACL 管理接口已接入权限检查；文件列表已返回当前页子节点的批量权限评估结果；权限变更 outbox 事件已接入 Redis 缓存失效 worker；org 部门/用户组 ACL 主体和搜索 ACL 重建事件已接入。
 - 搜索当前已完成 token builder、outbox 事件、文件索引文档构建、`search.index_requested` 写入 OpenSearch 入口、`search.acl_rebuild_requested` 的保守范围重建、`search.extract_requested` UTF-8 文本类、PDF 可复制正文、DOCX 段落/表格、PPTX 文本框/表格和 XLSX 单元格抽取入口、`/api/v1/search` 查询过滤、签名 cursor 分页、HTML 编码 highlight，以及上传完成、重命名、移动、删除、恢复和彻底删除后的索引同步；PDF 抽取当前依赖 `pypdf`，只覆盖可复制文本，不覆盖扫描件 OCR；DOCX/PPTX/XLSX 抽取分别依赖 `python-docx`、`python-pptx`、`openpyxl`，只覆盖 OOXML 格式，不覆盖旧 `.doc/.ppt/.xls`；OCR 和大文件解析需后续使用成熟开源工具接入。
@@ -154,16 +155,18 @@
 - 部门/用户组 ACL 变更当前无法精确枚举所有受影响用户缓存，已采用通配模式保守失效租户内节点权限缓存；若后续权限缓存读路径启用并出现大租户性能压力，应补充 subject membership 反向索引或异步展开任务。
 - 当前 Redis 权限缓存已完成失效 worker，但权限判断读路径尚未启用 Redis 缓存；接入读缓存时必须保持数据库为事实来源，高危动作继续二次查库。
 - 当前节点 ACL 路径加载采用逐级父节点查询并限制最大深度 64，适合一期目录深度可控场景；若后续目录深度、列表批量权限展示或搜索过滤压力升高，应引入递归 CTE、closure table 或批量权限评估缓存。
-- 过期上传清理已覆盖数据库会话终态、multipart abort 和 `uploads/...` 临时对象删除；对象复制成功但数据库最终化失败后的 `objects/...` 孤儿对象扫描仍需后续生命周期任务兜底。
-- 当前容量实现已覆盖空间维度的文件版本创建、彻底删除释放、空间容量校准和 DB 驱动的 blob/object 清理；用户/租户维度配额、定时调度配置和监控告警仍需后续补齐。
-- `file.cleanup_unreferenced_blobs` 只清理仍有 DB blob 元数据且已无版本引用的最终对象；对象存储里没有 DB 元数据的孤儿对象扫描仍需后续治理任务兜底。
-- 当前清理任务按批次扫描租户内过期会话，尚未接入定时调度配置、任务监控指标和失败告警。
+- 过期上传清理已覆盖数据库会话终态、multipart abort 和 `uploads/...` 临时对象删除；对象复制成功但数据库最终化失败后的 `objects/...` 孤儿最终对象扫描还没完成，这是当前最明显的数据治理缺口。
+- 当前容量实现已覆盖空间维度的文件版本创建、彻底删除释放、空间容量校准和 DB 驱动的 blob/object 清理；用户维度、租户维度和基于策略的配额仍需后续补齐。
+- `file.cleanup_unreferenced_blobs` 只清理仍有 DB blob 元数据且已无版本引用的最终对象；对象存储里没有 DB 元数据的孤儿对象扫描仍需后续治理任务兜底，扫描必须只处理受控 `objects/{tenant_id}/{hash_prefix}/{sha256}` key。
+- 当前维护任务仍偏“可手动跑/worker 可消费”的阶段，尚未系统接入定时调度配置、失败告警、清理指标和治理看板。
+- 并发下同 hash 首次上传主要依赖唯一约束和补偿路径，已有基础处理，但仍需补更细的竞争测试、对象归档幂等检查和失败恢复路径。
+- 真实对象存储集成测试不足，当前更多依赖 `InMemoryStorageAdapter` 验证；后续应补充 MinIO 或等价 S3 兼容服务覆盖 multipart、copy、delete、list、presign、hash 校验和异常恢复。
 - 当前基础限流覆盖上传初始化、分片签名、下载预签名、搜索查询、外链访问和外链下载；登录失败和管理接口限流仍需随对应模块接入。
-- 分享模块当前已开放创建/详情/撤销 API、带限流的外链访问入口和外链下载入口；外链下载现阶段返回短期预签名 URL，高密级文件的 Range 后端代理、水印导出和更细的 external subject 策略仍需后续补齐。
+- 分享模块当前已开放创建/详情/撤销 API、带限流的外链访问入口和外链下载入口；内部下载和外链下载现阶段仍以短期预签名直连为主，高密级文件需要后端代理、HTTP Range、增强审计、水印或 DLP 策略。
 
 ### 下一步
 
-- 补充真实 LibreOffice 环境联调；随后推进 OCR 等搜索复杂格式抽取的成熟开源工具适配。
+- 优先完成孤儿最终对象扫描：只扫描受控 `objects/{tenant_id}/{hash_prefix}/{sha256}`，默认 dry-run，补充删除、跳过非受控 key、审计、指标和 worker 聚合测试；随后补真实 MinIO 集成测试，覆盖 multipart 私有方法封装、copy/delete/list/presign/hash 校验和异常恢复。
 
 ### 涉及文件
 
