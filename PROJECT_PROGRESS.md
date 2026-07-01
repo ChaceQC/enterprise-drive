@@ -125,10 +125,14 @@
 - 新增图片预览渲染服务，使用成熟开源库 Pillow 将图片生成 WebP 预览产物，写入 `previews/{tenant_id}/{node_id}/{version_id}/image.webp`；非图片或超限文件明确标记为 `unsupported`。
 - 新增 `GET /api/v1/files/{node_id}/preview`，按节点级 `preview` 权限校验后返回短期私有预览 URL；无产物时返回当前预览状态和错误原因。
 - 补充预览测试，覆盖上传写入预览事件、worker 生成 WebP 产物、预览 URL 权限入口返回产物，以及文本文件被标记为 `unsupported`。
+- 新增 PDF 预览转换器协议和 Poppler `pdftoppm` 适配器，PDF 在临时目录内渲染首页 PNG，再复用 Pillow 生成 WebP 私有预览产物；命令执行使用参数列表，不拼接 shell 字符串。
+- PDF 预览新增超时、DPI 和渲染输出大小配置：`DRIVE_PREVIEW_PDF_COMMAND`、`DRIVE_PREVIEW_PDF_DPI`、`DRIVE_PREVIEW_PDF_MAX_RENDERED_BYTES`、`DRIVE_PREVIEW_COMMAND_TIMEOUT_SECONDS`。
+- `PreviewRenderService` 已支持图片和 PDF 两类预览检测：缺少 PDF 渲染器标记 `unsupported/pdf_renderer_missing`，PDF 渲染超时或失败标记 `failed` 并交给 outbox 退避重试。
+- 补充 PDF 预览测试，使用 fake converter 覆盖 PDF 首页生成 WebP 产物，并覆盖未配置 PDF 渲染器时标记为 `pdf_renderer_missing`，避免单元测试依赖本机 Poppler 安装状态。
 
 ### 进行中
 
-- Sprint 5 分享、搜索和预览模块已开始；基础分享、外链访问/下载、搜索索引/抽取和图片 WebP 预览基础链路已完成。下一步接入 Office/PDF 预览工具链，优先使用 LibreOffice、Poppler 等成熟开源工具，并补充任务超时和资源限制。
+- Sprint 5 分享、搜索和预览模块已开始；基础分享、外链访问/下载、搜索索引/抽取、图片 WebP 预览和 PDF 首页 WebP 预览基础链路已完成。下一步接入 Office/LibreOffice 预览工具链，并补充更完整的 worker 资源隔离、定时调度和失败告警。
 
 ### 阻塞与风险
 
@@ -136,7 +140,7 @@
 - 当前 Redis 限流仍是固定窗口策略，适用于上传初始化、分片签名和下载预签名的基础保护；若后续需要滑动窗口、令牌桶、多层级动态规则或管理端配置，应切换成熟限流库。
 - 当前空间、文件树、上传、下载、空间成员管理和节点 ACL 管理接口已接入权限检查；文件列表已返回当前页子节点的批量权限评估结果；权限变更 outbox 事件已接入 Redis 缓存失效 worker；org 部门/用户组 ACL 主体和搜索 ACL 重建事件已接入。
 - 搜索当前已完成 token builder、outbox 事件、文件索引文档构建、`search.index_requested` 写入 OpenSearch 入口、`search.acl_rebuild_requested` 的保守范围重建、`search.extract_requested` UTF-8 文本类抽取入口、`/api/v1/search` 查询过滤、签名 cursor 分页、HTML 编码 highlight，以及上传完成、重命名、移动、删除、恢复和彻底删除后的索引同步；Office/PDF、OCR 和大文件解析需后续使用成熟开源工具接入。
-- 预览当前只支持图片生成 WebP 产物；Office/PDF 等复杂格式、转码任务资源隔离、外部命令超时和失败告警仍需后续接成熟工具链。
+- 预览当前支持图片和 PDF 首页生成 WebP 产物；PDF 依赖 Poppler `pdftoppm`，本机已发现 `pdftoppm` 可用但 LibreOffice/soffice 不可用。Office 预览、转码任务资源隔离和失败告警仍需后续接成熟工具链并补齐部署依赖说明。
 - 部门/用户组 ACL 变更当前无法精确枚举所有受影响用户缓存，已采用通配模式保守失效租户内节点权限缓存；若后续权限缓存读路径启用并出现大租户性能压力，应补充 subject membership 反向索引或异步展开任务。
 - 当前 Redis 权限缓存已完成失效 worker，但权限判断读路径尚未启用 Redis 缓存；接入读缓存时必须保持数据库为事实来源，高危动作继续二次查库。
 - 当前节点 ACL 路径加载采用逐级父节点查询并限制最大深度 64，适合一期目录深度可控场景；若后续目录深度、列表批量权限展示或搜索过滤压力升高，应引入递归 CTE、closure table 或批量权限评估缓存。
@@ -149,7 +153,7 @@
 
 ### 下一步
 
-- 接入 Office/PDF 预览工具链：使用 LibreOffice / Poppler 等成熟开源工具生成私有预览产物，并补充 Worker 资源限制、超时、失败重试和异常状态测试。
+- 接入 Office 预览工具链：使用 LibreOffice headless 将 Office 文档转换为 PDF 或图片预览产物，并补充 worker 资源限制、外部命令失败告警、LibreOffice 缺失状态测试和部署依赖说明。
 
 ### 涉及文件
 
@@ -201,12 +205,14 @@
 - `backend/app/modules/permission/service.py`
 - `backend/app/modules/permission/validators.py`
 - `backend/app/modules/preview/events.py`
+- `backend/app/modules/preview/converters.py`
 - `backend/app/modules/preview/models.py`
 - `backend/app/modules/preview/renderer.py`
 - `backend/app/modules/preview/repository.py`
 - `backend/app/modules/preview/schemas.py`
 - `backend/app/modules/preview/service.py`
 - `backend/app/modules/preview/storage_keys.py`
+- `backend/app/infrastructure/preview/poppler.py`
 - `backend/app/modules/search/acl.py`
 - `backend/app/modules/search/cursor.py`
 - `backend/app/modules/search/events.py`
@@ -329,6 +335,16 @@
 - 已运行 `uv run alembic upgrade head --sql`，确认新增预览迁移 `20260701_0012_preview_base.py` 可生成 PostgreSQL SQL。
 - 已运行 `git diff --check`，未发现空白错误；仅有 Windows 工作区 LF/CRLF 提示。
 - 本轮未启动 API、Worker、Docker Compose 或其他常驻服务。
+- 已运行 `uv run pytest tests/test_preview.py tests/test_preview_pdf.py tests/test_preview_poppler.py -q`，结果为 6 passed，覆盖图片、文本 unsupported、PDF fake converter、PDF renderer missing 和 Windows/Codex Poppler 包装器解析。
+- 已运行 `uv run ruff format .`，结果为 175 files left unchanged。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run ruff format --check .`，结果为 175 files already formatted。
+- 已运行 `uv run mypy app`，结果为 no issues found in 136 source files。
+- 已运行 `uv run pytest`，结果为 113 passed。
+- 已运行 `uv run alembic upgrade head --sql`，确认 PDF 预览配置变更不影响当前迁移链。
+- 已运行 `git diff --check`，未发现空白错误；仅有 Windows 工作区 LF/CRLF 提示。
+- 已检查本机预览工具：`pdftoppm` 可用，适配器已解析到真实 `pdftoppm.exe` 并通过 `-v` smoke test；`libreoffice` / `soffice` 缺失，Office 预览接入时需安装 LibreOffice 或记录不可用原因。
+- 本轮未启动 API、Worker、Docker Compose 或其他常驻服务，并已确认 `18080`、`15432`、`16379`、`19000`、`19001`、`19200`、`19600` 未监听。
 - 已运行 `git diff --check`，未发现空白错误。
 - 已运行 `uv run pytest tests/test_share_router.py -q`，结果为 3 passed。
 - 已运行 `uv run ruff format --check .`，结果为 156 files already formatted。

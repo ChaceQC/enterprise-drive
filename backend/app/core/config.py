@@ -69,6 +69,10 @@ class Settings(BaseSettings):
     search_text_extract_max_bytes: int = 512 * 1024
     preview_max_source_bytes: int = 20 * 1024 * 1024
     preview_image_max_side: int = 1600
+    preview_pdf_command: str = "pdftoppm"
+    preview_pdf_dpi: int = 144
+    preview_pdf_max_rendered_bytes: int = 50 * 1024 * 1024
+    preview_command_timeout_seconds: int = 30
     preview_presign_expires_seconds: int = 300
 
     session_cookie_name: str = "drive_session"
