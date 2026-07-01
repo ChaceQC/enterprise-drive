@@ -71,7 +71,7 @@ uv run pytest
 - 搜索 ACL token builder、`search.acl_rebuild_requested` outbox event、`search.index_requested` 文件索引事件、`search.extract_requested` 文本抽取事件和 `GET /api/v1/search` 查询接口；`search.dispatch_outbox` 会从 PostgreSQL 重新加载文件、版本、blob、空间成员和节点 ACL 事实后写入 OpenSearch，不再活跃或已彻底删除的文件会删除索引文档，并在 ACL 变更后按 space 或 node 子树保守重建索引 token；当前文本抽取只处理 UTF-8 文本类文件，写入 `file_versions.search_text` 后刷新索引 `content` 字段，Office/PDF 等复杂格式后续接入成熟开源解析工具；查询接口使用 `acl_tokens` allow 过滤、`deny_acl_tokens` 排除过滤、签名 cursor 分页、HTML 编码高亮和 `read_meta` 二次权限校验。
 - `shares`、`share_items`、`share_recipients`、`share_access_logs` 基础表和迁移；服务层支持内部分享、外链分享、提取码哈希、过期时间、访问/下载次数上限和撤销状态。
 - 分享创建会校验 root 节点和全部分享项的节点级 `share` 权限，分享项必须与 root 节点属于同一空间；外链原始 token 只返回一次，数据库只保存 token hash，提取码只保存 Argon2id hash。
-- 分享创建和撤销会写入 `share.created` / `share.revoked` 审计事件和 `audit.share.*` outbox event；当前还未开放分享 HTTP 路由，外链访问、提取码校验、并发次数扣减和下载策略将在下一步接入。
+- 分享创建和撤销会写入 `share.created` / `share.revoked` 审计事件和 `audit.share.*` outbox event；`POST /api/v1/shares`、`GET /api/v1/shares/{share_id}`、`POST /api/v1/shares/{share_id}/revoke` 已接入 Cookie Session、CSRF 和创建者边界；外链访问、提取码校验、并发次数扣减和下载策略将在下一步接入。
 - 文件下载预签名 URL 接口，按当前文件版本生成短期私有对象下载地址。
 - 下载成功和拒绝均写入 `file.downloaded` 审计事件与 outbox event。
 - 管理员 seed 脚本。
@@ -113,6 +113,14 @@ uv run pytest
 文件夹名称会进行 Unicode NFC 归一化并去除首尾空白，禁止 `/`、`\`、NUL、控制字符和路径穿越片段。同一目录下未删除节点的名称由数据库唯一索引兜底，根目录由 `tenant_id + space_id` 唯一索引兜底。
 
 根目录不允许重命名、移动、删除或彻底删除。删除到回收站会同步标记当前活跃子树，不释放容量；恢复只恢复同一批删除的子树，避免误恢复更早单独删除的节点。彻底删除只允许作用于已在回收站的节点，会删除该节点下全部已删除后代的节点元数据和文件版本，扣减相关 blob 引用计数，按版本大小合计释放空间容量并写入 `file.purged` 审计。当前目录删除、恢复和彻底删除仍是同步遍历，适合 Sprint 2/3 骨架和普通目录验证；大目录后续需要改为后台任务或引入 `deleted_root_id` 等冗余状态来避免长事务。
+
+## 分享接口
+
+- `POST /api/v1/shares`
+- `GET /api/v1/shares/{share_id}`
+- `POST /api/v1/shares/{share_id}/revoke`
+
+创建分享接口支持 `internal` 和 `external` 类型。内部分享必须指定用户、部门或用户组接收人；外链分享会返回一次性明文 `raw_token`，数据库只保存 token hash。分享创建会检查 root 节点和全部分享项的 `share` 权限，分享项必须与 root 节点属于同一空间。详情和撤销当前只允许创建者访问；后续外链访问入口会使用独立 external subject，不能复用内部用户权限逻辑。当前 API 尚未提供外链打开、提取码校验、访问/下载次数原子扣减和外链下载。
 
 ## 上传接口
 

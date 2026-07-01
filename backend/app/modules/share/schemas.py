@@ -1,14 +1,31 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
+
+ShareType = Literal["internal", "external"]
+SharePermission = Literal["preview", "download"]
+ShareRecipientType = Literal["user", "department", "group"]
 
 
 class ShareRecipientInput(BaseModel):
-    subject_type: str
+    subject_type: ShareRecipientType
     subject_id: UUID
+
+
+class CreateShareRequest(BaseModel):
+    share_type: ShareType
+    root_node_id: UUID
+    permission: SharePermission = "download"
+    item_node_ids: list[UUID] = Field(default_factory=list)
+    recipients: list[ShareRecipientInput] = Field(default_factory=list)
+    passcode: str | None = Field(default=None, min_length=1, max_length=128)
+    expires_at: datetime | None = None
+    max_views: int | None = Field(default=None, gt=0)
+    max_downloads: int | None = Field(default=None, gt=0)
 
 
 class CreateShareResult(BaseModel):
@@ -23,6 +40,10 @@ class CreateShareResult(BaseModel):
     max_views: int | None
     max_downloads: int | None
     raw_token: str | None = None
+
+
+class CreateShareResponse(CreateShareResult):
+    pass
 
 
 class ShareDetail(BaseModel):
@@ -40,3 +61,8 @@ class ShareDetail(BaseModel):
     download_count: int
     revoked_at: datetime | None
     revoked_by: UUID | None
+
+
+class RevokeShareResponse(BaseModel):
+    share_id: UUID
+    revoked: Literal[True] = True
