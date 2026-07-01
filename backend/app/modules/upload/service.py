@@ -19,6 +19,7 @@ from app.modules.file.validators import node_name_conflict_error, normalize_node
 from app.modules.permission.actions import ACTION_UPLOAD
 from app.modules.permission.service import PermissionService
 from app.modules.quota.service import QuotaService
+from app.modules.search.events import emit_search_index_requested
 from app.modules.space.repository import SpaceRepository
 from app.modules.upload.audit import (
     instant_upload_metadata,
@@ -250,6 +251,14 @@ class UploadService:
                 resource_id=node.id,
                 audit_context=audit_context,
                 metadata=instant_upload_metadata(node=node, blob_id=blob_id),
+            )
+            await emit_search_index_requested(
+                audit_service=self.audit_service,
+                tenant_id=current_user.tenant_id,
+                node_id=node.id,
+                space_id=parent.space_id,
+                reason="upload_instant",
+                metadata={"version_id": str(version.id), "blob_id": str(blob_id)},
             )
             await self.repository.commit()
         except ApiError:

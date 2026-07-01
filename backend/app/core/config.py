@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     s3_secret_access_key: str = "drive-dev-password"
     s3_region: str = "us-east-1"
     opensearch_url: str = "http://127.0.0.1:19200"
+    opensearch_index_name: str = "drive_files_v1"
     celery_broker_url: str = "redis://127.0.0.1:16379/1"
     celery_result_backend: str = "redis://127.0.0.1:16379/2"
     outbox_batch_size: int = 100

@@ -5,6 +5,32 @@ from uuid import UUID
 from app.modules.audit.service import AuditService
 
 SEARCH_ACL_REBUILD_REQUESTED = "search.acl_rebuild_requested"
+SEARCH_INDEX_REQUESTED = "search.index_requested"
+
+
+async def emit_search_index_requested(
+    *,
+    audit_service: AuditService | None,
+    tenant_id: UUID,
+    node_id: UUID,
+    space_id: UUID,
+    reason: str,
+    metadata: dict[str, object] | None = None,
+) -> None:
+    if audit_service is None:
+        return
+    await audit_service.repository.add_outbox_event(
+        tenant_id=tenant_id,
+        event_type=SEARCH_INDEX_REQUESTED,
+        aggregate_type="node",
+        aggregate_id=node_id,
+        payload={
+            "node_id": str(node_id),
+            "space_id": str(space_id),
+            "reason": reason,
+            **(metadata or {}),
+        },
+    )
 
 
 async def emit_search_acl_rebuild_requested(

@@ -1,23 +1,31 @@
 from __future__ import annotations
 
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
+from httpx import AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
+from app.infrastructure.search.testing import InMemorySearchIndexAdapter
+from app.modules.audit.dispatcher import LoggingOutboxPublisher, OutboxDispatcher
 from app.modules.audit.models import OutboxEvent
 from app.modules.audit.repository import AuditRepository
 from app.modules.audit.service import AuditService
+from app.modules.file.models import FileBlob
 from app.modules.permission.events import emit_permission_changed
 from app.modules.permission.models import AclEntry, SpaceMember
 from app.modules.search.acl import build_index_acl_token_set, build_index_acl_tokens
-from app.modules.search.events import SEARCH_ACL_REBUILD_REQUESTED
+from app.modules.search.events import SEARCH_ACL_REBUILD_REQUESTED, SEARCH_INDEX_REQUESTED
+from app.modules.search.indexer import SearchIndexService
+from app.modules.search.repository import SearchRepository
 from app.workers import search_tasks
-from tests.helpers import seed_admin
+from tests.helpers import client as client
+from tests.helpers import create_space, login, seed_admin
 from tests.helpers import session_factory as session_factory
 from tests.helpers import settings as settings
+from tests.helpers import storage_adapter as storage_adapter
 from tests.test_permission_cache import _get_seeded_tenant_and_user
 
 
@@ -161,7 +169,7 @@ def test_build_index_acl_token_set_returns_deny_tokens_for_query_exclusion() -> 
 
 
 @pytest.mark.asyncio
-async def test_search_dispatcher_consumes_only_search_events(
+async def test_search_dispatcher_leaves_acl_rebuild_until_handler_exists(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
     monkeypatch: pytest.MonkeyPatch,
@@ -201,13 +209,13 @@ async def test_search_dispatcher_consumes_only_search_events(
 
     result = await search_tasks._dispatch_search_outbox(batch_size=10)
 
-    assert result == {"claimed": 1, "sent": 1, "failed": 0, "dead": 0}
+    assert result == {"claimed": 0, "sent": 0, "failed": 0, "dead": 0}
     async with session_factory() as session:
         stored_search_event = await session.get(OutboxEvent, search_event.id)
         stored_permission_event = await session.get(OutboxEvent, permission_event.id)
 
     assert stored_search_event is not None
-    assert stored_search_event.status == "sent"
+    assert stored_search_event.status == "pending"
     assert stored_permission_event is not None
     assert stored_permission_event.status == "pending"
 
@@ -246,3 +254,125 @@ async def test_permission_change_writes_search_acl_rebuild_event(
         SEARCH_ACL_REBUILD_REQUESTED,
     ]
     assert events[1][1]["reason"] == "node_acl_created"
+
+
+@pytest.mark.asyncio
+async def test_instant_upload_writes_search_index_event(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="search-index-event-space")
+    tenant_id = UUID(str(space["tenant_id"]))
+    async with session_factory() as session:
+        session.add(
+            FileBlob(
+                tenant_id=tenant_id,
+                hash_algo="sha256",
+                content_hash="c" * 64,
+                size_bytes=128,
+                storage_key="objects/test/cc",
+                mime_type="text/plain",
+                ref_count=0,
+            )
+        )
+        await session.commit()
+
+    response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"X-CSRF-Token": token},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "file_name": "搜索事件.txt",
+            "size_bytes": 128,
+            "content_hash": "c" * 64,
+            "hash_algo": "sha256",
+            "mime_type": "text/plain",
+        },
+    )
+
+    assert response.status_code == 201
+    node_id = response.json()["node_id"]
+    async with session_factory() as session:
+        event = (
+            await session.execute(
+                select(OutboxEvent).where(OutboxEvent.event_type == SEARCH_INDEX_REQUESTED)
+            )
+        ).scalar_one()
+
+    assert event.aggregate_type == "node"
+    assert event.aggregate_id == UUID(node_id)
+    assert event.payload["node_id"] == node_id
+    assert event.payload["reason"] == "upload_instant"
+
+
+@pytest.mark.asyncio
+async def test_search_index_requested_event_indexes_file_document(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="search-index-worker-space")
+    tenant_id = UUID(str(space["tenant_id"]))
+    async with session_factory() as session:
+        session.add(
+            FileBlob(
+                tenant_id=tenant_id,
+                hash_algo="sha256",
+                content_hash="d" * 64,
+                size_bytes=256,
+                storage_key="objects/test/dd",
+                mime_type="text/plain",
+                ref_count=0,
+            )
+        )
+        await session.commit()
+
+    response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"X-CSRF-Token": token},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "file_name": "搜索索引.txt",
+            "size_bytes": 256,
+            "content_hash": "d" * 64,
+            "hash_algo": "sha256",
+            "mime_type": "text/plain",
+        },
+    )
+    assert response.status_code == 201
+    node_id = response.json()["node_id"]
+    index_adapter = InMemorySearchIndexAdapter()
+
+    async with session_factory() as session:
+        dispatcher = OutboxDispatcher(
+            repository=AuditRepository(session),
+            publisher=search_tasks.SearchOutboxPublisher(
+                index_service=SearchIndexService(
+                    repository=SearchRepository(session),
+                    index_adapter=index_adapter,
+                ),
+                fallback_publisher=LoggingOutboxPublisher(),
+            ),
+            max_retries=settings.outbox_max_retries,
+        )
+        result = await dispatcher.dispatch_pending(
+            batch_size=10,
+            event_types=[SEARCH_INDEX_REQUESTED],
+        )
+        await session.commit()
+
+    assert result.to_dict() == {"claimed": 1, "sent": 1, "failed": 0, "dead": 0}
+    document = index_adapter.documents[f"{tenant_id}:{node_id}"]
+    assert document.name == "搜索索引.txt"
+    assert document.node_id == node_id
+    assert document.space_id == str(space["id"])
+    assert document.content_hash == "d" * 64
+    assert document.acl_tokens == [f"space:{space['id']}:role:owner"]
+    assert document.deny_acl_tokens == []

@@ -68,7 +68,7 @@ uv run pytest
 - `quota.reconcile_space_usage` 维护任务，支持空间容量只读报告和修复模式。
 - `file.cleanup_unreferenced_blobs` 维护任务，清理 ref_count 为 0 且无版本引用的最终对象和 blob 元数据。
 - `permission.invalidate_cache` 任务，消费 `permission.changed` outbox event 并失效 Redis 权限缓存 key；审计 dispatcher 只消费 `audit.*`，避免抢占权限事件。
-- 搜索 ACL token builder 和 `search.acl_rebuild_requested` outbox event；`search.dispatch_outbox` 当前消费 `search.*` 事件，为后续 OpenSearch 索引写入提供独立队列入口。
+- 搜索 ACL token builder、`search.acl_rebuild_requested` outbox event 和 `search.index_requested` 文件索引事件；`search.dispatch_outbox` 当前消费索引事件，从 PostgreSQL 重新加载文件、版本、blob、空间成员和节点 ACL 事实后写入 OpenSearch，ACL 重建事件仍待后续处理。
 - 文件下载预签名 URL 接口，按当前文件版本生成短期私有对象下载地址。
 - 下载成功和拒绝均写入 `file.downloaded` 审计事件与 outbox event。
 - 管理员 seed 脚本。
