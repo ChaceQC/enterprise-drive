@@ -29,7 +29,6 @@ class Share(Base):
         Index("idx_shares_status", "tenant_id", "status", "expires_at"),
         Index(
             "idx_shares_external_token_hash",
-            "tenant_id",
             "token_hash",
             unique=True,
             postgresql_where=text("share_type = 'external' and token_hash is not null"),

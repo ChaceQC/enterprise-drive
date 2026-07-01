@@ -25,7 +25,11 @@ from app.modules.share.constants import (
 )
 from app.modules.share.models import Share
 from app.modules.share.repository import ShareRepository
-from app.modules.share.schemas import CreateShareResult, ShareDetail, ShareRecipientInput
+from app.modules.share.schemas import (
+    CreateShareResult,
+    ShareDetail,
+    ShareRecipientInput,
+)
 
 
 class ShareService:

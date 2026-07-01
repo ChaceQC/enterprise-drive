@@ -6,6 +6,7 @@ from app.modules.auth.router import router as auth_router
 from app.modules.file.acl_router import router as file_acl_router
 from app.modules.file.router import router as file_router
 from app.modules.search.router import router as search_router
+from app.modules.share.router import public_router as public_share_router
 from app.modules.share.router import router as share_router
 from app.modules.space.router import router as space_router
 from app.modules.upload.router import router as upload_router
@@ -17,6 +18,7 @@ router.include_router(file_acl_router, prefix="/files", tags=["file-acl"])
 router.include_router(file_router, prefix="/files", tags=["files"])
 router.include_router(search_router, prefix="/search", tags=["search"])
 router.include_router(share_router, prefix="/shares", tags=["shares"])
+router.include_router(public_share_router, prefix="/public/shares", tags=["public-shares"])
 router.include_router(upload_router, prefix="/uploads", tags=["uploads"])
 
 

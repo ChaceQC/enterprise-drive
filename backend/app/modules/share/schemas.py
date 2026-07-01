@@ -66,3 +66,21 @@ class ShareDetail(BaseModel):
 class RevokeShareResponse(BaseModel):
     share_id: UUID
     revoked: Literal[True] = True
+
+
+class ExternalShareAccessRequest(BaseModel):
+    tenant_slug: str = Field(min_length=1, max_length=64)
+    raw_token: str = Field(min_length=32, max_length=256)
+    passcode: str | None = Field(default=None, min_length=1, max_length=128)
+
+
+class ExternalShareAccessResponse(BaseModel):
+    share_id: UUID
+    root_node_id: UUID
+    permission: str
+    expires_at: datetime | None
+    max_views: int | None
+    max_downloads: int | None
+    view_count: int
+    download_count: int
+    item_node_ids: list[UUID]

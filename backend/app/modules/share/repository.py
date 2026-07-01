@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import utc_now
@@ -90,6 +90,23 @@ class ShareRepository:
             )
         )
         return result.scalar_one_or_none()
+
+    async def consume_external_view(self, *, tenant_id: UUID, share_id: UUID) -> bool:
+        now = utc_now()
+        result = await self.session.execute(
+            update(Share)
+            .where(
+                Share.tenant_id == tenant_id,
+                Share.id == share_id,
+                Share.share_type == "external",
+                Share.status == "active",
+                or_(Share.expires_at.is_(None), Share.expires_at > now),
+                or_(Share.max_views.is_(None), Share.view_count < Share.max_views),
+            )
+            .values(view_count=Share.view_count + 1)
+            .returning(Share.id)
+        )
+        return result.scalar_one_or_none() is not None
 
     async def list_items(self, *, tenant_id: UUID, share_id: UUID) -> list[ShareItem]:
         result = await self.session.execute(

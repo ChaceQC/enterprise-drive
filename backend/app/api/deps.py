@@ -104,16 +104,30 @@ async def enforce_rate_limit(
     )
     if decision.allowed:
         return
-    raise ApiError(
-        "RATE_LIMITED",
-        "请求过于频繁，请稍后再试",
-        status_code=429,
-        details={
-            "action": action,
-            "limit": decision.limit,
-            "window_seconds": rule.window_seconds,
-            "retry_after_seconds": decision.retry_after_seconds,
-        },
+    _raise_rate_limited(
+        action=action, rule=rule, limit=decision.limit, retry_after=decision.retry_after_seconds
+    )
+
+
+async def enforce_public_rate_limit(
+    *,
+    settings: Settings,
+    rate_limiter: RateLimiter,
+    action: str,
+    request: Request,
+    resource_key: str | None = None,
+) -> None:
+    if not settings.rate_limit_enabled:
+        return
+    rule = _rate_limit_rule(settings=settings, action=action)
+    decision = await rate_limiter.hit(
+        key=_public_rate_limit_key(resource_key=resource_key, request=request),
+        rule=rule,
+    )
+    if decision.allowed:
+        return
+    _raise_rate_limited(
+        action=action, rule=rule, limit=decision.limit, retry_after=decision.retry_after_seconds
     )
 
 
@@ -142,6 +156,12 @@ def _rate_limit_rule(*, settings: Settings, action: str) -> RateLimitRule:
             limit=settings.search_query_rate_limit_count,
             window_seconds=settings.search_query_rate_limit_window_seconds,
         )
+    if action == "share.external_access":
+        return RateLimitRule(
+            action=action,
+            limit=settings.share_external_access_rate_limit_count,
+            window_seconds=settings.share_external_access_rate_limit_window_seconds,
+        )
     raise ApiError("RATE_LIMIT_RULE_NOT_FOUND", "限流规则不存在", status_code=500)
 
 
@@ -157,3 +177,35 @@ def _rate_limit_key(
     if request is not None and request.client is not None:
         parts.append(f"ip:{request.client.host}")
     return ":".join(parts)
+
+
+def _public_rate_limit_key(
+    *,
+    resource_key: str | None,
+    request: Request,
+) -> str:
+    parts = ["public"]
+    if resource_key:
+        parts.append(resource_key)
+    parts.append(f"ip:{request.client.host}" if request.client is not None else "ip:unknown")
+    return ":".join(parts)
+
+
+def _raise_rate_limited(
+    *,
+    action: str,
+    rule: RateLimitRule,
+    limit: int,
+    retry_after: int,
+) -> None:
+    raise ApiError(
+        "RATE_LIMITED",
+        "请求过于频繁，请稍后再试",
+        status_code=429,
+        details={
+            "action": action,
+            "limit": limit,
+            "window_seconds": rule.window_seconds,
+            "retry_after_seconds": retry_after,
+        },
+    )

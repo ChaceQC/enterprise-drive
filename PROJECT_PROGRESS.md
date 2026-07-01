@@ -110,10 +110,14 @@
 - 接入分享基础 HTTP API：`POST /api/v1/shares`、`GET /api/v1/shares/{share_id}`、`POST /api/v1/shares/{share_id}/revoke`，沿用 BFF Cookie Session 和 CSRF 校验。
 - 分享 API 响应会在外链创建时返回一次性 `raw_token`；详情和撤销当前仅允许创建者访问，非创建者统一返回 `SHARE_NOT_FOUND`，避免泄露分享存在性。
 - 补充分享路由测试，覆盖创建/详情/撤销闭环、缺少 CSRF 被拒、非创建者详情和撤销隐藏。
+- 接入外链分享访问入口 `POST /api/v1/public/shares/access`：请求体使用 `tenant_slug + raw_token` 建立租户边界，按 `tenant_id + token_hash` 加载外链分享，校验状态、过期时间、提取码和访问次数限制。
+- 外链访问成功时通过数据库条件 update 原子增加 `view_count`，返回分享基础信息和分享项节点 ID；成功和失败都会写入 `share_access_logs`，并通过审计服务写入 `share.external.accessed` outbox 事件。
+- 外链访问已复用 Redis Lua 固定窗口限流，按 IP 总量和 `token + IP` 维度计数；新增 `DRIVE_SHARE_EXTERNAL_ACCESS_RATE_LIMIT_COUNT` 和 `DRIVE_SHARE_EXTERNAL_ACCESS_RATE_LIMIT_WINDOW_SECONDS` 配置。
+- 补充外链访问测试，覆盖提取码错误、成功访问写日志、过期、撤销、访问次数耗尽和外链访问限流。
 
 ### 进行中
 
-- Sprint 5 分享模块已开始；基础表、迁移、服务层和创建/详情/撤销 HTTP API 已完成，下一步接入外链访问校验、提取码校验、并发次数扣减和下载策略。
+- Sprint 5 分享模块已开始；基础表、迁移、服务层、创建/详情/撤销 HTTP API、外链访问校验入口和外链访问限流已完成，下一步接入外链下载、下载次数并发扣减和 external subject 下载策略。
 
 ### 阻塞与风险
 
@@ -128,12 +132,12 @@
 - 当前容量实现已覆盖空间维度的文件版本创建、彻底删除释放、空间容量校准和 DB 驱动的 blob/object 清理；用户/租户维度配额、定时调度配置和监控告警仍需后续补齐。
 - `file.cleanup_unreferenced_blobs` 只清理仍有 DB blob 元数据且已无版本引用的最终对象；对象存储里没有 DB 元数据的孤儿对象扫描仍需后续治理任务兜底。
 - 当前清理任务按批次扫描租户内过期会话，尚未接入定时调度配置、任务监控指标和失败告警。
-- 当前基础限流覆盖上传初始化、分片签名、下载预签名和搜索查询；登录失败、外链访问和管理接口限流仍需随对应模块接入。
-- 分享模块当前已开放创建/详情/撤销 API，但外链打开入口、提取码校验、过期/撤销/次数耗尽错误映射、并发次数扣减和下载策略仍需下一步补齐。
+- 当前基础限流覆盖上传初始化、分片签名、下载预签名、搜索查询和外链访问；登录失败和管理接口限流仍需随对应模块接入。
+- 分享模块当前已开放创建/详情/撤销 API 和带限流的外链访问校验入口，但外链下载、下载次数原子扣减、Range/预签名策略和 external subject 下载权限仍需下一步补齐。
 
 ### 下一步
 
-- 接入外链分享访问入口：按 token hash 加载分享，校验状态、过期时间、提取码和访问次数限制，写入 `share_access_logs`，并为后续外链下载策略预留 external subject。
+- 接入外链下载入口：基于已校验外链分享加载 root/item 文件，校验分享权限、文件状态和下载次数限制，原子增加 `download_count`，并返回短期私有下载 URL 或后端代理策略。
 
 ### 涉及文件
 
@@ -195,6 +199,7 @@
 - `backend/app/modules/share/constants.py`
 - `backend/app/modules/share/models.py`
 - `backend/app/modules/share/repository.py`
+- `backend/app/modules/share/external_access.py`
 - `backend/app/modules/share/router.py`
 - `backend/app/modules/share/schemas.py`
 - `backend/app/modules/share/service.py`
@@ -286,6 +291,16 @@
 - 已运行 `uv run pytest -q`，结果通过，共 102 个测试点。
 - 已运行 `uv run alembic upgrade head --sql`，确认分享 API 接入后迁移链仍可生成 PostgreSQL SQL。
 - 已运行 `git diff --check`，未发现空白错误。
+- 已运行 `uv run ruff format app/api/deps.py app/core/config.py app/modules/share tests/test_share_router.py`，格式化外链访问入口、限流和测试。
+- 已运行 `uv run pytest tests/test_share_service.py tests/test_share_router.py -q`，结果为 12 passed。
+- 已运行 `uv run mypy app/modules/auth/service.py app/modules/share`，结果为 no issues found in 9 source files。
+- 已运行 `uv run ruff format --check .`，结果为 157 files already formatted。
+- 已运行 `uv run ruff check .`，结果为 All checks passed。
+- 已运行 `uv run mypy app`，结果为 no issues found in 123 source files。
+- 已运行 `uv run pytest -q`，结果通过，共 105 个测试点。
+- 已运行 `uv run alembic upgrade head --sql`，确认外链访问入口接入后迁移链仍可生成 PostgreSQL SQL。
+- 已运行 `git diff --check`，未发现空白错误。
+- 本轮未启动 API、Worker 或 Docker Compose 服务。
 - 已运行 `uv run ruff format --check .`，结果为 144 files already formatted。
 - 已运行 `uv run ruff check .`，结果为 All checks passed。
 - 已再次运行 `uv run mypy app`，结果为 no issues found in 114 source files。

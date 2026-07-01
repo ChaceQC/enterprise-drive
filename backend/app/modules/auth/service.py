@@ -262,6 +262,10 @@ class AuthService:
             return None
         return user
 
+    async def get_tenant_id_by_slug(self, tenant_slug: str) -> UUID | None:
+        tenant = await self.repository.get_tenant_by_slug(tenant_slug)
+        return tenant.id if tenant is not None else None
+
     async def logout(
         self,
         *,

@@ -80,7 +80,7 @@ def upgrade() -> None:
     op.create_index(
         "idx_shares_external_token_hash",
         "shares",
-        ["tenant_id", "token_hash"],
+        ["token_hash"],
         unique=True,
         postgresql_where=sa.text("share_type = 'external' and token_hash is not null"),
     )
