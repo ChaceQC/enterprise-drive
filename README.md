@@ -57,7 +57,8 @@ uv run pytest
 - `PROJECT_PROGRESS.md`：项目进度记录。
 - `企业网盘开发者技术计划书.md`：完整技术计划书。
 - `backend/README.md`：后端工程启动与验证说明。
+- `docs/deployment-preview-worker.md`：预览 Worker 资源配额和部署说明。
 
 ## 部署说明
 
-生产部署默认由宿主机 Nginx 暴露 `80/443` 并反向代理到内部应用服务。Nginx 不放入 Docker Compose 或应用容器；Docker Compose 只用于编排 API、Worker 和依赖服务。
+生产部署默认由宿主机 Nginx 暴露 `80/443` 并反向代理到内部应用服务。Nginx 不放入 Docker Compose 或应用容器；本地 Docker Compose 只编排依赖服务。预览 Worker 应按 [预览 Worker 部署说明](docs/deployment-preview-worker.md) 单独限制 CPU、内存和临时磁盘。

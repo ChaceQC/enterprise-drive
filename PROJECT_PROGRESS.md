@@ -136,10 +136,12 @@
 - 预览 worker 已在渲染 unsupported/failed 终态和 retryable exception 时输出结构化日志字段，包括 `event_id`、`tenant_id`、`version_id`、`preview_status`、`preview_reason` 和 `retry_count`；JSON 日志 formatter 已保留 `extra` 字段，便于后续日志告警和指标接入。
 - 新增 Prometheus 指标入口 `/metrics`，使用成熟开源库 `prometheus-client` 暴露文本格式指标；预览 worker 会在 unsupported/failed 终态和 retryable exception 时递增 `preview_failures_total{status,reason}`。
 - 补充 metrics 和 preview worker 测试，覆盖 `/metrics` 可访问、`preview_failures_total` 暴露、预览终态失败和异常失败都会写入对应指标。
+- 新增 `docs/deployment-preview-worker.md`，明确生产 Nginx 继续使用宿主机安装和管理，不放入 Docker Compose；补充 preview Worker 独立队列、LibreOffice/Poppler 工具检查、systemd 和 Kubernetes 下的 CPU、内存、临时磁盘配额示例，以及 `/metrics` 告警建议。
+- 升级 `backend-ci` workflow 使用的 `actions/checkout`、`actions/setup-python` 和 `astral-sh/setup-uv` 主版本，消除 GitHub Actions Node 20 弃用告警。
 
 ### 进行中
 
-- Sprint 5 分享、搜索和预览模块已开始；基础分享、外链访问/下载、搜索索引/抽取、图片 WebP 预览、PDF 首页 WebP 预览、Office 经 LibreOffice headless 转 PDF 的基础链路，以及 preview worker 任务超时/限速、结构化失败日志和预览失败指标已完成。下一步补充真实 LibreOffice 环境联调和更完整的 worker 资源配额部署说明。
+- Sprint 5 分享、搜索和预览模块已开始；基础分享、外链访问/下载、搜索索引/抽取、图片 WebP 预览、PDF 首页 WebP 预览、Office 经 LibreOffice headless 转 PDF 的基础链路、preview worker 任务超时/限速、结构化失败日志、预览失败指标和资源配额部署说明已完成。下一步补充真实 LibreOffice 环境联调和搜索复杂格式抽取工具适配。
 
 ### 阻塞与风险
 
@@ -147,7 +149,7 @@
 - 当前 Redis 限流仍是固定窗口策略，适用于上传初始化、分片签名和下载预签名的基础保护；若后续需要滑动窗口、令牌桶、多层级动态规则或管理端配置，应切换成熟限流库。
 - 当前空间、文件树、上传、下载、空间成员管理和节点 ACL 管理接口已接入权限检查；文件列表已返回当前页子节点的批量权限评估结果；权限变更 outbox 事件已接入 Redis 缓存失效 worker；org 部门/用户组 ACL 主体和搜索 ACL 重建事件已接入。
 - 搜索当前已完成 token builder、outbox 事件、文件索引文档构建、`search.index_requested` 写入 OpenSearch 入口、`search.acl_rebuild_requested` 的保守范围重建、`search.extract_requested` UTF-8 文本类抽取入口、`/api/v1/search` 查询过滤、签名 cursor 分页、HTML 编码 highlight，以及上传完成、重命名、移动、删除、恢复和彻底删除后的索引同步；Office/PDF、OCR 和大文件解析需后续使用成熟开源工具接入。
-- 预览当前支持图片、PDF 首页和 Office 文档生成 WebP 产物；PDF 依赖 Poppler `pdftoppm`，Office 依赖 LibreOffice `soffice`。本机已发现 `pdftoppm` 可用但 LibreOffice/soffice 不可用，因此本轮只能通过 fake converter 和缺失工具测试验证 Office 代码路径，真实 Office 转码需在安装 LibreOffice 的环境中联调；当前已具备 preview 任务级超时、限速、结构化失败日志和 `preview_failures_total` 指标，容器/主机级 CPU、内存、临时磁盘配额仍需后续补齐。
+- 预览当前支持图片、PDF 首页和 Office 文档生成 WebP 产物；PDF 依赖 Poppler `pdftoppm`，Office 依赖 LibreOffice `soffice`。本机已发现 `pdftoppm` 可用但 LibreOffice/soffice 不可用，因此本轮只能通过 fake converter 和缺失工具测试验证 Office 代码路径，真实 Office 转码需在安装 LibreOffice 的环境中联调；当前已具备 preview 任务级超时、限速、结构化失败日志、`preview_failures_total` 指标和 systemd/Kubernetes 资源配额说明。
 - 部门/用户组 ACL 变更当前无法精确枚举所有受影响用户缓存，已采用通配模式保守失效租户内节点权限缓存；若后续权限缓存读路径启用并出现大租户性能压力，应补充 subject membership 反向索引或异步展开任务。
 - 当前 Redis 权限缓存已完成失效 worker，但权限判断读路径尚未启用 Redis 缓存；接入读缓存时必须保持数据库为事实来源，高危动作继续二次查库。
 - 当前节点 ACL 路径加载采用逐级父节点查询并限制最大深度 64，适合一期目录深度可控场景；若后续目录深度、列表批量权限展示或搜索过滤压力升高，应引入递归 CTE、closure table 或批量权限评估缓存。
@@ -160,7 +162,7 @@
 
 ### 下一步
 
-- 补充真实 LibreOffice 环境联调和容器/主机级 CPU、内存、临时磁盘配额部署说明；随后推进搜索复杂格式抽取的成熟开源工具适配。
+- 补充真实 LibreOffice 环境联调；随后推进搜索复杂格式抽取的成熟开源工具适配。
 
 ### 涉及文件
 
@@ -305,6 +307,7 @@
 - `AGENT.md`
 - `PROJECT_PLAN.md`
 - `docs/code-audit-2026-07-01.md`
+- `docs/deployment-preview-worker.md`
 - `企业网盘开发者技术计划书.md`
 
 ### 验证

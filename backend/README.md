@@ -19,7 +19,7 @@ uv run fastapi dev app/main.py --host 127.0.0.1 --port 18080
 uv run celery -A app.infrastructure.queue.celery_app worker -Q audit,permission,preview,search,maintenance -l info
 ```
 
-生产环境的 Nginx 使用宿主机安装和管理，不放入 Docker Compose；本目录的 Compose 只用于本地依赖服务。
+生产环境的 Nginx 使用宿主机安装和管理，不放入 Docker Compose；本目录的 Compose 只用于本地依赖服务。预览 Worker 的 CPU、内存和临时磁盘配额请参考 `../docs/deployment-preview-worker.md`。
 
 ## 常用验证
 
