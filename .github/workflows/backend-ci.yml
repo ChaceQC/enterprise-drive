@@ -42,12 +42,14 @@ jobs:
 
       - name: Start MinIO
         run: |
+          MINIO_IMAGE="$(sed -n 's/^MINIO_IMAGE=//p' ../.env.windows.example)"
+          test -n "${MINIO_IMAGE}"
           docker run -d --name enterprise-drive-ci-minio \
             -p 9000:9000 \
             -e MINIO_ROOT_USER=drive-dev \
             -e MINIO_ROOT_PASSWORD=drive-dev-password \
-            minio/minio:latest server /data
-          for i in {1..30}; do
+            "${MINIO_IMAGE}" server /data
+          for _ in {1..30}; do
             if curl -fsS http://127.0.0.1:9000/minio/health/live; then
               exit 0
             fi
@@ -138,6 +140,173 @@ jobs:
 
       - name: Build Preview Worker image
         run: docker build --target preview --tag enterprise-drive-preview:ci .
+
+  minio-image-policy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.images.outputs.matrix }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Verify immutable MinIO image references
+        id: images
+        run: |
+          set -euo pipefail
+          files=(
+            .env.windows.example
+            compose.windows.yml
+            backend/docker-compose.yml
+            .github/workflows/backend-ci.yml
+          )
+          if grep -En 'minio/(minio|mc):latest([^[:alnum:]_.-]|$)' "${files[@]}"; then
+            echo "Mutable MinIO image tag detected." >&2
+            exit 1
+          fi
+
+          test "$(grep -c '^MINIO_IMAGE=' .env.windows.example)" -eq 1
+          test "$(grep -c '^MINIO_MC_IMAGE=' .env.windows.example)" -eq 1
+          server_image="$(sed -n 's/^MINIO_IMAGE=//p' .env.windows.example)"
+          client_image="$(sed -n 's/^MINIO_MC_IMAGE=//p' .env.windows.example)"
+          server_pattern='^minio/minio:RELEASE\.[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}Z@sha256:[0-9a-f]{64}$'
+          client_pattern='^minio/mc:RELEASE\.[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}Z@sha256:[0-9a-f]{64}$'
+          [[ "${server_image}" =~ ${server_pattern} ]]
+          [[ "${client_image}" =~ ${client_pattern} ]]
+
+          root_config="$(docker compose --profile tls-tools --env-file .env.windows.example -f compose.windows.yml config --format json)"
+          test "$(jq -r '.services.minio.image' <<<"${root_config}")" = "${server_image}"
+          test "$(jq -r '.services["minio-init"].image' <<<"${root_config}")" = "${client_image}"
+          dev_config="$(docker compose -f backend/docker-compose.yml config --format json)"
+          test "$(jq -r '.services.minio.image' <<<"${dev_config}")" = "${server_image}"
+
+          verify_registry_digest() {
+            local image="$1"
+            local tag_reference="${image%@sha256:*}"
+            local expected_digest="${image##*@}"
+            local resolved_digest
+            resolved_digest="$(
+              docker buildx imagetools inspect "${tag_reference}" --format '{{json .Manifest}}' |
+                jq -r '.digest'
+            )"
+            test "${resolved_digest}" = "${expected_digest}"
+          }
+          verify_registry_digest "${server_image}"
+          verify_registry_digest "${client_image}"
+
+          matrix="$(
+            jq -cn \
+              --arg server "${server_image}" \
+              --arg client "${client_image}" \
+              '{include: [
+                {component: "server", image: $server},
+                {component: "client", image: $client}
+              ]}'
+          )"
+          echo "matrix=${matrix}" >>"${GITHUB_OUTPUT}"
+
+  minio-supply-chain:
+    needs: minio-image-policy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.minio-image-policy.outputs.matrix) }}
+
+    steps:
+      - name: Prepare artifact directory
+        run: mkdir -p supply-chain-artifacts
+
+      - name: Generate SPDX JSON SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ matrix.image }}
+          format: spdx-json
+          output-file: supply-chain-artifacts/minio-${{ matrix.component }}.spdx.json
+          syft-version: v1.46.0
+          dependency-snapshot: false
+          upload-artifact: false
+
+      - name: Generate full Grype vulnerability report
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        with:
+          sbom: supply-chain-artifacts/minio-${{ matrix.component }}.spdx.json
+          fail-build: false
+          output-format: json
+          output-file: supply-chain-artifacts/minio-${{ matrix.component }}.grype.json
+          severity-cutoff: critical
+          only-fixed: false
+          grype-version: v0.115.0
+
+      - name: Report baseline and gate newly discovered Critical vulnerabilities
+        env:
+          COMPONENT: ${{ matrix.component }}
+          IMAGE: ${{ matrix.image }}
+          REPORT: supply-chain-artifacts/minio-${{ matrix.component }}.grype.json
+        run: |
+          set -euo pipefail
+          case "${COMPONENT}" in
+            server)
+              baseline=$'CVE-2026-10536\nCVE-2026-11856\nCVE-2026-8924\nCVE-2026-8927\nCVE-2026-9079\nGHSA-5cgq-3rg8-m6cv\nGHSA-89gr-r52h-f8rx\nGHSA-f5wc-c3c7-36mc\nGHSA-jppx-rxg9-jmrx\nGHSA-p77j-4mvh-x3m3\nGHSA-rm3j-f69w-wqmq\nGHSA-vgwf-h737-ff37\nGHSA-x527-x647-q7gg\nGO-2026-4337\nGO-2026-5005\nGO-2026-5019\nGO-2026-5020'
+              ;;
+            client)
+              baseline=$'GHSA-5cgq-3rg8-m6cv\nGHSA-89gr-r52h-f8rx\nGHSA-f5wc-c3c7-36mc\nGHSA-jppx-rxg9-jmrx\nGHSA-p77j-4mvh-x3m3\nGHSA-rm3j-f69w-wqmq\nGHSA-vgwf-h737-ff37\nGHSA-x527-x647-q7gg\nGO-2026-4337\nGO-2026-5005\nGO-2026-5019\nGO-2026-5020'
+              ;;
+            *)
+              echo "Unknown MinIO component: ${COMPONENT}" >&2
+              exit 1
+              ;;
+          esac
+
+          baseline_file="$(mktemp)"
+          observed_file="$(mktemp)"
+          new_file="$(mktemp)"
+          trap 'rm -f "${baseline_file}" "${observed_file}" "${new_file}"' EXIT
+          printf '%s\n' "${baseline}" | LC_ALL=C sort -u >"${baseline_file}"
+          jq -r '
+            .matches[]
+            | select(.vulnerability.severity == "Critical")
+            | .vulnerability.id
+          ' "${REPORT}" | LC_ALL=C sort -u >"${observed_file}"
+          comm -13 "${baseline_file}" "${observed_file}" >"${new_file}"
+
+          baseline_count="$(wc -l <"${baseline_file}" | tr -d ' ')"
+          critical_count="$(wc -l <"${observed_file}" | tr -d ' ')"
+          new_count="$(wc -l <"${new_file}" | tr -d ' ')"
+          {
+            echo "### MinIO ${COMPONENT} supply-chain scan"
+            echo
+            echo "- Image: \`${IMAGE}\`"
+            echo "- SBOM: SPDX JSON generated by Syft v1.46.0"
+            echo "- Scanner: Grype v0.115.0"
+            echo "- Audited Critical baseline (2026-07-15): ${baseline_count}"
+            echo "- Current Critical IDs: ${critical_count}"
+            echo "- Newly discovered Critical IDs: ${new_count}"
+            echo
+            echo "<details><summary>Current Critical vulnerability IDs</summary>"
+            echo
+            echo '```text'
+            cat "${observed_file}"
+            echo '```'
+            echo "</details>"
+          } >>"${GITHUB_STEP_SUMMARY}"
+
+          if [[ -s "${new_file}" ]]; then
+            echo "New Critical vulnerabilities were found:" >&2
+            cat "${new_file}" >&2
+            exit 1
+          fi
+
+      - name: Upload MinIO supply-chain artifacts
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: minio-${{ matrix.component }}-supply-chain
+          path: supply-chain-artifacts/
+          if-no-files-found: error
 
   windows-deployment:
     runs-on: windows-latest
