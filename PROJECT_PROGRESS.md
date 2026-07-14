@@ -1,5 +1,96 @@
 # PROJECT_PROGRESS.md
 
+## 2026-07-14
+
+### 已完成
+
+- 将正式部署方向从“Linux/Kubernetes 或宿主机 Nginx”统一修正为 Windows 11 + Docker Desktop（WSL2/Linux containers）+ 仓库根 `compose.windows.yml`。
+- 明确 `compose.windows.yml` 是正式部署唯一编排入口，`backend/docker-compose.yml` 继续作为本地依赖开发清单，两者用途不得混用。
+- 明确 Nginx gateway 运行在 Compose 内，并且是唯一允许发布宿主端口的服务；当前默认本机由 gateway 发布 HTTP `18080/19000`。公网模式在补齐受信证书和 TLS 配置后映射 `80/443`，API、Worker、PostgreSQL、Redis、OpenSearch、MinIO API/Console 等内部服务不发布宿主端口。
+- 明确正式部署环境模板为根 `.env.windows.example`，宿主机管理入口为 `deploy/windows/manage.ps1`，Windows 侧命令统一以 PowerShell 为主。
+- 明确默认本机 API 入口为 `http://localhost:18080`，S3 外部预签名入口为 `http://localhost:19000`，两者均由 gateway 发布；公网 TLS 完成后的目标分别为 `https://drive.example.com` 和 `https://storage.example.com`。gateway 按 Host 分流并保留原始 Host，S3 外部入口不使用路径前缀重写。
+- 明确 S3 内外端点分离：API/Worker 使用 Compose 内部 `http://minio:9000`，浏览器只接收 gateway 暴露的 host-based 外部端点。
+- 明确正式编排必须覆盖 API、一次性 migration、一次性 seed、MinIO 初始化、按职责隔离的 Celery Worker、Celery beat、PostgreSQL、Redis、MinIO、OpenSearch、Nginx gateway、named volumes、备份与回滚。
+- 明确 `/healthz` 只表示进程存活，`/readyz` 必须执行真实 PostgreSQL 探针，数据库不可用时返回非 2xx，Compose 和 gateway 以 readiness 结果决定是否接流量。
+- 明确 Preview Worker 与其他队列隔离，镜像内包含 LibreOffice、Poppler 和中文字体，并限制 CPU、内存、临时磁盘、并发数和子进程生命周期。
+- 新增 `docs/deployment-windows-docker.md` 作为 Windows 11 Docker 正式部署、运维、备份、发布和回滚的主文档；Kubernetes、systemd 仅保留为未来可选迁移方向。
+
+### 版本影响
+
+- 部署架构从 Linux 宿主服务/Kubernetes 默认路径切换为 Windows 11 Docker Desktop 正式路径，属于向后兼容的部署能力增强，项目版本已按次版本规则从 `0.1.0` 提升到 `0.2.0`。
+- `backend/pyproject.toml`、`backend/uv.lock` 和应用 Settings 版本已同步为 `0.2.0`；本轮已构建并验收 `runtime`、`preview` 本地镜像，正式发布 tag 在后续合并 `main` 时创建。
+
+### 进行中
+
+- Windows Docker 本机 HTTP 部署闭环已完成；公网受信证书、TLS server block、HTTP 到 HTTPS 跳转、证书续期和双域名 HTTPS 实测仍在进行中。
+- 备份与恢复当前已形成文档化流程，后续仍需补 PowerShell 自动化脚本和隔离环境恢复演练。
+
+### 阻塞与风险
+
+- Docker Desktop 必须启用 WSL2 engine 和 Linux containers；Windows containers 模式不在本项目支持范围内。
+- 默认本机通过 gateway 的 `18080/19000` 两个端口区分 API 与 S3；生产域名模式必须配置两个真实 DNS 名称和 TLS 证书，并让 gateway 保留原始 Host。不得为 MinIO 外部端点增加 `/s3` 等 base path。
+- 当前 Nginx 工件只实现本机 HTTP `18080/19000` 和可配置 Host/端口，尚未包含证书挂载、TLS server block 或 HTTPS 自动化；公网 `80/443`、受信证书续期和 HTTPS 实测仍是上线前阻塞项。
+- PostgreSQL、Redis、MinIO、OpenSearch 都使用 named volumes；更新和回滚过程中误执行 `docker compose down -v` 会删除持久化数据，管理脚本不得把该命令作为默认操作。
+- OpenSearch、LibreOffice 和 Poppler 对 Docker Desktop 的 CPU、内存和磁盘要求较高，正式部署前需要按部署文档预留 WSL2 资源并验证 Preview Worker 的临时空间限制。
+- 当前 OpenSearch Security Plugin 在 Compose 内关闭，服务仅位于 internal network 且不发布宿主端口；公网或跨主机拆分前必须重新评估鉴权、TLS 和网络策略。
+- `MINIO_IMAGE`、`MINIO_MC_IMAGE` 示例仍使用 `latest`，正式发布前应固定已验证 tag 或 digest。
+
+### 下一步
+
+- 在公网发布前为 gateway 增加受信证书挂载、TLS server block、HTTP 到 HTTPS 跳转和证书续期方案，并实测 API/存储双域名的 `80/443` Host 分流。
+- 增加 PostgreSQL/MinIO 备份与恢复 PowerShell 自动化，并在隔离 Compose project 中完成恢复演练。
+- 固定 MinIO/MinIO Client 镜像 tag 或 digest，补镜像 SBOM 与漏洞扫描。
+- Docker 部署闭环通过后，再恢复推进 MinIO multipart 稳定封装、高密级下载代理、多维配额和治理任务告警等业务任务。
+
+### 验证
+
+- 已确认 Docker Desktop `29.3.1` 使用 `desktop-linux` / WSL2 Linux engine，Docker Compose 为 `v5.1.0`。
+- 已运行 `docker compose --env-file .env.windows.example -f compose.windows.yml config --quiet` 和 `deploy/windows/manage.ps1 config -Quiet`，均通过。
+- 已实际构建 `runtime` 和 `preview` 两个镜像；运行用户均为 UID/GID `10001` 的非 root `app`。Preview 镜像内 `LibreOffice 7.4.7.2` 与 `pdftoppm 22.12.0` 可执行。
+- 已完整启动 gateway、API、PostgreSQL、Redis、MinIO、OpenSearch、5 类 Worker 和 beat；`migration`、`seed`、`minio-init` 均按预期 `Exited (0)`，其余服务全部 healthy。只有 gateway 发布 `127.0.0.1:18080/19000`。
+- 已验证 `/healthz` 返回 `version=0.2.0`，`/readyz` 通过真实 PostgreSQL `SELECT 1` 并返回 `checks.database=ready`。
+- 已验证 MinIO CORS 预检返回 HTTP 204，并按配置返回允许 origin/method/header。
+- 已完成两轮真实 6 MiB multipart 上传与下载闭环：登录、创建空间、初始化上传、gateway 预签名 PUT、complete、gateway 预签名 GET 全部成功，下载内容 SHA-256 与原内容一致，外部 URL 使用 `localhost:19000`。
+- 已通过 gateway 运行真实 MinIO 集成测试，结果 `3 passed`，覆盖 multipart、presign、copy、delete、list、hash 和孤儿对象扫描。
+- 初次持续运行暴露 Celery `asyncio.run()` 跨事件循环复用 asyncpg QueuePool，导致连接累积、`Future attached to a different loop` 和 PostgreSQL `too many clients`。现已增加可配置数据库池模式：API 使用受控 QueuePool，Celery Worker 使用 NullPool；新增跨事件循环回归测试。
+- 修复后连续观察 2 分钟：`/readyz` 始终 200，PostgreSQL 当前业务连接保持稳定，audit/permission/search/preview/maintenance 任务持续成功，无连接池、事件循环或任务异常。
+- 连接池修复后已再次运行完整质量门禁：`uv sync --frozen --all-extras --dev`、`uv run ruff check .`、`uv run ruff format --check .`、`uv run mypy app`、`uv run pytest`、`uv lock --check`、`uv run alembic upgrade head --sql`；结果为 Ruff 通过、`186 files already formatted`、Mypy `140 source files` 无问题、`148 passed, 3 skipped`、锁文件与 Alembic SQL 通过。
+- 已再次运行 `docker compose --env-file .env.windows.example -f compose.windows.yml config --quiet`、`deploy/windows/manage.ps1 config -EnvFile .env.windows.example -Quiet` 和 `git diff --check`；Compose、管理脚本和补丁格式检查均通过，文档均为 UTF-8、无 BOM，Markdown code fence 成对，陈旧默认部署方向仅保留在明确标记的历史记录中。
+- 验证完成后已使用 `deploy/windows/manage.ps1 down -EnvFile .env.windows.example -Volumes` 关闭本轮测试环境；确认 Compose 项目无残留容器，`18080/19000` 均已释放，测试生成的 `enterprise-drive-windows` named volumes 与 networks 已清理。
+
+### 涉及文件
+
+- `AGENT.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `README.md`
+- `backend/README.md`
+- `docs/deployment-preview-worker.md`
+- `docs/deployment-windows-docker.md`
+- `企业网盘开发者技术计划书.md`
+- `.github/workflows/backend-ci.yml`
+- `.env.windows.example`
+- `.gitattributes`
+- `.gitignore`
+- `compose.windows.yml`
+- `deploy/windows/manage.ps1`
+- `deploy/windows/nginx/default.conf.template`
+- `backend/Dockerfile`
+- `backend/.dockerignore`
+- `backend/.env.example`
+- `backend/app/core/config.py`
+- `backend/app/db/session.py`
+- `backend/app/health.py`
+- `backend/app/infrastructure/queue/celery_app.py`
+- `backend/app/infrastructure/queue/schedule.py`
+- `backend/app/infrastructure/storage/s3.py`
+- `backend/tests/test_app.py`
+- `backend/tests/test_celery_schedule.py`
+- `backend/tests/test_db_session.py`
+- `backend/tests/test_storage_s3_endpoints.py`
+- `backend/pyproject.toml`
+- `backend/uv.lock`
+
 ## 2026-07-01
 
 ### 已完成
@@ -137,7 +228,7 @@
 - 预览 worker 已在渲染 unsupported/failed 终态和 retryable exception 时输出结构化日志字段，包括 `event_id`、`tenant_id`、`version_id`、`preview_status`、`preview_reason` 和 `retry_count`；JSON 日志 formatter 已保留 `extra` 字段，便于后续日志告警和指标接入。
 - 新增 Prometheus 指标入口 `/metrics`，使用成熟开源库 `prometheus-client` 暴露文本格式指标；预览 worker 会在 unsupported/failed 终态和 retryable exception 时递增 `preview_failures_total{status,reason}`。
 - 补充 metrics 和 preview worker 测试，覆盖 `/metrics` 可访问、`preview_failures_total` 暴露、预览终态失败和异常失败都会写入对应指标。
-- 新增 `docs/deployment-preview-worker.md`，明确生产 Nginx 继续使用宿主机安装和管理，不放入 Docker Compose；补充 preview Worker 独立队列、LibreOffice/Poppler 工具检查、systemd 和 Kubernetes 下的 CPU、内存、临时磁盘配额示例，以及 `/metrics` 告警建议。
+- 当时新增 `docs/deployment-preview-worker.md`，按旧方向记录宿主机 Nginx、systemd/Kubernetes 资源示例；该默认方向已在 2026-07-14 被 Windows 11 Docker Compose 部署替代，文档现已改为独立 `worker-preview` 容器、LibreOffice/Poppler 工具检查、CPU、内存、临时磁盘配额和 `/metrics` 告警建议。
 - 升级 `backend-ci` workflow 使用的 `actions/checkout`、`actions/setup-python` 和 `astral-sh/setup-uv` 版本；其中 `setup-uv` 固定到已发布 tag `v8.2.0`，避免 GitHub Actions 无法解析不存在的浮动主版本。
 - 已将上传/下载链路的企业级补强缺口写入 `PROJECT_PLAN.md` 和《企业网盘开发者技术计划书.md》：MinIO SDK multipart 私有方法风险、孤儿最终对象扫描、用户/租户/策略化配额、维护任务调度告警和清理指标、高密级下载代理与 Range/审计/水印/DLP、同 hash 首次上传竞争测试、真实对象存储集成测试。
 - 新增对象存储反向扫描能力：`StorageAdapter.list_objects` 支持按 prefix 和 `start_after` 游标列出私有对象，MinIO 适配器复用 SDK 公开 `list_objects`，测试适配器按 key 排序模拟分页。
@@ -161,7 +252,7 @@
 - 当前 Redis 限流仍是固定窗口策略，适用于上传初始化、分片签名和下载预签名的基础保护；若后续需要滑动窗口、令牌桶、多层级动态规则或管理端配置，应切换成熟限流库。
 - 当前空间、文件树、上传、下载、空间成员管理和节点 ACL 管理接口已接入权限检查；文件列表已返回当前页子节点的批量权限评估结果；权限变更 outbox 事件已接入 Redis 缓存失效 worker；org 部门/用户组 ACL 主体和搜索 ACL 重建事件已接入。
 - 搜索当前已完成 token builder、outbox 事件、文件索引文档构建、`search.index_requested` 写入 OpenSearch 入口、`search.acl_rebuild_requested` 的保守范围重建、`search.extract_requested` UTF-8 文本类、PDF 可复制正文、DOCX 段落/表格、PPTX 文本框/表格和 XLSX 单元格抽取入口、`/api/v1/search` 查询过滤、签名 cursor 分页、HTML 编码 highlight，以及上传完成、重命名、移动、删除、恢复和彻底删除后的索引同步；PDF 抽取当前依赖 `pypdf`，只覆盖可复制文本，不覆盖扫描件 OCR；DOCX/PPTX/XLSX 抽取分别依赖 `python-docx`、`python-pptx`、`openpyxl`，只覆盖 OOXML 格式，不覆盖旧 `.doc/.ppt/.xls`；OCR 和大文件解析需后续使用成熟开源工具接入。
-- 预览当前支持图片、PDF 首页和 Office 文档生成 WebP 产物；PDF 依赖 Poppler `pdftoppm`，Office 依赖 LibreOffice `soffice`。本机已发现 `pdftoppm` 可用但 LibreOffice/soffice 不可用，因此本轮只能通过 fake converter 和缺失工具测试验证 Office 代码路径，真实 Office 转码需在安装 LibreOffice 的环境中联调；当前已具备 preview 任务级超时、限速、结构化失败日志、`preview_failures_total` 指标和 systemd/Kubernetes 资源配额说明。
+- 预览当前支持图片、PDF 首页和 Office 文档生成 WebP 产物；PDF 依赖 Poppler `pdftoppm`，Office 依赖 LibreOffice `soffice`。当时本机已发现 `pdftoppm` 可用但 LibreOffice/soffice 不可用，因此只能通过 fake converter 和缺失工具测试验证 Office 代码路径；原 systemd/Kubernetes 资源说明已在 2026-07-14 改为 Windows Docker Compose 下的 Preview Worker 镜像与资源限制，真实 Office 转码需在最终容器中联调。
 - 部门/用户组 ACL 变更当前无法精确枚举所有受影响用户缓存，已采用通配模式保守失效租户内节点权限缓存；若后续权限缓存读路径启用并出现大租户性能压力，应补充 subject membership 反向索引或异步展开任务。
 - 当前 Redis 权限缓存已完成失效 worker，但权限判断读路径尚未启用 Redis 缓存；接入读缓存时必须保持数据库为事实来源，高危动作继续二次查库。
 - 当前节点 ACL 路径加载采用逐级父节点查询并限制最大深度 64，适合一期目录深度可控场景；若后续目录深度、列表批量权限展示或搜索过滤压力升高，应引入递归 CTE、closure table 或批量权限评估缓存。

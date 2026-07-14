@@ -25,14 +25,13 @@ from app.infrastructure.storage.base import (
 class S3StorageAdapter:
     def __init__(self, *, settings: Settings) -> None:
         self.settings = settings
-        endpoint_url = urlsplit(settings.s3_endpoint_url)
-        endpoint = endpoint_url.netloc or endpoint_url.path
-        self._client = Minio(
-            endpoint,
-            access_key=settings.s3_access_key_id,
-            secret_key=settings.s3_secret_access_key,
-            region=settings.s3_region,
-            secure=endpoint_url.scheme == "https",
+        self._client = _build_minio_client(
+            endpoint_url=settings.s3_endpoint_url,
+            settings=settings,
+        )
+        self._presign_client = _build_minio_client(
+            endpoint_url=settings.s3_public_endpoint_url or settings.s3_endpoint_url,
+            settings=settings,
         )
 
     async def create_multipart_upload(
@@ -61,7 +60,7 @@ class S3StorageAdapter:
         expires_in_seconds: int,
     ) -> PresignedUploadPart:
         upload_url = await asyncio.to_thread(
-            self._client.get_presigned_url,
+            self._presign_client.get_presigned_url,
             "PUT",
             bucket,
             storage_key,
@@ -136,7 +135,7 @@ class S3StorageAdapter:
             f"filename*=UTF-8''{quote(safe_filename, safe='')}"
         )
         download_url = await asyncio.to_thread(
-            self._client.presigned_get_object,
+            self._presign_client.presigned_get_object,
             bucket,
             storage_key,
             expires=timedelta(seconds=expires_in_seconds),
@@ -292,3 +291,15 @@ class S3StorageAdapter:
             if len(objects) >= limit:
                 break
         return objects
+
+
+def _build_minio_client(*, endpoint_url: str, settings: Settings) -> Minio:
+    parsed_endpoint = urlsplit(endpoint_url)
+    endpoint = parsed_endpoint.netloc or parsed_endpoint.path
+    return Minio(
+        endpoint,
+        access_key=settings.s3_access_key_id,
+        secret_key=settings.s3_secret_access_key,
+        region=settings.s3_region,
+        secure=parsed_endpoint.scheme == "https",
+    )

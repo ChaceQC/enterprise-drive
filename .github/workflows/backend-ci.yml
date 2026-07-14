@@ -4,10 +4,16 @@ on:
   push:
     paths:
       - "backend/**"
+      - "compose.windows.yml"
+      - ".env.windows.example"
+      - "deploy/windows/**"
       - ".github/workflows/backend-ci.yml"
   pull_request:
     paths:
       - "backend/**"
+      - "compose.windows.yml"
+      - ".env.windows.example"
+      - "deploy/windows/**"
       - ".github/workflows/backend-ci.yml"
 
 jobs:
@@ -67,3 +73,13 @@ jobs:
           DRIVE_TEST_MINIO_SECRET_KEY: "drive-dev-password"
           DRIVE_TEST_MINIO_BUCKET: "enterprise-drive-ci"
         run: uv run pytest
+
+      - name: Validate Windows Docker Compose
+        working-directory: .
+        run: docker compose --env-file .env.windows.example -f compose.windows.yml config --quiet
+
+      - name: Build API and core Worker image
+        run: docker build --target runtime --tag enterprise-drive-backend:ci .
+
+      - name: Build Preview Worker image
+        run: docker build --target preview --tag enterprise-drive-preview:ci .

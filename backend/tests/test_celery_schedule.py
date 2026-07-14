@@ -1,0 +1,53 @@
+from __future__ import annotations
+
+from app.core.config import Settings
+from app.infrastructure.queue.schedule import build_beat_schedule
+
+
+def test_beat_schedule_routes_outbox_dispatchers_to_dedicated_queues() -> None:
+    schedule = build_beat_schedule(
+        Settings(
+            outbox_dispatch_interval_seconds=7,
+        )
+    )
+
+    expected = {
+        "dispatch-audit-outbox": ("audit.dispatch_outbox", "audit"),
+        "dispatch-permission-outbox": ("permission.invalidate_cache", "permission"),
+        "dispatch-search-outbox": ("search.dispatch_outbox", "search"),
+        "dispatch-preview-outbox": ("preview.dispatch_outbox", "preview"),
+    }
+    for entry_name, (task_name, queue_name) in expected.items():
+        entry = schedule[entry_name]
+        assert entry["task"] == task_name
+        assert entry["schedule"] == 7.0
+        assert entry["options"] == {"queue": queue_name}
+
+
+def test_beat_schedule_keeps_destructive_maintenance_in_safe_modes() -> None:
+    schedule = build_beat_schedule(
+        Settings(
+            maintenance_task_batch_size=23,
+            upload_cleanup_interval_seconds=60,
+            blob_cleanup_interval_seconds=120,
+            orphan_object_scan_interval_seconds=180,
+            quota_reconciliation_interval_seconds=240,
+        )
+    )
+
+    assert schedule["expire-upload-sessions"]["schedule"] == 60.0
+    assert schedule["cleanup-unreferenced-blobs"]["schedule"] == 120.0
+    assert schedule["scan-orphaned-objects"]["schedule"] == 180.0
+    assert schedule["report-quota-drift"]["schedule"] == 240.0
+    assert schedule["expire-upload-sessions"]["kwargs"] == {"limit": 23}
+    assert schedule["cleanup-unreferenced-blobs"]["kwargs"] == {"limit": 23}
+    assert schedule["scan-orphaned-objects"]["kwargs"] == {
+        "limit": 23,
+        "dry_run": True,
+        "scan_all": True,
+    }
+    assert schedule["report-quota-drift"]["kwargs"] == {
+        "limit": 23,
+        "repair": False,
+        "scan_all": True,
+    }

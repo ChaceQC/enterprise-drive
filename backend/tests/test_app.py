@@ -8,6 +8,7 @@ import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 
+from app import health as health_module
 from app.core.config import Settings
 from app.core.logging import JsonFormatter
 from app.main import create_app
@@ -20,6 +21,7 @@ async def client() -> AsyncIterator[AsyncClient]:
         cors_origins=[],
         trusted_hosts=["testserver"],
         secret_key="test-secret",
+        database_url="sqlite+aiosqlite:///:memory:",
     )
     transport = ASGITransport(app=create_app(settings))
     async with AsyncClient(transport=transport, base_url="http://testserver") as test_client:
@@ -34,7 +36,7 @@ async def test_healthz(client: AsyncClient) -> None:
     assert response.json() == {
         "status": "ok",
         "service": "企业网盘",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "environment": "test",
     }
 
@@ -45,6 +47,31 @@ async def test_readyz(client: AsyncClient) -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "ready"
+    assert response.json()["checks"] == {"database": "ready"}
+
+
+@pytest.mark.asyncio
+async def test_readyz_returns_503_when_database_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fail_database_check(settings: Settings) -> None:
+        raise ConnectionError(settings.database_url)
+
+    monkeypatch.setattr(health_module, "_check_database_ready", fail_database_check)
+    settings = Settings(
+        environment="test",
+        cors_origins=[],
+        trusted_hosts=["testserver"],
+        secret_key="test-secret",
+        database_url="sqlite+aiosqlite:///:memory:",
+    )
+    transport = ASGITransport(app=create_app(settings))
+    async with AsyncClient(transport=transport, base_url="http://testserver") as test_client:
+        response = await test_client.get("/readyz")
+
+    assert response.status_code == 503
+    assert response.json()["status"] == "not_ready"
+    assert response.json()["checks"] == {"database": "unavailable"}
 
 
 @pytest.mark.asyncio

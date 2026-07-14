@@ -8,10 +8,10 @@
 
 搜索 PDF 正文抽取使用成熟开源库 `pypdf` 读取可复制文本，DOCX 正文抽取使用成熟开源库 `python-docx` 读取段落和表格文本，PPTX 正文抽取使用成熟开源库 `python-pptx` 读取文本框和表格文本，XLSX 正文抽取使用成熟开源库 `openpyxl` 读取单元格文本；预览 PDF 需要安装 Poppler，并确保 `pdftoppm` 在 `PATH` 中；Office 预览需要安装 LibreOffice，并确保 `soffice` 或配置的命令在 `PATH` 中。业务代码只编排 pypdf、python-docx、python-pptx、openpyxl、LibreOffice、Poppler、Pillow 等成熟开源工具，不自研文档解析器。
 
-```bash
+```powershell
 uv python install 3.12
 uv sync --all-extras --dev
-copy .env.example .env
+Copy-Item .env.example .env
 docker compose up -d postgres redis minio opensearch
 uv run alembic upgrade head
 uv run python -m scripts.seed_admin
@@ -19,11 +19,25 @@ uv run fastapi dev app/main.py --host 127.0.0.1 --port 18080
 uv run celery -A app.infrastructure.queue.celery_app worker -Q audit,permission,preview,search,maintenance -l info
 ```
 
-生产环境的 Nginx 使用宿主机安装和管理，不放入 Docker Compose；本目录的 Compose 只用于本地依赖服务。预览 Worker 的 CPU、内存和临时磁盘配额请参考 `../docs/deployment-preview-worker.md`。
+本目录的 `docker-compose.yml` 只用于本地依赖开发，不包含正式 API、Worker 或 gateway。Windows 11 正式部署必须回到仓库根目录使用 `compose.windows.yml`，Nginx gateway 位于 Compose 内并且是唯一宿主端口入口；完整流程见 `../docs/deployment-windows-docker.md`。
+
+正式部署使用根 `.env.windows.example` 生成未提交的 `.env.windows`，并通过 `deploy/windows/manage.ps1` 管理：
+
+```powershell
+Set-Location ..
+Copy-Item .env.windows.example .env.windows
+.\deploy\windows\manage.ps1 config
+.\deploy\windows\manage.ps1 up -Build
+.\deploy\windows\manage.ps1 status
+```
+
+正式环境中 API/Worker 使用 `http://minio:9000` 等 Compose 内部服务端点；默认浏览器预签名地址为 gateway 提供的 `http://localhost:19000`。公网 TLS 配置完成后可替换为 `https://storage.example.com`，外部 S3 端点不能使用 `/s3` 等路径前缀。默认 API 入口为 gateway 提供的 `http://localhost:18080`；公网 TLS 配置完成后可使用 `https://drive.example.com` 并按 Host 分流。当前 Nginx 工件尚未包含证书挂载或 TLS server block。Preview Worker 的 CPU、内存和临时磁盘配额请参考 `../docs/deployment-preview-worker.md`。
+
+正式 Compose 中 API 使用受控 SQLAlchemy QueuePool；各 Celery Worker 会覆盖 `DRIVE_DATABASE_POOL_MODE=null`。这是因为当前同步 Celery task 使用 `asyncio.run()` 执行异步服务，不能跨任务事件循环复用 asyncpg 连接池。
 
 ## 常用验证
 
-```bash
+```powershell
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy app
@@ -32,12 +46,12 @@ uv run pytest
 
 真实 MinIO 集成测试默认跳过，避免普通单元测试依赖外部服务。需要验证对象存储真实行为时，先启动本地 MinIO，再显式设置环境变量：
 
-```bash
-DRIVE_RUN_MINIO_TESTS=1 \
-DRIVE_TEST_MINIO_ENDPOINT=http://127.0.0.1:19000 \
-DRIVE_TEST_MINIO_ACCESS_KEY=drive-dev \
-DRIVE_TEST_MINIO_SECRET_KEY=drive-dev-password \
-DRIVE_TEST_MINIO_BUCKET=enterprise-drive-test \
+```powershell
+$env:DRIVE_RUN_MINIO_TESTS = "1"
+$env:DRIVE_TEST_MINIO_ENDPOINT = "http://127.0.0.1:19000"
+$env:DRIVE_TEST_MINIO_ACCESS_KEY = "drive-dev"
+$env:DRIVE_TEST_MINIO_SECRET_KEY = "drive-dev-password"
+$env:DRIVE_TEST_MINIO_BUCKET = "enterprise-drive-test"
 uv run pytest tests/test_storage_minio_integration.py -q
 ```
 

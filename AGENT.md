@@ -5,8 +5,9 @@
 ## 1. 基本要求
 
 - 文件读写和终端输入输出统一使用 UTF-8。
-- 开发环境默认为 Windows 11。
-- 生产部署环境默认为 Linux，应用和依赖服务可使用 Docker / Kubernetes，但 Nginx 默认使用宿主机安装和管理，不放入 Docker Compose 或应用容器。
+- 开发和正式部署宿主机统一以 Windows 11 为基线。
+- 正式部署使用 Docker Desktop 的 WSL2 后端和 Linux containers，仓库根目录 `compose.windows.yml` 是唯一正式编排入口；`backend/docker-compose.yml` 仅保留为本地依赖开发清单。
+- 正式部署的 Nginx gateway 运行在 `compose.windows.yml` 中，并且是唯一允许发布宿主端口的服务；当前默认本机入口由 gateway 发布 API `18080` 和 S3 外部端点 `19000`。公网模式必须先在 gateway 补充受信证书和 TLS server 配置，再映射 `80/443`；API、Worker、PostgreSQL、Redis、OpenSearch、MinIO API/Console 等内部服务只加入 Compose 网络。
 - 技术基线：Python 3.12+、uv、FastAPI、SQLAlchemy 2.x、PostgreSQL 16+、Redis、S3 兼容对象存储、OpenSearch、Celery。
 - 面向用户的界面文案、说明文字、代码注释、README 和项目文档默认使用中文；确需保留英文时，仅限命令、变量名、协议名、第三方产品名、API 字段和行业通用术语。
 - 文件路径、目录名、对象存储 key、代码导入路径和真实存储文件名统一使用英文、数字、短横线或下划线；中文文件名只作为展示名、标题、备注等单独字段保存和显示。
@@ -15,7 +16,7 @@
 - 一期目标是可试点上线的企业网盘后端，不要为了演示效果牺牲权限、审计、上传下载一致性和部署安全。
 - 本地开发服务避免使用常见端口；如无项目内配置，API 默认避免使用 `3000`、`5173`、`8000` 等常见开发端口，端口应放入环境变量或配置文件。
 - 后端依赖和命令必须通过 uv 管理，禁止直接使用系统 Python 或全局 Python 启动项目。
-- 开发、验证或部署过程中发现缺少必要工具或依赖时，应自行安装或补齐，例如 uv、Python 3.12、Docker、GitHub CLI、后端 Python 包和前端包；确因权限、网络或平台限制无法安装时，必须写入 `PROJECT_PROGRESS.md` 并在最终说明中说明原因。
+- 开发、验证或部署过程中发现缺少必要工具或依赖时，应自行安装或补齐，例如 uv、Python 3.12、Docker Desktop、WSL2、Docker Compose v2、GitHub CLI、后端 Python 包和前端包；确因权限、网络或平台限制无法安装时，必须写入 `PROJECT_PROGRESS.md` 并在最终说明中说明原因。
 - 功能实现优先复用成熟库、标准工具、开放协议、框架能力或可信开源实现；只有在现有方案不能满足本项目的安全、审计、一致性、性能、授权协议或运维要求时，才允许自研实现。
 - 不要默认引入或直接依赖云厂商专有 SDK；对象存储、搜索、消息、身份认证等外部能力应优先使用开放协议、兼容接口、标准客户端或可替换的开源适配器。确需临时使用某个 SDK 时，必须封装在 infrastructure 适配层，并在文档中写明替换计划。
 - 引入第三方库或开源代码前必须评估许可证、维护活跃度、安全记录、依赖体量、Python 3.12 和异步生态兼容性，以及与 FastAPI、SQLAlchemy、Celery、Redis、S3/OpenSearch 等现有技术栈的契合度。
@@ -24,9 +25,9 @@
 - 如果暂时采用轻量自研实现，必须在 `PROJECT_PROGRESS.md` 或相关 README 中标明原因、适用范围、已知限制和替换为成熟库或开源方案的触发条件。
 - 运行后端应在 `backend` 目录内使用 `uv run ...`；如果项目尚未创建 `backend` 目录，应先按计划书建立工程结构。
 - 端口、域名、数据库连接、Redis、对象存储、OpenSearch、CORS、Trusted Host、上传策略、API 地址等环境相关配置必须放在独立配置文件或环境变量中，不得硬编码在业务代码或启动脚本里。
-- 公网部署是默认目标，宿主机 Nginx 负责暴露 `80/443` 并反向代理到内部服务；不能把 PostgreSQL、Redis、OpenSearch、MinIO 管理端、FastAPI 调试端口、私有上传目录直接暴露到公网。
+- 公网部署是目标形态，但当前基线只实现 gateway 的本机 HTTP `18080/19000`。上线公网前必须在 gateway 补充受信证书、TLS server block、HTTP 到 HTTPS 跳转并映射 `80/443`；不能为 PostgreSQL、Redis、OpenSearch、MinIO API/Console、FastAPI 调试端口或私有上传目录配置宿主端口映射。
 - 不要把临时方案伪装成最终方案；临时实现必须在进度记录中标明原因、影响范围和后续处理。
-- 实现过程中必须实时更新受影响文档，至少包括 `README.md`、`PROJECT_PLAN.md`、`PROJECT_PROGRESS.md`、`AGENT.md` 和相关子目录 README；项目计划以《企业网盘开发者技术计划书.md》为准，可在 `PROJECT_PLAN.md` 中维护执行版摘要。
+- 实现过程中必须实时更新受影响文档，至少包括 `README.md`、`PROJECT_PLAN.md`、`PROJECT_PROGRESS.md`、`AGENT.md`、`docs/deployment-windows-docker.md` 和相关子目录 README；项目计划以《企业网盘开发者技术计划书.md》为准，可在 `PROJECT_PLAN.md` 中维护执行版摘要。
 
 ## 2. 版本规则
 
@@ -183,7 +184,7 @@ uv run mypy app
 - 修改 `pyproject.toml` 时必须同步更新并提交 `uv.lock`。
 - 新增依赖前先确认是否已有标准库、项目工具或现有依赖可满足。
 - 生产镜像构建必须固定 `uv.lock`，不能在构建时漂移依赖版本。
-- 如果本机无法完成 Linux 或 Docker 验证，必须在 `PROJECT_PROGRESS.md` 和最终说明中写明验证边界。
+- Windows 11 正式部署改动必须完成 Docker Desktop/WSL2/Linux containers 下的构建、启动、健康检查和停止验证；当前机器若暂时不具备 Docker Desktop 实测条件，必须在 `PROJECT_PROGRESS.md` 和最终说明中写明验证边界，并由最终集成步骤补齐。
 
 ## 9. 数据库与迁移
 
@@ -300,7 +301,7 @@ uv run mypy app
 - 外部 URL 预览或远程拉取默认不做，避免 SSRF。
 - 登录失败、初始化上传、分片签名、下载、外链访问和搜索必须有限流策略。
 - CORS、Trusted Host、Cookie、CSRF、限流必须按公网部署设计。
-- 生产环境只允许宿主机 Nginx 暴露 `80/443`；Nginx 不放入 Docker，应用容器、数据库、Redis、OpenSearch、对象存储等服务只监听内网或宿主机本地反代端口。
+- 正式环境只允许 Compose 内的 Nginx gateway 发布宿主端口；当前默认本机为 HTTP `18080/19000`，公网模式在补齐并验证 TLS 后映射 `80/443`。应用容器、数据库、Redis、OpenSearch、MinIO API/Console 等服务只监听 Compose 内部网络。
 
 ## 17. 容量与配额
 
@@ -358,7 +359,7 @@ uv run mypy app
 - 上传下载：验证秒传、multipart、断点续传、幂等 complete、Range 下载。
 - 权限：验证继承、拒绝优先、空间角色、目录 ACL、越权下载失败。
 - 审计：验证成功和失败操作都写入 audit log，outbox 投递失败可重试。
-- 部署：检查 Dockerfile、Docker Compose、Kubernetes、宿主机 Nginx 反向代理配置和环境变量示例；不得生成把 Nginx 放入 Docker Compose 的默认部署方案。
+- 部署：检查 Dockerfile、根 `compose.windows.yml`、Nginx gateway、`.env.windows.example`、`deploy/windows/manage.ps1`、named volumes、备份/回滚说明和 Windows Docker Desktop 启停流程；必须确认只有 gateway 发布宿主端口。
 - 安全：检查公网端口、后台入口、文件访问路径、对象存储 bucket、敏感日志。
 
 如果某项验证无法执行，必须在最终说明和 `PROJECT_PROGRESS.md` 中记录原因。
@@ -377,6 +378,7 @@ checkout
   -> ruff format --check
   -> mypy app
   -> pytest
+  -> docker compose --env-file .env.windows.example -f compose.windows.yml config --quiet
   -> build docker image
   -> dependency vulnerability scan
 ```
@@ -384,44 +386,44 @@ checkout
 Dockerfile 要求：
 
 - 使用多阶段构建。
-- 构建阶段运行 `uv sync --frozen`。
+- 构建阶段运行 `uv sync --frozen` 并固定 `uv.lock`。
+- API 与各类 Worker 复用同一后端基础镜像，通过 Compose command 区分进程。
 - 运行镜像使用非 root 用户。
-- 不把 `.env`、测试文件、缓存目录复制到生产镜像。
-- 健康检查使用 `/healthz` 和 `/readyz`。
+- 不把 `.env`、测试文件、缓存目录、运行数据和备份复制到生产镜像。
+- API 健康检查使用 `/healthz` 和 `/readyz`；`/readyz` 必须执行真实 PostgreSQL 探针，数据库不可用时返回非 2xx。
+- Preview Worker 镜像必须包含 LibreOffice、Poppler 和常用中文字体，并限制 CPU、内存、临时磁盘、并发数和子进程生命周期。
 
-宿主机 Nginx 要求：
+Windows Docker Compose 要求：
 
-- 生产默认使用宿主机安装的 Nginx 做 TLS 终止和反向代理。
-- Docker Compose 不包含 Nginx 服务；Compose 只编排 API、Worker 和依赖服务。
-- Nginx 配置文件、站点启用方式、证书路径和反代 upstream 应在部署文档中说明。
-- API 容器端口只绑定到宿主机本地地址或内网地址，禁止直接公网暴露。
-- WebSocket、Range 下载、上传大小限制、超时、真实客户端 IP 头和安全响应头必须在宿主机 Nginx 中配置。
-
-Kubernetes 至少拆分：
-
-- `api-deployment`：FastAPI。
-- `worker-preview-deployment`：重 CPU / 内存转码任务。
-- `worker-search-deployment`：文本抽取和索引。
-- `worker-audit-deployment`：审计投递。
-- `cronjob-maintenance`：过期外链、回收站、容量校准。
-- `migration-job`：发布时执行 Alembic migration。
+- 仓库根目录 `compose.windows.yml` 是 Windows 11 正式部署的唯一编排入口；`backend/docker-compose.yml` 只用于开发机单独拉起依赖。
+- 正式编排至少包含 `gateway`、`api`、一次性 `migration`、一次性 `seed`、一次性 `minio-init`、按职责隔离的 Celery Worker、运行 Celery beat 的 `beat` 服务、PostgreSQL、Redis、MinIO 和 OpenSearch。
+- `gateway` 是唯一发布宿主端口的服务；当前默认本机发布 HTTP `18080/19000`，公网模式必须在补齐受信证书和 TLS 配置后再发布 `80/443`。其他服务禁止配置 `ports`，服务间通过 Compose 网络和服务名访问。
+- `.env.windows.example` 是正式环境变量模板，真实 `.env.windows` 不得提交。数据库、Redis、OpenSearch、Celery broker/result backend 使用内部服务 DNS。
+- API 使用可配置的 SQLAlchemy QueuePool；Celery Worker 因同步任务入口会通过 `asyncio.run()` 建立独立事件循环，必须在 Compose 中使用 `DRIVE_DATABASE_POOL_MODE=null`，禁止跨任务事件循环复用 asyncpg 连接池。
+- S3 必须区分容器内访问端点和浏览器可访问的外部端点：内部端点用于 API/Worker 访问 `http://minio:9000`；默认外部端点为 gateway 提供的 `http://localhost:19000`，公网 TLS 配置完成后可使用 `https://storage.example.com` 等独立 Host。外部端点不得使用 `/s3` 等 base path，也不能把内部服务名返回给浏览器。
+- PostgreSQL、Redis、MinIO 和 OpenSearch 使用 named volumes；备份输出使用明确的 Windows 宿主目录或专用备份卷。Celery beat 当前把可重建 schedule 文件放在容器临时目录，不能把它当作任务事实来源。
+- `deploy/windows/manage.ps1` 是宿主机管理入口，当前提供 `config`、`up`、`down`、`status`、`logs`，构建使用 `up -Build`，删除卷必须显式使用 `down -Volumes`；备份、更新和回滚按部署文档中的 PowerShell/Compose 流程执行。
+- 周期维护任务由独立 `beat` 容器运行 Celery beat，至少覆盖过期上传、无引用 blob、孤儿最终对象和容量校准；调度不得与 API 进程混跑。
+- 当前 Nginx gateway 必须处理 WebSocket、Range、上传大小限制、超时、真实客户端 IP、安全响应头，以及 API 与外部 S3 端点的分流；公网发布前还必须补充受信证书挂载、TLS server block 和 HTTPS 实测。
 
 发布顺序：
 
-- 合并代码前运行 ruff、mypy、pytest、OpenAPI diff。
-- 构建镜像时固定 `uv.lock`，生成 SBOM，可选漏洞扫描。
-- 执行 migration job，只允许向前兼容 migration。
-- 部署 API，readiness 通过后接流量。
-- 部署 Worker，按队列逐类发布，避免任务中断扩大。
-- 观察错误率、延迟、队列积压、数据库慢查询和对象存储异常。
-- 发布完成后标记版本、归档 OpenAPI、记录 migration 版本。
+- 合并代码前运行 ruff、mypy、pytest、OpenAPI diff、Compose config 校验和镜像构建。
+- 更新前创建 PostgreSQL、MinIO 对象和关键配置/证书备份，并记录当前镜像 tag、migration 版本和环境模板版本。
+- 执行一次性 migration 服务，只允许向前兼容 migration。
+- 启动 API，等待 `/readyz` 真实数据库探针通过后再让 gateway 接流量。
+- 启动 Worker 和 `beat`，按队列逐类检查，避免任务中断扩大。
+- 观察错误率、延迟、队列积压、数据库慢查询、对象存储异常、容器重启次数和 Windows 宿主磁盘空间。
+- 发布完成后标记版本、归档 OpenAPI、记录 migration 与 Compose 配置版本。
 
 回滚原则：
 
-- 应用可快速回滚镜像。
-- 数据库 migration 原则上只做向前兼容，避免依赖回滚 DDL。
+- 应用通过上一个可用镜像 tag 和上一版 `compose.windows.yml` 快速回滚。
+- named volumes 默认保留，停止或回滚时不得默认执行 `docker compose down -v`。
+- 数据库 migration 原则上只做向前兼容，避免依赖回滚 DDL；恢复数据库备份必须经过明确维护窗口。
 - 如果必须执行破坏性迁移，必须先做影子字段和双写验证。
 - Worker 任务 payload 必须兼容至少一个旧版本。
+- Kubernetes、systemd 只作为未来迁移或其他平台的可选方案，不是当前默认部署路径。
 
 ## 22. 文档同步
 
@@ -446,5 +448,6 @@ Kubernetes 至少拆分：
 - API 契约、错误码和文档已同步。
 - 权限、审计、容量、幂等和安全边界已按功能影响范围处理。
 - 相关单元测试、集成测试或手工验证已完成。
+- Windows 11 Docker 部署相关改动已通过 Compose config、镜像构建、容器健康检查、真实 `/readyz` 数据库探针、Worker 工具检查和停止回收验证。
 - `PROJECT_PROGRESS.md` 已记录完成事项、风险、下一步和验证方式。
 - 可运行、可回滚、可排查；没有把临时方案伪装成最终方案。

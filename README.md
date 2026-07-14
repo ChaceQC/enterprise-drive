@@ -1,6 +1,6 @@
 # 企业网盘
 
-企业网盘后端工程，目标是实现一个可试点上线的企业级文件管理服务。项目以《企业网盘开发者技术计划书.md》为技术基线，优先保障文件元数据、对象存储、权限、审计、搜索和异步任务之间的一致性。
+企业网盘后端工程，当前项目版本为 `0.2.0`，目标是实现一个可试点上线的企业级文件管理服务。项目以《企业网盘开发者技术计划书.md》为技术基线，优先保障文件元数据、对象存储、权限、审计、搜索和异步任务之间的一致性。
 
 ## 技术基线
 
@@ -13,8 +13,10 @@
 - S3 兼容对象存储
 - OpenSearch
 - Celery
-- Docker / Kubernetes
-- 宿主机 Nginx
+- Windows 11
+- Docker Desktop（WSL2 / Linux containers）
+- Docker Compose v2
+- Compose 内 Nginx gateway
 
 ## 一期范围
 
@@ -24,7 +26,7 @@
 - 目录权限、空间角色、拒绝优先、权限缓存和高危动作二次校验。
 - 内部分享、外链分享、提取码、过期、次数限制、撤销。
 - 预览 Worker、搜索索引 Worker、审计 outbox dispatcher。
-- Docker Compose 本地开发环境、Alembic migration、CI 质量门禁。
+- Docker Compose 本地开发环境、Windows 11 Docker 正式部署、Alembic migration、CI 质量门禁。
 
 ## 当前状态
 
@@ -40,8 +42,8 @@ Sprint 3 已落地上传会话基础：`upload_sessions`、`upload_parts` 迁移
 
 若本机缺少 `uv`、Python 3.12、Docker、GitHub CLI 或后端依赖包等必要工具，可按命令提示自行安装或补齐；确因权限、网络或平台限制无法安装时，需要记录到 `PROJECT_PROGRESS.md`。
 
-```bash
-cd backend
+```powershell
+Set-Location backend
 uv sync --all-extras --dev
 uv run alembic upgrade head
 uv run ruff check .
@@ -52,13 +54,13 @@ uv run pytest
 
 真实 MinIO 集成测试默认跳过；需要本机已有 MinIO 或通过 Docker 启动临时 MinIO 后显式打开：
 
-```bash
-cd backend
-DRIVE_RUN_MINIO_TESTS=1 \
-DRIVE_TEST_MINIO_ENDPOINT=http://127.0.0.1:19000 \
-DRIVE_TEST_MINIO_ACCESS_KEY=drive-dev \
-DRIVE_TEST_MINIO_SECRET_KEY=drive-dev-password \
-DRIVE_TEST_MINIO_BUCKET=enterprise-drive-test \
+```powershell
+Set-Location backend
+$env:DRIVE_RUN_MINIO_TESTS = "1"
+$env:DRIVE_TEST_MINIO_ENDPOINT = "http://127.0.0.1:19000"
+$env:DRIVE_TEST_MINIO_ACCESS_KEY = "drive-dev"
+$env:DRIVE_TEST_MINIO_SECRET_KEY = "drive-dev-password"
+$env:DRIVE_TEST_MINIO_BUCKET = "enterprise-drive-test"
 uv run pytest tests/test_storage_minio_integration.py -q
 ```
 
@@ -71,8 +73,13 @@ GitHub `backend-ci` 会启动临时 MinIO，并运行这组真实对象存储集
 - `PROJECT_PROGRESS.md`：项目进度记录。
 - `企业网盘开发者技术计划书.md`：完整技术计划书。
 - `backend/README.md`：后端工程启动与验证说明。
+- `docs/deployment-windows-docker.md`：Windows 11 Docker Desktop 正式部署、运维、备份与回滚说明。
 - `docs/deployment-preview-worker.md`：预览 Worker 资源配额和部署说明。
 
 ## 部署说明
 
-生产部署默认由宿主机 Nginx 暴露 `80/443` 并反向代理到内部应用服务。Nginx 不放入 Docker Compose 或应用容器；本地 Docker Compose 只编排依赖服务。预览 Worker 应按 [预览 Worker 部署说明](docs/deployment-preview-worker.md) 单独限制 CPU、内存和临时磁盘。
+正式部署目标为 Windows 11 + Docker Desktop（WSL2/Linux containers）。仓库根 `compose.windows.yml` 是唯一正式编排入口，根 `.env.windows.example` 是环境变量模板，`deploy/windows/manage.ps1` 是 PowerShell 管理入口；`backend/docker-compose.yml` 继续只用于本地依赖开发。
+
+Compose 内的 Nginx gateway 是唯一宿主端口入口。当前默认本机 API 使用 `http://localhost:18080`，浏览器访问的 S3 预签名端点使用 `http://localhost:19000`，两者均由 gateway 发布。公网模式必须先为 gateway 补充受信证书和 TLS server 配置，再映射 `80/443` 并使用 `https://drive.example.com`、`https://storage.example.com`；gateway 按 Host 分流并保留原始 Host。API、Worker、PostgreSQL、Redis、OpenSearch、MinIO API/Console 等内部服务不发布宿主端口。容器内 API/Worker 通过 `http://minio:9000` 访问对象存储，不能把内部服务名返回给浏览器。
+
+正式编排还必须包含真实 PostgreSQL `/readyz` 探针、独立 Celery beat、隔离的 Preview Worker、named volumes、备份/回滚和 CI image build/Compose config 验证。完整流程见 [Windows 11 Docker 部署说明](docs/deployment-windows-docker.md)，预览资源限制见 [预览 Worker 部署说明](docs/deployment-preview-worker.md)。Kubernetes、systemd 仅作为未来可选迁移方案。

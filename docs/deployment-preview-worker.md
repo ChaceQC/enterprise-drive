@@ -1,18 +1,19 @@
 # 预览 Worker 部署说明
 
-本文说明 `preview` 队列的生产部署边界。预览 Worker 会运行 Pillow、Poppler `pdftoppm` 和 LibreOffice `soffice` 等外部工具，必须与 API Worker 分离部署，并设置 CPU、内存、临时磁盘和队列速率限制。
+本文说明 Windows 11 + Docker Desktop 正式环境中 `preview` 队列的部署边界。预览 Worker 会运行 Pillow、Poppler `pdftoppm` 和 LibreOffice `soffice` 等外部工具，必须在根 `compose.windows.yml` 中与 API 和其他 Worker 分离，并设置 CPU、内存、临时磁盘和队列速率限制。
 
 ## 基本原则
 
-- 生产 Nginx 使用宿主机安装和管理，只暴露 `80/443`，反向代理到 API 内部端口；不要把 Nginx 放入 Docker Compose 或应用容器。
-- `backend/docker-compose.yml` 只用于本地依赖服务，不作为生产编排清单；生产 API、Worker、数据库、Redis、OpenSearch、对象存储需要独立部署或用 Kubernetes/系统服务管理。
+- Windows 11 正式部署使用 Docker Desktop 的 WSL2 后端和 Linux containers；根 `compose.windows.yml` 是唯一正式编排入口。
+- Nginx gateway 在 Compose 内运行，并且是唯一发布宿主端口的服务；Preview Worker、API、Redis、数据库、OpenSearch 和 MinIO 都只加入内部网络。
+- `backend/docker-compose.yml` 只用于本地依赖开发，不作为生产编排清单。
 - `preview` Worker 只消费 `preview` 队列，避免 LibreOffice/Poppler 转码拖慢 `audit`、`permission`、`search` 和 `maintenance` 队列。
 - Worker 节点需要安装 LibreOffice 和 Poppler，并在启动前确认 `soffice` 和 `pdftoppm` 可执行。
 - 临时目录必须放在可限额、可清理的分区或容器 `emptyDir`，不要和系统根分区混用。
 
 ## 必要工具
 
-Ubuntu/Debian 示例：
+工具安装在 Preview Worker 的 Linux 容器镜像中，Dockerfile 构建阶段应使用发行版包管理器安装并立即验证：
 
 ```bash
 sudo apt-get update
@@ -21,7 +22,14 @@ soffice --version
 pdftoppm -v
 ```
 
-Windows 开发机可安装 LibreOffice 和 Poppler，并把 `soffice`、`pdftoppm` 所在目录加入 `PATH`。本机缺少工具时，Office/PDF 预览会按配置标记为 `unsupported` 并记录明确原因。
+Windows 宿主机只需要 Docker Desktop，不要求额外安装 LibreOffice 或 Poppler。工具版本通过 PowerShell 在容器内检查：
+
+```powershell
+docker compose --env-file .env.windows -f compose.windows.yml exec worker-preview soffice --version
+docker compose --env-file .env.windows -f compose.windows.yml exec worker-preview pdftoppm -v
+```
+
+镜像内缺少工具时，Office/PDF 预览会按配置标记为 `unsupported` 并记录明确原因。
 
 ## 环境变量
 
@@ -41,100 +49,50 @@ DRIVE_PREVIEW_TASK_RATE_LIMIT=30/m
 
 `DRIVE_PREVIEW_COMMAND_TIMEOUT_SECONDS` 限制单次外部命令；Celery 软/硬超时限制整个 `preview.dispatch_outbox` 任务；速率限制用于削峰，不能替代 CPU、内存和临时磁盘配额。
 
-## systemd 示例
+## Windows Docker Compose 服务
 
-适用于非 Kubernetes 单机或小规模部署。示例只展示 Worker，API 和 Nginx 应独立服务化。
-
-```ini
-[Unit]
-Description=Enterprise Drive preview worker
-After=network.target redis.service
-
-[Service]
-User=drive
-Group=drive
-WorkingDirectory=/opt/enterprise-drive/backend
-EnvironmentFile=/etc/enterprise-drive/backend.env
-Environment=TMPDIR=/var/lib/enterprise-drive/preview-tmp
-ExecStart=/usr/local/bin/uv run celery -A app.infrastructure.queue.celery_app worker -Q preview -l info --concurrency=1 --max-tasks-per-child=20
-Restart=on-failure
-RestartSec=5s
-NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/var/lib/enterprise-drive/preview-tmp
-MemoryMax=2G
-CPUQuota=200%
-TasksMax=256
-TimeoutStopSec=90
-
-[Install]
-WantedBy=multi-user.target
-```
-
-建议为 `/var/lib/enterprise-drive/preview-tmp` 单独挂载或设置磁盘配额，例如 4 到 8 GiB。部署脚本应定期清理陈旧临时目录；正常任务会使用临时目录并在进程内释放。
-
-## Kubernetes 示例
-
-预览 Worker 应单独 Deployment，不和 API 混跑。
+根 `compose.windows.yml` 中的 `worker-preview` 是正式配置来源。服务至少满足：
 
 ```yaml
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: worker-preview
-spec:
-  replicas: 1
-  selector:
-    matchLabels:
-      app: worker-preview
-  template:
-    metadata:
-      labels:
-        app: worker-preview
-    spec:
-      containers:
-        - name: worker
-          image: enterprise-drive-backend:latest
-          command:
-            - uv
-            - run
-            - celery
-            - -A
-            - app.infrastructure.queue.celery_app
-            - worker
-            - -Q
-            - preview
-            - -l
-            - info
-            - --concurrency=1
-            - --max-tasks-per-child=20
-          envFrom:
-            - secretRef:
-                name: enterprise-drive-backend-env
-          env:
-            - name: TMPDIR
-              value: /tmp/preview
-          resources:
-            requests:
-              cpu: "500m"
-              memory: "1Gi"
-              ephemeral-storage: "2Gi"
-            limits:
-              cpu: "2"
-              memory: "2Gi"
-              ephemeral-storage: "8Gi"
-          volumeMounts:
-            - name: preview-tmp
-              mountPath: /tmp/preview
-      volumes:
-        - name: preview-tmp
-          emptyDir:
-            sizeLimit: 8Gi
+worker-preview:
+  image: enterprise-drive-preview:VERSION
+  command:
+    - celery
+    - -A
+    - app.infrastructure.queue.celery_app
+    - worker
+    - --queues=preview
+    - --hostname=preview@%h
+    - --loglevel=INFO
+    - "--concurrency=${PREVIEW_WORKER_CONCURRENCY:-1}"
+    - "--max-tasks-per-child=${PREVIEW_WORKER_MAX_TASKS_PER_CHILD:-20}"
+  env_file:
+    - .env.windows
+  environment:
+    TMPDIR: /tmp/enterprise-drive
+  cpus: 2.0
+  mem_limit: 3g
+  tmpfs:
+    - /tmp/enterprise-drive:size=1073741824
+  restart: unless-stopped
 ```
 
-容器镜像必须包含 LibreOffice、Poppler 和常用字体；如果这些工具由宿主机提供，则不要把该 Pod 调度到缺少工具的节点。
+这是约束示例，最终字段以根 `compose.windows.yml` 为准。Docker Compose 非 Swarm 场景应使用 `cpus`、`mem_limit` 等实际生效的服务级限制，不要只写可能被忽略的 Swarm `deploy.resources`。
+
+资源基线：
+
+- CPU 上限建议 `2.0`，并发默认 `1`。
+- 默认内存上限为 `3 GiB`。
+- 默认临时目录上限为 `1 GiB`，可通过 `PREVIEW_TMPFS_SIZE` 调整；不得复用 PostgreSQL、MinIO 或 OpenSearch 数据卷。
+- `--max-tasks-per-child=20` 用于回收 LibreOffice/Poppler 长时间运行产生的内存碎片。
+- Preview Worker 只消费 `preview` 队列；`audit`、`permission`、`search`、`maintenance` 使用其他 Worker。
+- 外部命令超时、Celery 软/硬超时和速率限制必须同时启用。
+
+Docker Desktop 设置中应为整个项目预留至少 4 个 CPU、8 GiB 内存和足够磁盘；实际值根据 OpenSearch、预览并发和文件体量调整。临时目录和预览产物清理由任务生命周期与维护任务共同保证。
+
+## 未来可选部署
+
+Kubernetes Deployment、Linux systemd 服务可在后续迁移到其他宿主平台时补充。它们不是当前 Windows 11 正式部署路径，也不得替代根 `compose.windows.yml` 的交付和验证。
 
 ## 监控与告警
 
@@ -158,14 +116,17 @@ orphan_object_cleanup_total{status="scanned|skipped|planned|cleaned|failed"}
 
 发布前检查：
 
-```bash
+```powershell
+Push-Location backend
 uv run ruff check .
 uv run ruff format --check .
 uv run mypy app
 uv run pytest
 uv run alembic upgrade head --sql
-soffice --version
-pdftoppm -v
+Pop-Location
+docker compose --env-file .env.windows -f compose.windows.yml config --quiet
+docker compose --env-file .env.windows -f compose.windows.yml exec worker-preview soffice --version
+docker compose --env-file .env.windows -f compose.windows.yml exec worker-preview pdftoppm -v
 ```
 
-如果当前环境无法安装 LibreOffice 或 Poppler，需要在 `PROJECT_PROGRESS.md` 记录验证边界，并保证缺失工具场景已有测试覆盖。
+如果当前环境暂时不能执行 Docker Desktop 实测，需要在 `PROJECT_PROGRESS.md` 记录验证边界，并保证缺失工具场景已有测试覆盖；最终发布前必须在实际 Preview Worker 容器内完成工具版本、转码、资源限制和任务重试验证。

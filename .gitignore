@@ -17,6 +17,7 @@ htmlcov/
 .env
 .env.*
 !.env.example
+!.env.windows.example
 *.pem
 *.key
 *.crt

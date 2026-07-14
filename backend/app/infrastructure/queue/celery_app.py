@@ -3,6 +3,7 @@ from __future__ import annotations
 from celery import Celery  # type: ignore[import-untyped]
 
 from app.core.config import Settings, get_settings
+from app.infrastructure.queue.schedule import build_beat_schedule
 
 settings = get_settings()
 
@@ -48,6 +49,7 @@ celery_app.conf.update(
     result_serializer="json",
     accept_content=["json"],
     task_annotations=_task_annotations(settings),
+    beat_schedule=build_beat_schedule(settings),
     timezone="UTC",
     enable_utc=True,
     task_acks_late=True,

@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "企业网盘"
-    app_version: str = "0.1.0"
+    app_version: str = "0.2.0"
     environment: Literal["local", "test", "staging", "production"] = "local"
     debug: bool = False
     app_port: int = 18080
@@ -36,8 +36,13 @@ class Settings(BaseSettings):
     database_url: str = (
         "postgresql+asyncpg://drive:drive_dev_password@127.0.0.1:15432/enterprise_drive"
     )
+    database_pool_mode: Literal["queue", "null"] = "queue"
+    database_pool_size: int = Field(default=5, ge=1)
+    database_max_overflow: int = Field(default=5, ge=0)
+    database_pool_timeout_seconds: int = Field(default=10, ge=1)
     redis_url: str = "redis://127.0.0.1:16379/0"
     s3_endpoint_url: str = "http://127.0.0.1:19000"
+    s3_public_endpoint_url: str | None = None
     s3_bucket: str = "enterprise-drive-local"
     s3_access_key_id: str = "drive-dev"
     s3_secret_access_key: str = "drive-dev-password"
@@ -48,6 +53,12 @@ class Settings(BaseSettings):
     celery_result_backend: str = "redis://127.0.0.1:16379/2"
     outbox_batch_size: int = 100
     outbox_max_retries: int = 8
+    outbox_dispatch_interval_seconds: int = Field(default=5, ge=1)
+    maintenance_task_batch_size: int = Field(default=100, ge=1)
+    upload_cleanup_interval_seconds: int = Field(default=300, ge=1)
+    blob_cleanup_interval_seconds: int = Field(default=3600, ge=1)
+    orphan_object_scan_interval_seconds: int = Field(default=86400, ge=1)
+    quota_reconciliation_interval_seconds: int = Field(default=86400, ge=1)
     upload_session_ttl_minutes: int = 1440
     upload_part_size_bytes: int = 8 * 1024 * 1024
     upload_presign_expires_seconds: int = 900
