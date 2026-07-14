@@ -51,6 +51,7 @@
 - 自签名证书卷没有 Certbot renewal lineage；真实 Docker 运行已确认 `tls-renew` 在续期前明确拒绝该状态，不再把手工证书误记为“无续期任务后热重载”。Windows fake Docker 流程验证了成功路径固定使用 `--cert-name enterprise-drive`、renew 前允许不足 24 小时证书进入 Certbot、renew 后执行严格证书检查和 Nginx 热重载；实际受信证书续期仍待生产 lineage 演练。
 - 已真实创建临时 Windows 计划任务并用不同大小写名称执行幂等删除；再次创建后，`down -Tls -Volumes` 成功清理全部业务/TLS volumes、containers、networks、标准端口和对应计划任务。
 - 已解析 `.github/workflows/backend-ci.yml`，并在 Windows PowerShell 5.1 复现 TLS Compose、证书生成、Nginx 模板和 fake Docker guard；覆盖 tls-init 签发失败恢复、renewal lineage、renew 前后有效期门禁、MinIO CORS、loopback bind、数据库密码不一致、危险证书名在 shell 检查前拒绝和续期 cert name。已检查全部改动文件为 UTF-8 无 BOM、Markdown fence 成对、`manage.ps1` 保持 ASCII，`git diff --check` 通过；测试 containers/volumes/networks/tasks 和 `80/443` 均无残留。
+- GitHub Actions `backend-ci` run `29359205421` 已通过：Linux backend job 完成依赖同步、MinIO 集成、Ruff、Mypy、Pytest、两套 Compose/Nginx 校验和 runtime/preview 镜像构建，Windows deployment job 完成 PowerShell parser 与全部 TLS guard 验证。
 
 ### 涉及文件
 
