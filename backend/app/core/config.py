@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "企业网盘"
-    app_version: str = "0.2.0"
+    app_version: str = "0.3.0"
     environment: Literal["local", "test", "staging", "production"] = "local"
     debug: bool = False
     app_port: int = 18080

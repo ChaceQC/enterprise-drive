@@ -31,7 +31,17 @@ Copy-Item .env.windows.example .env.windows
 .\deploy\windows\manage.ps1 status
 ```
 
-正式环境中 API/Worker 使用 `http://minio:9000` 等 Compose 内部服务端点；默认浏览器预签名地址为 gateway 提供的 `http://localhost:19000`。公网 TLS 配置完成后可替换为 `https://storage.example.com`，外部 S3 端点不能使用 `/s3` 等路径前缀。默认 API 入口为 gateway 提供的 `http://localhost:18080`；公网 TLS 配置完成后可使用 `https://drive.example.com` 并按 Host 分流。当前 Nginx 工件尚未包含证书挂载或 TLS server block。Preview Worker 的 CPU、内存和临时磁盘配额请参考 `../docs/deployment-preview-worker.md`。
+正式环境中 API/Worker 使用 `http://minio:9000` 等 Compose 内部服务端点；默认浏览器预签名地址为 gateway 提供的 `http://localhost:19000`，默认 API 入口为 `http://localhost:18080`。公网模式把真实 `.env.windows` 中的 API/存储域名、`DRIVE_S3_PUBLIC_ENDPOINT_URL`、`DRIVE_CORS_ORIGINS`、`MINIO_CORS_ALLOWED_ORIGIN`、Trusted Hosts、Secure Cookie 和 Certbot 邮箱改为生产值后，可使用以下命令完成 ACME bootstrap、证书签发和 TLS gateway 启动：
+
+```powershell
+.\deploy\windows\manage.ps1 config -Tls -Quiet
+.\deploy\windows\manage.ps1 tls-init -Tls
+.\deploy\windows\manage.ps1 up -Tls -Build
+.\deploy\windows\manage.ps1 tls-register-renewal -Tls
+.\deploy\windows\manage.ps1 status -Tls
+```
+
+公网入口使用 `https://drive.example.com` 和 `https://storage.example.com`，gateway 在 `80/443` 按 Host 分流并把 HTTP 重定向到 HTTPS。外部 S3 端点不能使用 `/s3` 等路径前缀。生产证书签发和续期要求两个域名解析到当前 Windows 宿主、外部 TCP 80/443 可达，并且 Docker Desktop 运行；`tls-renew` 和计划任务注册只接受 `tls-init` 建立的 Certbot renewal lineage，单独挂载的手工证书不具备该续期状态。Preview Worker 的 CPU、内存和临时磁盘配额请参考 `../docs/deployment-preview-worker.md`。
 
 正式 Compose 中 API 使用受控 SQLAlchemy QueuePool；各 Celery Worker 会覆盖 `DRIVE_DATABASE_POOL_MODE=null`。这是因为当前同步 Celery task 使用 `asyncio.run()` 执行异步服务，不能跨任务事件循环复用 asyncpg 连接池。
 

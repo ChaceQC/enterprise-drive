@@ -1,5 +1,77 @@
 # PROJECT_PROGRESS.md
 
+## 2026-07-15
+
+### 已完成
+
+- 为同一个 `gateway` service 增加公网 TLS 模式：`manage.ps1 -Tls` 会把宿主入口切换为 `80/443`，使用 `deploy/windows/nginx/tls.conf.template` 按 API/存储双域名 Host 分流，并保留默认本机 HTTP `18080/19000` 模式。
+- 新增 `deploy/windows/nginx/acme-bootstrap.conf.template`，首次签发期间只开放 `/gateway-healthz` 和 `/.well-known/acme-challenge/`，其他请求返回 `503`；签发成功后强制重建 gateway 并切换到 TLS 模板。标准端口集成发现已配置 Host 的 `/gateway-healthz` 被维护页覆盖后，已为 bootstrap 的域名 server block 补齐显式健康端点。
+- 在正式 Compose 中增加 `tls-certificates`、`tls-acme-webroot`、`tls-certbot-work`、`tls-certbot-logs` named volumes 和 `tls-tools` profile 下的一次性 Certbot 服务；Certbot 不发布宿主端口，证书私钥只由 gateway 只读挂载。
+- 公网 Nginx 模板已启用 TLS 1.2/1.3、HTTP/2、HTTP `308` 跳转、HSTS、未知 Host 拒绝、安全响应头、API WebSocket 代理和 MinIO 原始 Host/请求体保留。
+- 扩展 `deploy/windows/manage.ps1`：新增 TLS 配置校验、`tls-init`、`tls-renew`、`tls-certificates`、Windows 计划任务注册/精确幂等删除、续期后的 `nginx -t` 与热重载；`down -Volumes` 成功清理 Certbot profile 全部卷后再删除对应续期任务。续期前的证书检查允许即将到期或已过期证书进入 Certbot，避免被 24 小时有效期门禁提前阻断，续期后再执行严格有效期检查；续期和计划任务注册还会拒绝缺少 Certbot renewal lineage 的手工/自签名证书。首次签发改用同一 gateway service 的临时 one-off bootstrap 容器，已有 gateway 停止但保留，签发失败会删除临时容器并恢复原入口。
+- 修复公网 Trusted Hosts 模式下 API 容器健康检查使用 `127.0.0.1` Host 导致 `/readyz` 返回 400 的问题；healthcheck 现在访问回环地址但显式携带 `DRIVE_SERVER_NAME` Host。
+- 公网配置校验新增非回环 IPv4 bind、数据库/Redis URL 密码一致性和 MinIO CORS 对齐门禁：`MINIO_CORS_ALLOWED_ORIGIN` 必须与 `DRIVE_CORS_ORIGINS` 精确一致且全部为 HTTPS origin，避免 API CORS 已切换 HTTPS 但预签名 PUT/GET 仍被 MinIO 的本机 HTTP origin 拒绝。
+- CI 新增公网 TLS Compose 渲染、ACME/TLS Nginx 模板语法验证和 Windows PowerShell 5.1 `manage.ps1` parser/guard job；Nginx 验证使用临时自签名双域名证书，不依赖真实公网证书。
+- 同步更新 AGENT、README、执行计划、完整技术计划书和 Windows Docker 部署文档中的 TLS、续期、健康检查、版本与验收规则。
+
+### 版本影响
+
+- 本轮新增公网 TLS/ACME/续期能力，属于向后兼容的部署功能扩展，项目版本从 `0.2.0` 提升到 `0.3.0`。
+- `backend/pyproject.toml`、`backend/uv.lock`、应用 Settings、`/healthz` 测试和相关文档版本已同步为 `0.3.0`。
+- 数据库结构、API 契约、对象存储 key 和 Worker payload 未变化；正式发布 tag 在后续合并 `main` 时创建。
+
+### 进行中
+
+- Windows Docker 本机 HTTP 和公网 TLS 代码/本机自签名闭环已完成，标准宿主 `80/443` 已在隔离完整编排中实测；真实公网 DNS、受信证书签发、外部网络双域名 HTTPS、浏览器信任链和 Certbot renewal lineage 实际续期仍需在生产环境验收。
+- 备份与恢复当前只有上线前原则和操作检查清单，尚未形成可执行流程；后续仍需补 PowerShell 自动化脚本、加密与校验、同一业务时间点编排和隔离环境恢复演练。
+
+### 阻塞与风险
+
+- 当前机器没有可用于本项目的真实公网双域名与受信证书，因此 ACME 生产签发、外部网络到宿主 `80/443` 和浏览器信任链尚未实测，仍是上线前环境验收项；本机标准端口映射本身已通过。
+- Windows 计划任务续期依赖运行 Docker Desktop 的同一用户和可用的 Linux engine；宿主重启、用户会话和 Docker Desktop 自启动策略必须在生产机演练。
+- `MINIO_IMAGE`、`MINIO_MC_IMAGE` 示例仍使用 `latest`，正式发布前应固定已验证 tag 或 digest。
+
+### 下一步
+
+- 在真实生产 DNS/网络环境执行 `tls-init -Tls`、注册每日续期任务，并实测 API/存储双域名的外部 `80/443`、受信证书链、HTTP 跳转和预签名 PUT/GET。
+- 增加 PostgreSQL/MinIO/证书卷备份与恢复 PowerShell 自动化，并在隔离 Compose project 中完成同一业务时间点恢复演练。
+- 固定 MinIO/MinIO Client 镜像 tag 或 digest，补镜像 SBOM 与漏洞扫描。
+- 完成上线治理后，再恢复推进 MinIO multipart 稳定封装、高密级下载代理、多维配额和治理任务告警等业务任务。
+
+### 验证
+
+- 已运行 `uv sync --frozen --all-extras --dev`、`uv lock --check`、Ruff、Mypy、Pytest、Alembic SQL 和 OpenAPI 生成；结果为 `186 files already formatted`、`140 source files` 无类型问题、`148 passed, 3 skipped`、OpenAPI `version=0.3.0` 且 29 条 path，锁文件和迁移链通过。
+- 已运行本机 HTTP 与公网 TLS 两套 `docker compose config --quiet`，并通过 Windows PowerShell 5.1 parser 校验 `manage.ps1` 和 workflow 中的完整 PowerShell step；TLS 参数校验覆盖双域名格式、非回环 IPv4 bind、HTTPS S3 根 URL、Secure Cookie、Trusted Hosts、API/MinIO HTTPS CORS、生产 secret、数据库/Redis URL 密码一致性及保留字符百分号编码正例。
+- 已使用 `certbot/certbot:v5.6.0` 生成临时双域名自签名证书，在 `nginx:1.27-alpine` 中验证 ACME bootstrap 和 TLS 模板 `nginx -t`；本机运行验证 HTTP 返回 `308`、API/存储两个 HTTPS Host 的 `/gateway-healthz` 均返回 200，ACME challenge 可读取共享 webroot，已配置 Host 的 bootstrap `/gateway-healthz` 返回 200，非 challenge 请求返回 503。
+- 已在隔离 Compose project `enterprise-drive-tls-integration` 中真实构建 `runtime`/`preview` 镜像并启动完整正式编排；API、gateway、5 类 Worker、beat、PostgreSQL、Redis、MinIO、OpenSearch 全部 healthy，migration/seed/minio-init 均退出 0，`/healthz` 返回 `version=0.3.0`，`/readyz` 返回数据库 ready。
+- 隔离 TLS 编排首次启动暴露 API healthcheck 的 Host 不在 Trusted Hosts，导致 `/readyz` 400；修复为显式使用 `DRIVE_SERVER_NAME` 后重新启动通过，形成公网 Trusted Hosts 回归验证。
+- 已通过 `storage.test` TLS Host 使用 MinIO Client 的 S3v4 签名完成对象 pipe/stat/cat/remove，确认 gateway 保留存储 Host、请求方法、查询参数和请求体；只有 gateway 发布测试宿主端口 `18083/18444`。
+- 已在隔离 Compose project `enterprise-drive-tls-standard-0715` 使用标准宿主 `80/443` 再次启动完整正式编排；API、gateway、5 类 Worker、beat、PostgreSQL、Redis、MinIO、OpenSearch 全部 healthy 且 restart count 为 0，migration/seed/minio-init 退出 0。实测 HTTP `308`、`/healthz` 版本 `0.3.0`、数据库 `/readyz`、HSTS、MinIO CORS 204、S3v4 pipe/stat/cat/remove、未知 Host 空连接拒绝，以及只有 gateway 发布宿主端口。
+- 已真实停止但保留标准端口 TLS gateway，用同一 service 启动 one-off bootstrap；确认已配置 Host 的 `/gateway-healthz` 返回 200、普通路径返回 503、原 gateway 容器保持 exited，删除临时容器后原 gateway 恢复 healthy 和 HTTPS 服务。
+- 自签名证书卷没有 Certbot renewal lineage；真实 Docker 运行已确认 `tls-renew` 在续期前明确拒绝该状态，不再把手工证书误记为“无续期任务后热重载”。Windows fake Docker 流程验证了成功路径固定使用 `--cert-name enterprise-drive`、renew 前允许不足 24 小时证书进入 Certbot、renew 后执行严格证书检查和 Nginx 热重载；实际受信证书续期仍待生产 lineage 演练。
+- 已真实创建临时 Windows 计划任务并用不同大小写名称执行幂等删除；再次创建后，`down -Tls -Volumes` 成功清理全部业务/TLS volumes、containers、networks、标准端口和对应计划任务。
+- 已解析 `.github/workflows/backend-ci.yml`，并在 Windows PowerShell 5.1 复现 TLS Compose、证书生成、Nginx 模板和 fake Docker guard；覆盖 tls-init 签发失败恢复、renewal lineage、renew 前后有效期门禁、MinIO CORS、loopback bind、数据库密码不一致、危险证书名在 shell 检查前拒绝和续期 cert name。已检查全部改动文件为 UTF-8 无 BOM、Markdown fence 成对、`manage.ps1` 保持 ASCII，`git diff --check` 通过；测试 containers/volumes/networks/tasks 和 `80/443` 均无残留。
+
+### 涉及文件
+
+- `.env.windows.example`
+- `.github/workflows/backend-ci.yml`
+- `AGENT.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `README.md`
+- `backend/README.md`
+- `backend/app/core/config.py`
+- `backend/pyproject.toml`
+- `backend/tests/test_app.py`
+- `backend/uv.lock`
+- `compose.windows.yml`
+- `deploy/windows/manage.ps1`
+- `deploy/windows/nginx/acme-bootstrap.conf.template`
+- `deploy/windows/nginx/tls.conf.template`
+- `docs/deployment-windows-docker.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-07-14
 
 ### 已完成
@@ -23,7 +95,7 @@
 ### 进行中
 
 - Windows Docker 本机 HTTP 部署闭环已完成；公网受信证书、TLS server block、HTTP 到 HTTPS 跳转、证书续期和双域名 HTTPS 实测仍在进行中。
-- 备份与恢复当前已形成文档化流程，后续仍需补 PowerShell 自动化脚本和隔离环境恢复演练。
+- 备份与恢复当前只有原则和检查清单，尚未形成可执行流程；后续仍需补 PowerShell 自动化脚本和隔离环境恢复演练。
 
 ### 阻塞与风险
 

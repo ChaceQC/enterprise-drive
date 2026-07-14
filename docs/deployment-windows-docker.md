@@ -1,8 +1,8 @@
 # Windows 11 Docker 正式部署说明
 
-> 适用项目版本：`v0.2.0`
+> 适用项目版本：`v0.3.0`
 >
-> 当前可验证基线：Windows 本机 HTTP `18080/19000`；公网 TLS 为后续上线任务。
+> 当前代码基线：Windows 本机 HTTP `18080/19000` 与公网 ACME/TLS `80/443` 双模式；真实受信证书签发和双域名 HTTPS 验收需要生产 DNS/网络环境。
 
 ## 1. 部署目标
 
@@ -14,6 +14,9 @@
 - `.env.windows.example`：正式环境变量模板。
 - `.env.windows`：实际环境配置，不提交 Git。
 - `deploy/windows/manage.ps1`：Windows PowerShell 管理入口。
+- `deploy/windows/nginx/default.conf.template`：本机 HTTP gateway。
+- `deploy/windows/nginx/acme-bootstrap.conf.template`：首次证书签发期间只开放健康检查和 HTTP-01 challenge。
+- `deploy/windows/nginx/tls.conf.template`：公网 TLS、HTTP 跳转和双域名 Host 分流。
 - `backend/docker-compose.yml`：只用于本地依赖开发，不参与正式部署。
 
 Kubernetes、Linux systemd 可以作为未来迁移方案，但不属于当前默认部署和验收范围。
@@ -47,7 +50,8 @@ docker info --format '{{.OSType}}'
 
 | 服务 | 职责 | 宿主端口 |
 | --- | --- | --- |
-| `gateway` | Nginx 入口、API/存储分流、Range、安全响应头；公网阶段补 TLS | 唯一允许发布端口 |
+| `gateway` | Nginx 入口、API/存储分流、Range、安全响应头、ACME challenge、TLS 与 HTTP 跳转 | 唯一允许发布端口 |
+| `certbot` | `tls-tools` profile 下的一次性证书签发、检查和续期工具 | 不发布 |
 | `api` | FastAPI API | 不发布 |
 | `migration` | 一次性 Alembic migration | 不发布 |
 | `seed` | migration 后一次性创建或校准初始管理员 | 不发布 |
@@ -77,7 +81,17 @@ docker info --format '{{.OSType}}'
 - API：`https://drive.example.com`
 - S3 外部端点：`https://storage.example.com`
 
-当前 Nginx 工件只实现 HTTP 本机入口和可配置 Host/端口，尚未包含证书挂载或 TLS server block。公网发布前必须先补充受信证书、TLS server 配置、HTTP 到 HTTPS 跳转和证书续期方案，再让 gateway 发布 `80/443`，按 Host 分流 API 与存储流量，并在转发到 MinIO 时保留原始 Host。
+公网 TLS 工件已经包含：
+
+- gateway 独占宿主 `80/443`。
+- ACME HTTP-01 webroot bootstrap；Certbot 本身不发布宿主端口。
+- 证书、ACME webroot、Certbot work/log 独立 named volumes。
+- TLS 1.2/1.3、HTTP/2、HTTP `308` 到 HTTPS 跳转。
+- API/存储双域名 Host 分流、未知 Host 拒绝。
+- 证书续期后的 `nginx -t` 和热重载。
+- Windows 计划任务注册/删除命令。
+
+代码侧已完成静态和本机自签名证书验证。正式公网发布仍必须让两个真实域名解析到当前 Windows 宿主，开放外部 TCP 80/443，签发受信证书，并完成真实预签名 PUT/GET、Cookie、CORS 和续期演练。
 
 ```text
 Windows 11
@@ -115,7 +129,7 @@ Copy-Item .env.windows.example .env.windows
 - Trusted Hosts。
 - API 外部地址。
 - S3 外部地址。
-- 公网 HTTPS 阶段所需的 TLS 域名、证书挂载和续期配置；当前基线尚未实现。
+- 公网 HTTPS 的 API/存储域名、Certbot 邮箱、证书名、HSTS、API/MinIO CORS、Trusted Hosts、Secure Cookie 和外部 S3 HTTPS URL。
 
 容器内连接使用 Compose 服务 DNS，例如：
 
@@ -141,7 +155,7 @@ DRIVE_S3_PUBLIC_ENDPOINT_URL=http://localhost:19000
 
 写入 PostgreSQL 或 Redis URL 的密码若包含 `@`、`:`、`/`、`#`、`?` 等保留字符，必须先进行 URL 百分号编码，并保证独立的 `POSTGRES_PASSWORD`、`REDIS_PASSWORD` 与连接 URL 中的解码后密码一致。
 
-公网 TLS 配置完成后把外部端点改为：
+公网 TLS 模式把外部端点改为：
 
 ```dotenv
 DRIVE_GATEWAY_BIND=0.0.0.0
@@ -149,16 +163,26 @@ DRIVE_STORAGE_GATEWAY_BIND=0.0.0.0
 DRIVE_SERVER_NAME=drive.example.com
 DRIVE_STORAGE_SERVER_NAME=storage.example.com
 DRIVE_S3_PUBLIC_ENDPOINT_URL=https://storage.example.com
+DRIVE_SESSION_COOKIE_SECURE=true
+DRIVE_CORS_ORIGINS=["https://drive.example.com"]
+MINIO_CORS_ALLOWED_ORIGIN=https://drive.example.com
+DRIVE_TRUSTED_HOSTS=["drive.example.com","storage.example.com"]
+DRIVE_TLS_GATEWAY_BIND=0.0.0.0
+DRIVE_TLS_HTTP_PORT=80
+DRIVE_TLS_HTTPS_PORT=443
+DRIVE_TLS_CERT_NAME=enterprise-drive
+DRIVE_TLS_HSTS_MAX_AGE=31536000
+CERTBOT_EMAIL=ops@example.com
 ```
 
-以上变量只表达绑定地址、Host 和外部 URL，不能单独完成公网 HTTPS。公网阶段还需要受控的 Compose/gateway 配置调整：移除本机独立 `19000` 映射，使用同一 gateway 的 Host 分流入口，挂载受信证书并新增 TLS server block，再映射 `80/443` 和执行 HTTPS 实测。
+`manage.ps1 -Tls` 会用 `DRIVE_TLS_GATEWAY_BIND`、`DRIVE_TLS_HTTP_PORT`、`DRIVE_TLS_HTTPS_PORT` 覆盖本机端口，并切换到 ACME bootstrap 或 TLS 模板。公网 bind 只接受 `0.0.0.0` 或其他非回环 IPv4 地址；脚本不负责验证 DNS 解析和外部路由。不要手工同时启动本机 HTTP 和公网 TLS 两套 gateway；两种模式复用同一个 Compose service 和项目 named volumes。
 
 ### S3 内外端点分离
 
 - `DRIVE_S3_ENDPOINT_URL` 只供 API/Worker 在 Compose 网络内访问 MinIO。
 - `DRIVE_S3_PUBLIC_ENDPOINT_URL` 用于生成浏览器可访问的预签名 URL。
 - 默认外部端点是 `http://localhost:19000`。
-- 公网 TLS 配置完成后使用独立 Host，例如 `https://storage.example.com`。
+- 公网 TLS 模式使用独立 Host，例如 `https://storage.example.com`。
 - 外部端点不使用 `/s3` 等 base path。MinIO client 和 SigV4 会把 Host、路径、查询参数纳入签名，路径前缀重写会导致签名不匹配。
 - gateway 转发存储请求时必须保留原始 Host、查询字符串、HTTP 方法和请求体。
 - MinIO Console 不对宿主机发布；运维应通过容器内 CLI 或受控管理流程进行。
@@ -177,12 +201,82 @@ DRIVE_S3_PUBLIC_ENDPOINT_URL=https://storage.example.com
 | --- | --- |
 | `config [-Quiet]` | 使用示例或实际环境文件校验 Compose 渲染结果 |
 | `up [-Build]` | 启动服务；`-Build` 会先构建镜像，migration、MinIO 初始化和 seed 由 Compose 依赖链执行 |
+| `config -Tls [-Quiet]` | 校验公网域名格式、HTTPS S3 URL、Secure Cookie、API/MinIO CORS、Trusted Hosts 和 TLS Compose 渲染 |
+| `up -Tls [-Build]` | 使用已有证书启动或更新公网 TLS gateway |
 | `status` | 查看全部容器与健康状态 |
 | `logs [-Service NAME] [-Tail N]` | 查看全部或指定服务日志 |
+| `tls-init -Tls [-TlsEmail EMAIL] [-TlsStaging]` | 用 ACME webroot bootstrap 首次签发双域名证书并切换到 TLS gateway |
+| `tls-renew -Tls [-ForceRenewal]` | 执行 Certbot 续期，随后校验并热重载 Nginx |
+| `tls-certificates -Tls` | 查看 Certbot 管理的证书和到期时间 |
+| `tls-register-renewal -Tls [-TlsRenewalAt HH:mm]` | 确认 Certbot renewal lineage 后，为当前 Windows 用户注册每日续期计划任务 |
+| `tls-unregister-renewal [-TlsRenewalTaskName NAME]` | 幂等删除续期计划任务，不依赖环境文件或 Docker CLI |
 | `down` | 停止服务并保留 named volumes |
-| `down -Volumes` | 显式销毁 named volumes，仅限确认备份后的环境清理 |
+| `down -Volumes` | 显式销毁全部业务/TLS named volumes，并删除同名续期计划任务；仅限确认备份后的环境清理 |
 
-脚本默认 `down` 不删除 volumes；`-Volumes` 是显式破坏性开关。`.env.windows`、证书私钥或备份内容不得写入 Git。
+脚本默认 `down` 不删除 volumes；`-Volumes` 是显式破坏性开关，并会删除 PostgreSQL、MinIO、OpenSearch、Redis、TLS/Certbot volumes 和对应续期计划任务。`.env.windows`、证书私钥或备份内容不得写入 Git。
+
+### 首次公网证书签发
+
+前置条件：
+
+1. `DRIVE_SERVER_NAME` 与 `DRIVE_STORAGE_SERVER_NAME` 是两个不同的公网 DNS 名称。
+2. 两个名称都解析到当前 Windows 宿主的公网地址。
+3. 路由器、云防火墙、Windows 防火墙允许外部 TCP 80/443 到 gateway。
+4. 真实 `.env.windows` 已切换 HTTPS S3 URL、CORS、Trusted Hosts 和 Secure Cookie。
+5. Docker Desktop Linux engine 正在运行，宿主没有其他程序占用 80/443。
+
+公网管理入口固定要求 `DRIVE_TLS_HTTP_PORT=80`、`DRIVE_TLS_HTTPS_PORT=443`；非标准端口只用于底层 Compose/Nginx 隔离测试，不属于 `manage.ps1 -Tls` 的正式支持范围。
+
+先做配置校验：
+
+```powershell
+.\deploy\windows\manage.ps1 config -Tls -EnvFile .env.windows -Quiet
+```
+
+公网校验只检查域名语法，DNS 解析和外部可达性必须按前置条件单独验证。校验会拒绝回环/非 IPv4 gateway bind、`change-me` 示例密钥、过短 secret、关键 secret/连接 URL 中的 `${...}` 间接插值、数据库或 Redis URL 与独立密码不一致、含通配符的 Trusted Hosts、HTTP API CORS origin、与 API CORS 不完全一致或包含非 HTTPS 项的 MinIO CORS、带凭据/非 443 端口的 S3 URL 和不安全的证书名。URL 中的密码包含保留字符时仍须百分号编码，脚本会解码后与 `POSTGRES_PASSWORD`、`REDIS_PASSWORD` 比较。`tls-init` 还会拒绝 `example.com`、`.invalid`、`.test` 等示例邮箱域名。
+
+可选先使用 ACME staging 验证 challenge 链路。staging 会使用独立的 `<DRIVE_TLS_CERT_NAME>-staging` 证书名，把 HSTS `max-age` 强制为 0，且浏览器不会信任该证书：
+
+```powershell
+.\deploy\windows\manage.ps1 tls-init -Tls -TlsStaging -EnvFile .env.windows
+```
+
+生产签发：
+
+```powershell
+.\deploy\windows\manage.ps1 tls-init -Tls -EnvFile .env.windows
+.\deploy\windows\manage.ps1 up -Tls -Build -EnvFile .env.windows
+.\deploy\windows\manage.ps1 tls-certificates -Tls -EnvFile .env.windows
+```
+
+`tls-init` 会记录已有 gateway 是否正在运行并先停止但保留其容器，再用同一 `gateway` service 启动临时 one-off ACME bootstrap 容器。bootstrap 期间只有 `/gateway-healthz` 和 `/.well-known/acme-challenge/` 可用，其他请求返回 `503`；证书签发与 TLS 模板 `nginx -t` 成功后，脚本删除临时容器并强制重建正式 gateway。签发、SAN 或模板检查失败时，脚本删除临时 bootstrap 并重新启动原 gateway，避免扩域或重签失败后中断已有公网入口。`tls-init` 只保证签发所需依赖和 gateway 就绪，首次正式部署随后必须执行 `up -Tls -Build`，确保 Preview 镜像、全部 Worker 和 Celery beat 一并启动。
+
+### 自动续期
+
+手工验证一次续期命令、现有 Certbot lineage 检查和热重载：
+
+```powershell
+.\deploy\windows\manage.ps1 tls-renew -Tls -EnvFile .env.windows
+```
+
+普通命令在证书未进入续期窗口时不会实际签发新证书；需要验证真实签发时，只在受控演练窗口增加 `-ForceRenewal`。续期前脚本允许即将到期或已过期的现有证书进入 Certbot，但仍要求文件可读、SAN 覆盖两个配置域名，并存在 `/etc/letsencrypt/renewal/<DRIVE_TLS_CERT_NAME>.conf`。Certbot 完成后会重新要求证书至少还有 24 小时有效期，再执行 `nginx -t` 和热重载。手工复制或自签名到 `live/` 的证书没有 renewal lineage，`tls-renew` 和 `tls-register-renewal` 会明确拒绝；生产自动续期证书必须由 `tls-init` 建立。
+
+确认普通命令路径成功后为当前 Windows 用户注册每日任务：
+
+```powershell
+.\deploy\windows\manage.ps1 tls-register-renewal `
+    -Tls `
+    -EnvFile .env.windows `
+    -TlsRenewalAt 03:17
+```
+
+计划任务需要使用运行 Docker Desktop 的同一 Windows 用户，并要求任务执行时 Docker Desktop Linux engine 可用。修改仓库路径、环境文件路径或运行用户后，应先删除再重新注册：
+
+```powershell
+.\deploy\windows\manage.ps1 tls-unregister-renewal
+```
+
+自定义 `TlsRenewalTaskName` 只允许英文、数字、点、下划线和短横线；管理脚本按根 TaskPath 和不区分大小写的完整名称查找，禁止把计划任务通配符传给删除操作。
 
 底层 Compose 命令应固定使用：
 
@@ -205,6 +299,7 @@ docker compose -f compose.windows.yml --env-file .env.windows <command>
 - 数据库连接失败、连接池不可用或探针超时返回 `503`。
 - 不得只返回固定 JSON 或只检查配置字符串。
 - Compose 的 API healthcheck 和 gateway 上游接流量条件都以 `/readyz` 为准。
+- 公网 Trusted Hosts 模式下，healthcheck 仍访问容器回环地址，但必须显式使用 `DRIVE_SERVER_NAME` 作为 Host，避免被 TrustedHost middleware 返回 400。
 
 推荐启动顺序：
 
@@ -279,13 +374,15 @@ docker compose -f compose.windows.yml --env-file .env.windows exec worker-previe
 - Redis 数据。
 - MinIO 对象。
 - OpenSearch 索引。
+- Certbot 证书、账户和续期状态。
+- ACME webroot、Certbot work/log。
 
 原则：
 
 - named volumes 由 Compose 管理，不写入 Git 工作区。
 - 停止、重建 API/Worker/gateway 不删除数据卷。
 - `docker compose down` 默认保留数据。
-- `docker compose down -v` 只允许在明确销毁环境并已确认备份后手工执行。
+- 破坏性清理统一使用 `manage.ps1 down -Volumes`；底层 `docker compose down -v` 若未带 `--profile tls-tools` 会遗漏 Certbot work/log volumes，也不会删除 Windows 续期计划任务。
 - OpenSearch 索引以 PostgreSQL 为事实来源，仍应保留重建索引脚本和演练流程。
 - Preview 临时目录属于可清理数据，不作为原文件或唯一预览事实来源。
 
@@ -294,7 +391,7 @@ docker compose -f compose.windows.yml --env-file .env.windows exec worker-previe
 gateway 必须负责：
 
 - 当前默认本机 HTTP `18080/19000` 入口。
-- 公网发布前新增受信证书挂载、TLS server block、HTTP 到 HTTPS 跳转和证书续期，再映射 `80/443`。
+- 公网模式通过 `-Tls` 使用 ACME bootstrap、证书只读挂载、TLS server block、HTTP 到 HTTPS 跳转和 `80/443` Host 分流。
 - API 与存储请求分流。
 - 保留存储请求原始 Host。
 - WebSocket upgrade。
@@ -320,11 +417,15 @@ gateway 必须负责：
 
 当前 TLS 边界：
 
-- 当前提交的 gateway 配置只覆盖 HTTP `18080/19000`。
-- 证书挂载、TLS server block、自动续期和公网 HTTPS 验收属于上线前后续任务。
-- 在这些任务完成前，不得把当前本机 HTTP 基线描述成已完成公网 TLS 部署。
+- 代码已经覆盖本机 HTTP `18080/19000` 和公网 TLS `80/443` 两种模板。
+- Certbot 证书、账户和续期配置位于 named volumes，gateway 只读挂载证书；私钥不进入仓库或镜像。
+- HTTP-01 challenge 只允许 `/.well-known/acme-challenge/`，未知 Host 在 TLS 模板中直接拒绝。
+- 续期由宿主 PowerShell 命令或同一 Windows 用户的计划任务触发，不向容器挂载 Docker socket。
+- 当前机器已用自签名双域名证书在标准宿主 `80/443` 启动完整正式编排，验证 HTTP `308`、API `/healthz`/`/readyz`、HSTS、MinIO CORS、S3v4 对象往返、未知 Host 拒绝、临时 one-off bootstrap、原 gateway 恢复、大小写无关计划任务删除和全部卷/端口清理。真实受信证书、外部 DNS/网络、浏览器信任链和 Certbot renewal lineage 实际续期仍需在生产网络验收。
 
-## 11. 备份
+## 11. 备份与恢复检查清单
+
+本节是上线前操作要求，不代表自动化备份恢复已经交付。当前仓库尚未提供 `pg_dump`/`pg_restore`、MinIO 镜像、证书卷导出、加密校验和同一业务时间点编排脚本，也尚未完成隔离环境恢复演练。
 
 更新前至少备份：
 
@@ -355,6 +456,8 @@ Redis 主要保存缓存、限流和队列状态，不作为权限、容量、�
 .\deploy\windows\manage.ps1 status
 ```
 
+公网 TLS 发布把上述三个命令分别加上 `-Tls`；首次签发先执行 `tls-init -Tls`，后续发布只需要 `up -Tls`。
+
 发布检查：
 
 - CI 的 ruff、format、mypy、pytest 通过。
@@ -362,7 +465,7 @@ Redis 主要保存缓存、限流和队列状态，不作为权限、容量、�
 - 应用镜像构建通过。
 - migration 一次性服务退出码为 0。
 - `/readyz` 真实数据库探针通过。
-- gateway 的 API 与 S3 外部端点可访问。
+- gateway 的 API 与 S3 外部端点可访问；公网模式还要检查 HTTP `308`、证书链、HSTS、双域名 Host 分流和真实预签名 PUT/GET。
 - Worker 已连接预期队列。
 - `beat` 只有一个有效实例。
 - Preview 工具版本可读取。
@@ -414,7 +517,7 @@ docker compose -f compose.windows.yml --env-file .env.windows ps -a
 docker compose -f compose.windows.yml --env-file .env.windows logs --no-color --tail 200
 ```
 
-入口：
+本机 HTTP 入口：
 
 ```powershell
 Invoke-WebRequest http://localhost:18080/healthz
@@ -422,6 +525,22 @@ Invoke-WebRequest http://localhost:18080/readyz
 ```
 
 对象存储应通过真实预签名 PUT/GET 集成测试验证 `http://localhost:19000`，不能只访问 MinIO 根路径判断成功。
+
+公网 TLS：
+
+```powershell
+.\deploy\windows\manage.ps1 config -Tls -EnvFile .env.windows -Quiet
+.\deploy\windows\manage.ps1 tls-certificates -Tls -EnvFile .env.windows
+.\deploy\windows\manage.ps1 up -Tls -EnvFile .env.windows
+
+Resolve-DnsName drive.example.com
+Resolve-DnsName storage.example.com
+curl.exe -sS -o NUL -w "%{http_code} %{redirect_url}`n" http://drive.example.com/healthz
+Invoke-WebRequest https://drive.example.com/healthz
+Invoke-WebRequest https://drive.example.com/readyz
+```
+
+HTTP 检查应返回 `308` 并跳到同 Host 的 HTTPS。随后检查响应包含预期 HSTS、安全头和受信证书链，并通过 `https://storage.example.com` 的真实预签名 PUT/GET 验证 Host、查询参数、请求体和签名未被 gateway 改写。`tls-renew -Tls -ForceRenewal` 只在受控演练窗口使用，用于验证续期和热重载；日常计划任务不要强制续期。
 
 内部服务端口检查：
 
@@ -438,7 +557,7 @@ Get-NetTCPConnection -State Listen |
 docker compose -f compose.windows.yml --env-file .env.windows down
 ```
 
-停止后不得添加 `-v`。重新启动后还应验证 named volumes 中的数据保持、migration 不重复产生副作用、Worker 和 beat 恢复正常。
+公网模式使用 `manage.ps1 down -Tls`。停止后不得添加 `-Volumes` 或底层 `-v`。重新启动后还应验证 named volumes 中的数据与证书保持、migration 不重复产生副作用、Worker 和 beat 恢复正常。
 
 ## 15. 常见问题
 
@@ -475,3 +594,25 @@ docker compose -f compose.windows.yml --env-file .env.windows exec worker-previe
 ### OpenSearch 在 Docker Desktop 中频繁重启
 
 检查 WSL2 内存、磁盘空间、OpenSearch heap 和容器日志。不要通过发布 OpenSearch 宿主端口规避内部诊断流程。
+
+### `tls-init` 的 HTTP-01 challenge 失败
+
+检查：
+
+- 两个域名是否都解析到当前公网地址。
+- 外部 TCP 80 是否真正到达 gateway，而不是被路由器、云防火墙、Windows 防火墙或其他 Web 服务截获。
+- `tls-init` 期间 gateway 日志是否显示 ACME challenge 请求。
+- 是否错误启用了 CDN 代理、强制 HTTPS 或上游 WAF，导致 challenge 内容被改写。
+- staging 与生产签发是否使用了预期证书名；staging 默认为 `<DRIVE_TLS_CERT_NAME>-staging`。
+
+### 续期成功但 gateway 仍返回旧证书
+
+先运行：
+
+```powershell
+.\deploy\windows\manage.ps1 tls-certificates -Tls -EnvFile .env.windows
+.\deploy\windows\manage.ps1 tls-renew -Tls -EnvFile .env.windows
+.\deploy\windows\manage.ps1 logs -Tls -Service gateway -Tail 100
+```
+
+`tls-renew` 要求 gateway 正在运行 TLS/ACME 模板，并确认容器 `8080/8443` 分别发布到宿主 `80/443`，以便 HTTP-01 webroot 能响应续期 challenge；脚本还会先确认 `/etc/letsencrypt/renewal/<DRIVE_TLS_CERT_NAME>.conf` 存在，再只续期该 production lineage，最后执行 `nginx -t` 和热重载。若提示 renewal lineage 缺失，使用 `tls-init` 建立 Certbot 管理状态，不能只向 `live/` 复制证书。若 gateway 未运行或仍是本机 HTTP 模板，先使用 `up -Tls` 启动并确认健康。计划任务必须由能访问 Docker Desktop Linux engine 的同一 Windows 用户运行。

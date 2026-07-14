@@ -7,7 +7,7 @@
 - 文件读写和终端输入输出统一使用 UTF-8。
 - 开发和正式部署宿主机统一以 Windows 11 为基线。
 - 正式部署使用 Docker Desktop 的 WSL2 后端和 Linux containers，仓库根目录 `compose.windows.yml` 是唯一正式编排入口；`backend/docker-compose.yml` 仅保留为本地依赖开发清单。
-- 正式部署的 Nginx gateway 运行在 `compose.windows.yml` 中，并且是唯一允许发布宿主端口的服务；当前默认本机入口由 gateway 发布 API `18080` 和 S3 外部端点 `19000`。公网模式必须先在 gateway 补充受信证书和 TLS server 配置，再映射 `80/443`；API、Worker、PostgreSQL、Redis、OpenSearch、MinIO API/Console 等内部服务只加入 Compose 网络。
+- 正式部署的 Nginx gateway 运行在 `compose.windows.yml` 中，并且是唯一允许发布宿主端口的服务；默认本机入口由 gateway 发布 API `18080` 和 S3 外部端点 `19000`。公网模式使用 `manage.ps1 -Tls`、ACME HTTP-01 bootstrap、Certbot 证书卷和 TLS Nginx 模板映射 `80/443`；启用前必须配置真实 DNS、受信证书邮箱、HTTPS 外部端点、CORS、Trusted Hosts 和 Secure Cookie，并完成双域名实测。API、Worker、PostgreSQL、Redis、OpenSearch、MinIO API/Console 等内部服务只加入 Compose 网络。
 - 技术基线：Python 3.12+、uv、FastAPI、SQLAlchemy 2.x、PostgreSQL 16+、Redis、S3 兼容对象存储、OpenSearch、Celery。
 - 面向用户的界面文案、说明文字、代码注释、README 和项目文档默认使用中文；确需保留英文时，仅限命令、变量名、协议名、第三方产品名、API 字段和行业通用术语。
 - 文件路径、目录名、对象存储 key、代码导入路径和真实存储文件名统一使用英文、数字、短横线或下划线；中文文件名只作为展示名、标题、备注等单独字段保存和显示。
@@ -25,7 +25,7 @@
 - 如果暂时采用轻量自研实现，必须在 `PROJECT_PROGRESS.md` 或相关 README 中标明原因、适用范围、已知限制和替换为成熟库或开源方案的触发条件。
 - 运行后端应在 `backend` 目录内使用 `uv run ...`；如果项目尚未创建 `backend` 目录，应先按计划书建立工程结构。
 - 端口、域名、数据库连接、Redis、对象存储、OpenSearch、CORS、Trusted Host、上传策略、API 地址等环境相关配置必须放在独立配置文件或环境变量中，不得硬编码在业务代码或启动脚本里。
-- 公网部署是目标形态，但当前基线只实现 gateway 的本机 HTTP `18080/19000`。上线公网前必须在 gateway 补充受信证书、TLS server block、HTTP 到 HTTPS 跳转并映射 `80/443`；不能为 PostgreSQL、Redis、OpenSearch、MinIO API/Console、FastAPI 调试端口或私有上传目录配置宿主端口映射。
+- 公网部署是目标形态。当前代码同时保留 gateway 本机 HTTP `18080/19000` 基线，并提供 ACME bootstrap、证书持久卷、TLS server block、HTTP 到 HTTPS 跳转、`80/443` Host 分流和续期热重载命令；真实公网环境仍必须完成受信证书签发、续期任务注册和 API/存储双域名 HTTPS 验收。不能为 PostgreSQL、Redis、OpenSearch、MinIO API/Console、FastAPI 调试端口或私有上传目录配置宿主端口映射。
 - 不要把临时方案伪装成最终方案；临时实现必须在进度记录中标明原因、影响范围和后续处理。
 - 实现过程中必须实时更新受影响文档，至少包括 `README.md`、`PROJECT_PLAN.md`、`PROJECT_PROGRESS.md`、`AGENT.md`、`docs/deployment-windows-docker.md` 和相关子目录 README；项目计划以《企业网盘开发者技术计划书.md》为准，可在 `PROJECT_PLAN.md` 中维护执行版摘要。
 
@@ -301,7 +301,8 @@ uv run mypy app
 - 外部 URL 预览或远程拉取默认不做，避免 SSRF。
 - 登录失败、初始化上传、分片签名、下载、外链访问和搜索必须有限流策略。
 - CORS、Trusted Host、Cookie、CSRF、限流必须按公网部署设计。
-- 正式环境只允许 Compose 内的 Nginx gateway 发布宿主端口；当前默认本机为 HTTP `18080/19000`，公网模式在补齐并验证 TLS 后映射 `80/443`。应用容器、数据库、Redis、OpenSearch、MinIO API/Console 等服务只监听 Compose 内部网络。
+- 公网 TLS 管理入口必须拒绝回环或非 IPv4 bind、示例密钥、过短或 `${...}` 间接插值的关键 secret/连接 URL、数据库/Redis URL 与独立密码不一致、Wildcard Trusted Hosts、HTTP API CORS origin、与 API CORS 不一致或非 HTTPS 的 MinIO CORS、带凭据/非 443 的 S3 外部端点和示例 Certbot 邮箱，不能仅因证书配置存在就允许绑定 `0.0.0.0:80/443`。
+- 正式环境只允许 Compose 内的 Nginx gateway 发布宿主端口；默认本机为 HTTP `18080/19000`，公网模式通过已实现的 TLS 配置映射 `80/443`，但必须先完成真实 DNS、证书和 Host 分流验证。应用容器、数据库、Redis、OpenSearch、MinIO API/Console 等服务只监听 Compose 内部网络。
 
 ## 17. 容量与配额
 
@@ -379,6 +380,8 @@ checkout
   -> mypy app
   -> pytest
   -> docker compose --env-file .env.windows.example -f compose.windows.yml config --quiet
+  -> public TLS Compose + ACME/TLS Nginx template syntax checks
+  -> Windows PowerShell 5.1 manage.ps1 parser + TLS guard checks
   -> build docker image
   -> dependency vulnerability scan
 ```
@@ -390,21 +393,21 @@ Dockerfile 要求：
 - API 与各类 Worker 复用同一后端基础镜像，通过 Compose command 区分进程。
 - 运行镜像使用非 root 用户。
 - 不把 `.env`、测试文件、缓存目录、运行数据和备份复制到生产镜像。
-- API 健康检查使用 `/healthz` 和 `/readyz`；`/readyz` 必须执行真实 PostgreSQL 探针，数据库不可用时返回非 2xx。
+- API 健康检查使用 `/healthz` 和 `/readyz`；`/readyz` 必须执行真实 PostgreSQL 探针，数据库不可用时返回非 2xx。公网 Trusted Hosts 模式下，容器回环 healthcheck 必须显式携带 API 域名 Host。
 - Preview Worker 镜像必须包含 LibreOffice、Poppler 和常用中文字体，并限制 CPU、内存、临时磁盘、并发数和子进程生命周期。
 
 Windows Docker Compose 要求：
 
 - 仓库根目录 `compose.windows.yml` 是 Windows 11 正式部署的唯一编排入口；`backend/docker-compose.yml` 只用于开发机单独拉起依赖。
 - 正式编排至少包含 `gateway`、`api`、一次性 `migration`、一次性 `seed`、一次性 `minio-init`、按职责隔离的 Celery Worker、运行 Celery beat 的 `beat` 服务、PostgreSQL、Redis、MinIO 和 OpenSearch。
-- `gateway` 是唯一发布宿主端口的服务；当前默认本机发布 HTTP `18080/19000`，公网模式必须在补齐受信证书和 TLS 配置后再发布 `80/443`。其他服务禁止配置 `ports`，服务间通过 Compose 网络和服务名访问。
+- `gateway` 是唯一发布宿主端口的服务；默认本机发布 HTTP `18080/19000`，公网模式由 `manage.ps1 -Tls` 切换为 `80/443` 并使用 ACME bootstrap/TLS 模板，bind 必须是 `0.0.0.0` 或其他非回环 IPv4 地址。其他常驻服务禁止配置 `ports`，Certbot 只通过 gateway 共享的 webroot 完成 HTTP-01，服务间通过 Compose 网络和服务名访问。
 - `.env.windows.example` 是正式环境变量模板，真实 `.env.windows` 不得提交。数据库、Redis、OpenSearch、Celery broker/result backend 使用内部服务 DNS。
 - API 使用可配置的 SQLAlchemy QueuePool；Celery Worker 因同步任务入口会通过 `asyncio.run()` 建立独立事件循环，必须在 Compose 中使用 `DRIVE_DATABASE_POOL_MODE=null`，禁止跨任务事件循环复用 asyncpg 连接池。
-- S3 必须区分容器内访问端点和浏览器可访问的外部端点：内部端点用于 API/Worker 访问 `http://minio:9000`；默认外部端点为 gateway 提供的 `http://localhost:19000`，公网 TLS 配置完成后可使用 `https://storage.example.com` 等独立 Host。外部端点不得使用 `/s3` 等 base path，也不能把内部服务名返回给浏览器。
+- S3 必须区分容器内访问端点和浏览器可访问的外部端点：内部端点用于 API/Worker 访问 `http://minio:9000`；默认外部端点为 gateway 提供的 `http://localhost:19000`，公网 TLS 模式使用 `https://storage.example.com` 等独立 Host。外部端点不得使用 `/s3` 等 base path，也不能把内部服务名返回给浏览器；公网模式的 `MINIO_CORS_ALLOWED_ORIGIN` 必须与 `DRIVE_CORS_ORIGINS` 精确一致且只包含 HTTPS origin，禁止通配符和遗留 origin。
 - PostgreSQL、Redis、MinIO 和 OpenSearch 使用 named volumes；备份输出使用明确的 Windows 宿主目录或专用备份卷。Celery beat 当前把可重建 schedule 文件放在容器临时目录，不能把它当作任务事实来源。
-- `deploy/windows/manage.ps1` 是宿主机管理入口，当前提供 `config`、`up`、`down`、`status`、`logs`，构建使用 `up -Build`，删除卷必须显式使用 `down -Volumes`；备份、更新和回滚按部署文档中的 PowerShell/Compose 流程执行。
+- `deploy/windows/manage.ps1` 是宿主机管理入口，提供 `config`、`up`、`down`、`status`、`logs`、`tls-init`、`tls-renew`、`tls-certificates`、`tls-register-renewal` 和幂等的 `tls-unregister-renewal`；构建使用 `up -Build`，公网操作使用 `-Tls`，删除卷必须显式使用 `down -Volumes`，并同步删除对应续期计划任务。`tls-init` 必须保留已有 gateway 容器，用同一 service 的临时 one-off bootstrap 容器完成签发；签发失败时恢复原 gateway，不能把已有公网入口停在 bootstrap 或 stopped 状态。`tls-renew` 和计划任务注册必须确认 `DRIVE_TLS_CERT_NAME` 对应的 Certbot renewal lineage 存在，手工挂载或自签名证书不能伪装成可自动续期证书。部署文档当前只提供备份、更新和回滚检查清单；自动化脚本与隔离恢复演练完成前，不得把它描述成已交付的恢复能力。
 - 周期维护任务由独立 `beat` 容器运行 Celery beat，至少覆盖过期上传、无引用 blob、孤儿最终对象和容量校准；调度不得与 API 进程混跑。
-- 当前 Nginx gateway 必须处理 WebSocket、Range、上传大小限制、超时、真实客户端 IP、安全响应头，以及 API 与外部 S3 端点的分流；公网发布前还必须补充受信证书挂载、TLS server block 和 HTTPS 实测。
+- Nginx gateway 必须处理 WebSocket、Range、上传大小限制、超时、真实客户端 IP、安全响应头，以及 API 与外部 S3 端点的分流；公网模板还必须保持证书只读挂载、TLS 1.2/1.3、HTTP 到 HTTPS 跳转、ACME challenge 路径、未知 Host 拒绝和 HSTS。正式发布前必须完成受信证书与双域名 HTTPS 实测。
 
 发布顺序：
 

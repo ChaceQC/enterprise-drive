@@ -76,10 +76,265 @@ jobs:
 
       - name: Validate Windows Docker Compose
         working-directory: .
-        run: docker compose --env-file .env.windows.example -f compose.windows.yml config --quiet
+        run: docker compose --profile tls-tools --env-file .env.windows.example -f compose.windows.yml config --quiet
+
+      - name: Validate public TLS Compose
+        working-directory: .
+        env:
+          DRIVE_SERVER_NAME: drive.example.com
+          DRIVE_STORAGE_SERVER_NAME: storage.example.com
+          DRIVE_S3_PUBLIC_ENDPOINT_URL: https://storage.example.com
+          DRIVE_SESSION_COOKIE_SECURE: "true"
+          DRIVE_TRUSTED_HOSTS: '["drive.example.com","storage.example.com"]'
+          DRIVE_CORS_ORIGINS: '["https://drive.example.com"]'
+          MINIO_CORS_ALLOWED_ORIGIN: https://drive.example.com
+          DRIVE_GATEWAY_TEMPLATE_PATH: ./deploy/windows/nginx/tls.conf.template
+          DRIVE_GATEWAY_BIND: 0.0.0.0
+          DRIVE_STORAGE_GATEWAY_BIND: 0.0.0.0
+          DRIVE_GATEWAY_PORT: "80"
+          DRIVE_STORAGE_GATEWAY_PORT: "443"
+          DRIVE_GATEWAY_HTTP_CONTAINER_PORT: "8080"
+          DRIVE_GATEWAY_SECONDARY_CONTAINER_PORT: "8443"
+        run: docker compose --profile tls-tools --env-file .env.windows.example -f compose.windows.yml config --quiet
+
+      - name: Validate Nginx gateway templates
+        working-directory: .
+        run: |
+          set -euo pipefail
+          tls_volume="enterprise-drive-ci-tls-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          docker volume create "${tls_volume}" >/dev/null
+          trap 'docker volume rm -f "${tls_volume}" >/dev/null 2>&1 || true' EXIT
+
+          docker run --rm \
+            --mount "type=volume,source=${tls_volume},target=/etc/letsencrypt" \
+            --entrypoint sh \
+            certbot/certbot:v5.6.0 \
+            -ec 'mkdir -p /etc/letsencrypt/live/enterprise-drive; openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=drive.example.com" -addext "subjectAltName=DNS:drive.example.com,DNS:storage.example.com" -keyout /etc/letsencrypt/live/enterprise-drive/privkey.pem -out /etc/letsencrypt/live/enterprise-drive/fullchain.pem >/dev/null 2>&1'
+
+          docker run --rm \
+            --add-host api:127.0.0.1 \
+            --add-host minio:127.0.0.1 \
+            --mount "type=bind,source=${PWD}/deploy/windows/nginx/tls.conf.template,target=/etc/nginx/templates/default.conf.template,readonly" \
+            --mount "type=volume,source=${tls_volume},target=/etc/letsencrypt,readonly" \
+            -e DRIVE_SERVER_NAME=drive.example.com \
+            -e DRIVE_STORAGE_SERVER_NAME=storage.example.com \
+            -e DRIVE_TLS_CERT_NAME=enterprise-drive \
+            -e DRIVE_TLS_HSTS_MAX_AGE=31536000 \
+            -e DRIVE_API_MAX_BODY_SIZE=16m \
+            -e DRIVE_PROXY_CONNECT_TIMEOUT=10s \
+            -e DRIVE_PROXY_READ_TIMEOUT=300s \
+            -e DRIVE_PROXY_SEND_TIMEOUT=300s \
+            nginx:1.27-alpine nginx -t
+
+          docker run --rm \
+            --mount "type=bind,source=${PWD}/deploy/windows/nginx/acme-bootstrap.conf.template,target=/etc/nginx/templates/default.conf.template,readonly" \
+            -e DRIVE_SERVER_NAME=drive.example.com \
+            -e DRIVE_STORAGE_SERVER_NAME=storage.example.com \
+            nginx:1.27-alpine nginx -t
+          test "$(grep -Fc 'location = /gateway-healthz {' deploy/windows/nginx/acme-bootstrap.conf.template)" -eq 2
 
       - name: Build API and core Worker image
         run: docker build --target runtime --tag enterprise-drive-backend:ci .
 
       - name: Build Preview Worker image
         run: docker build --target preview --tag enterprise-drive-preview:ci .
+
+  windows-deployment:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Validate Windows PowerShell management entrypoint
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $errors = $null
+          $tokens = $null
+          [System.Management.Automation.Language.Parser]::ParseFile(
+              (Resolve-Path ".\deploy\windows\manage.ps1"),
+              [ref]$tokens,
+              [ref]$errors
+          ) | Out-Null
+          if ($errors.Count -gt 0) {
+              $errors | Format-List
+              throw "manage.ps1 parser validation failed"
+          }
+
+          $fakeBin = Join-Path $env:RUNNER_TEMP "enterprise-drive-fake-docker"
+          New-Item -ItemType Directory -Path $fakeBin -Force | Out-Null
+          $env:FAKE_DOCKER_LOG = Join-Path $env:RUNNER_TEMP "enterprise-drive-docker-args.log"
+          [System.IO.File]::WriteAllText(
+              (Join-Path $fakeBin "docker.cmd"),
+              @"
+          @echo off
+          echo %*>>"%FAKE_DOCKER_LOG%"
+          echo %* | findstr /c:"ps --quiet gateway" >nul && (echo fake-gateway& exit /b 0)
+          echo %* | findstr /c:"port gateway 8080" >nul && (echo 0.0.0.0:80& exit /b 0)
+          echo %* | findstr /c:"port gateway 8443" >nul && (echo 0.0.0.0:443& exit /b 0)
+          echo %* | findstr /c:"run --detach --no-deps --service-ports gateway" >nul && (echo fake-bootstrap& exit /b 0)
+          echo %* | findstr /c:"inspect --format" >nul && (echo healthy& exit /b 0)
+          echo %* | findstr /c:" certonly " >nul && exit /b 9
+          echo %* | findstr /c:"-checkend 86400" >nul && (
+            findstr /c:"renew --cert-name" "%FAKE_DOCKER_LOG%" >nul || exit /b 7
+          )
+          exit /b 0
+          "@,
+              (New-Object System.Text.ASCIIEncoding)
+          )
+          $env:PATH = "$fakeBin;$env:PATH"
+
+          $env:DRIVE_SERVER_NAME = "drive.example.com"
+          $env:DRIVE_STORAGE_SERVER_NAME = "storage.example.com"
+          $env:DRIVE_S3_PUBLIC_ENDPOINT_URL = "https://storage.example.com"
+          $env:DRIVE_SESSION_COOKIE_SECURE = "true"
+          $env:DRIVE_TRUSTED_HOSTS = '["drive.example.com","storage.example.com"]'
+          $env:DRIVE_CORS_ORIGINS = '["https://app.example.com"]'
+          $env:MINIO_CORS_ALLOWED_ORIGIN = "https://app.example.com"
+          $env:DRIVE_SECRET_KEY = "0123456789abcdef0123456789abcdef01234567"
+          $env:POSTGRES_PASSWORD = "Postgres-Strong-Secret-2026"
+          $env:DRIVE_DATABASE_URL = "postgresql+asyncpg://drive:Postgres-Strong-Secret-2026@postgres:5432/enterprise_drive"
+          $env:REDIS_PASSWORD = "Redis-Strong-Secret-2026"
+          $env:DRIVE_REDIS_URL = "redis://:Redis-Strong-Secret-2026@redis:6379/0"
+          $env:DRIVE_CELERY_BROKER_URL = "redis://:Redis-Strong-Secret-2026@redis:6379/1"
+          $env:DRIVE_CELERY_RESULT_BACKEND = "redis://:Redis-Strong-Secret-2026@redis:6379/2"
+          $env:MINIO_ROOT_PASSWORD = "Minio-Strong-Secret-2026"
+          $env:OPENSEARCH_INITIAL_ADMIN_PASSWORD = "OpenSearch-Strong-Secret-2026"
+          $env:DRIVE_ADMIN_PASSWORD = "Admin-Strong-Secret-2026"
+          $env:CERTBOT_EMAIL = "ops@contoso.org"
+
+          .\deploy\windows\manage.ps1 config -Tls -EnvFile .env.windows.example -Quiet
+          .\deploy\windows\manage.ps1 tls-renew -Tls -EnvFile .env.windows.example
+          if (
+              -not (
+                  Get-Content -LiteralPath $env:FAKE_DOCKER_LOG |
+                      Select-String -SimpleMatch "renew --cert-name enterprise-drive"
+              )
+          ) {
+              throw "tls-renew did not target DRIVE_TLS_CERT_NAME"
+          }
+          if (
+              -not (
+                  Get-Content -LiteralPath $env:FAKE_DOCKER_LOG |
+                      Select-String -SimpleMatch "/etc/letsencrypt/renewal/enterprise-drive.conf"
+              )
+          ) {
+              throw "tls-renew did not verify the Certbot renewal lineage"
+          }
+
+          try {
+              .\deploy\windows\manage.ps1 tls-init -Tls -EnvFile .env.windows.example
+              throw "fake Certbot failure did not reach tls-init"
+          }
+          catch {
+              if ($_.Exception.Message -notlike "*docker compose failed with exit code 9*") {
+                  throw
+              }
+          }
+          $fakeDockerCalls = Get-Content -LiteralPath $env:FAKE_DOCKER_LOG
+          if (
+              -not ($fakeDockerCalls | Select-String -SimpleMatch "stop gateway") -or
+              -not ($fakeDockerCalls | Select-String -SimpleMatch "start gateway")
+          ) {
+              throw "tls-init did not restore the previously running gateway after issuance failure"
+          }
+
+          $env:DRIVE_SECRET_KEY = "change-me-use-a-long-random-secret"
+          try {
+              .\deploy\windows\manage.ps1 config -Tls -EnvFile .env.windows.example -Quiet
+              throw "example secret guard did not fail"
+          }
+          catch {
+              if ($_.Exception.Message -notlike "*non-interpolated, non-example value*") {
+                  throw
+              }
+          }
+
+          $env:DRIVE_SECRET_KEY = '0123456789abcdef0123456789abcdef01234567'
+          $env:MINIO_ROOT_PASSWORD = '${WEAK_PASSWORD}'
+          try {
+              .\deploy\windows\manage.ps1 config -Tls -EnvFile .env.windows.example -Quiet
+              throw "interpolated secret guard did not fail"
+          }
+          catch {
+              if ($_.Exception.Message -notlike "*non-interpolated, non-example value*") {
+                  throw
+              }
+          }
+
+          $env:MINIO_ROOT_PASSWORD = "Minio-Strong-Secret-2026"
+          $env:DRIVE_TRUSTED_HOSTS = '["*","drive.example.com","storage.example.com"]'
+          try {
+              .\deploy\windows\manage.ps1 config -Tls -EnvFile .env.windows.example -Quiet
+              throw "wildcard Trusted Hosts guard did not fail"
+          }
+          catch {
+              if ($_.Exception.Message -notlike "*does not allow wildcard*") {
+                  throw
+              }
+          }
+
+          $env:DRIVE_TRUSTED_HOSTS = '["drive.example.com","storage.example.com"]'
+          $env:DRIVE_S3_PUBLIC_ENDPOINT_URL = "https://user:pass@storage.example.com/"
+          try {
+              .\deploy\windows\manage.ps1 config -Tls -EnvFile .env.windows.example -Quiet
+              throw "S3 user info guard did not fail"
+          }
+          catch {
+              if ($_.Exception.Message -notlike "*without user info*") {
+                  throw
+              }
+          }
+
+          $env:DRIVE_S3_PUBLIC_ENDPOINT_URL = "https://storage.example.com"
+          $env:MINIO_CORS_ALLOWED_ORIGIN = "https://other.example.com"
+          try {
+              .\deploy\windows\manage.ps1 config -Tls -EnvFile .env.windows.example -Quiet
+              throw "MinIO CORS alignment guard did not fail"
+          }
+          catch {
+              if ($_.Exception.Message -notlike "*must exactly match DRIVE_CORS_ORIGINS*") {
+                  throw
+              }
+          }
+
+          $env:MINIO_CORS_ALLOWED_ORIGIN = "https://app.example.com"
+          $env:DRIVE_TLS_GATEWAY_BIND = "127.0.0.1"
+          try {
+              .\deploy\windows\manage.ps1 config -Tls -EnvFile .env.windows.example -Quiet
+              throw "loopback TLS bind guard did not fail"
+          }
+          catch {
+              if ($_.Exception.Message -notlike "*non-loopback IPv4 address*") {
+                  throw
+              }
+          }
+
+          $env:DRIVE_TLS_GATEWAY_BIND = "0.0.0.0"
+          $env:DRIVE_DATABASE_URL = "postgresql+asyncpg://drive:Different-Strong-Secret-2026@postgres:5432/enterprise_drive"
+          try {
+              .\deploy\windows\manage.ps1 config -Tls -EnvFile .env.windows.example -Quiet
+              throw "database password alignment guard did not fail"
+          }
+          catch {
+              if ($_.Exception.Message -notlike "*URL-encoded value of POSTGRES_PASSWORD*") {
+                  throw
+              }
+          }
+
+          $env:DRIVE_DATABASE_URL = "postgresql+asyncpg://drive:Postgres-Strong-Secret-2026@postgres:5432/enterprise_drive"
+          $env:DRIVE_TLS_CERT_NAME = "../unsafe"
+          try {
+              .\deploy\windows\manage.ps1 tls-register-renewal -Tls -EnvFile .env.windows.example
+              throw "unsafe certificate name guard did not fail before task registration"
+          }
+          catch {
+              if ($_.Exception.Message -notlike "*DRIVE_TLS_CERT_NAME must be 1-64 safe characters*") {
+                  throw
+              }
+          }
+
+          .\deploy\windows\manage.ps1 tls-unregister-renewal `
+              -EnvFile missing.env `
+              -TlsRenewalTaskName EnterpriseDriveCiMissingTask

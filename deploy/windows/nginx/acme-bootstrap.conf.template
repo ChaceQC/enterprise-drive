@@ -1,0 +1,42 @@
+server {
+    listen 8080 default_server;
+    server_name _;
+    server_tokens off;
+
+    location = /gateway-healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    location / {
+        return 444;
+    }
+}
+
+server {
+    listen 8080;
+    server_name ${DRIVE_SERVER_NAME} ${DRIVE_STORAGE_SERVER_NAME};
+    server_tokens off;
+
+    location = /gateway-healthz {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    location ^~ /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+        default_type text/plain;
+        try_files $uri =404;
+    }
+
+    location / {
+        default_type text/plain;
+        return 503 "TLS certificate bootstrap in progress\n";
+    }
+
+    add_header X-Content-Type-Options nosniff always;
+    add_header X-Frame-Options DENY always;
+    add_header Referrer-Policy no-referrer always;
+}
