@@ -99,6 +99,86 @@ jobs:
           DRIVE_GATEWAY_SECONDARY_CONTAINER_PORT: "8443"
         run: docker compose --profile tls-tools --env-file .env.windows.example -f compose.windows.yml config --quiet
 
+      - name: Validate Windows Compose backup model
+        working-directory: .
+        run: |
+          set -euo pipefail
+          docker compose \
+            --profile tls-tools \
+            --env-file .env.windows.example \
+            -f compose.windows.yml \
+            config --format json |
+            python -c '
+          import json
+          import sys
+
+          config = json.load(sys.stdin)
+          services = config["services"]
+          volumes = config["volumes"]
+          project = config["name"]
+
+          port_services = sorted(
+              name for name, service in services.items() if service.get("ports")
+          )
+          assert port_services == ["gateway"], (
+              f"Only gateway may publish host ports; found: {port_services}"
+          )
+
+          expected_volumes = {
+              "postgres-data",
+              "redis-data",
+              "minio-data",
+              "opensearch-data",
+              "tls-certificates",
+          }
+          missing_volumes = sorted(expected_volumes - volumes.keys())
+          assert not missing_volumes, (
+              f"Missing backup volumes: {missing_volumes}"
+          )
+          for logical_name in sorted(expected_volumes):
+              expected_name = f"{project}_{logical_name}"
+              actual_name = volumes[logical_name].get("name")
+              assert actual_name == expected_name, (
+                  f"Volume {logical_name} resolved to {actual_name}, "
+                  f"expected {expected_name}"
+              )
+
+          expected_mounts = {
+              "postgres-data": {
+                  ("postgres", "/var/lib/postgresql/data", False),
+              },
+              "redis-data": {
+                  ("redis", "/data", False),
+              },
+              "minio-data": {
+                  ("minio", "/data", False),
+              },
+              "opensearch-data": {
+                  ("opensearch", "/usr/share/opensearch/data", False),
+              },
+              "tls-certificates": {
+                  ("gateway", "/etc/letsencrypt", True),
+                  ("certbot", "/etc/letsencrypt", False),
+              },
+          }
+          for volume_name, expected in expected_mounts.items():
+              actual = {
+                  (
+                      service_name,
+                      mount.get("target"),
+                      bool(mount.get("read_only", False)),
+                  )
+                  for service_name, service in services.items()
+                  for mount in service.get("volumes", [])
+                  if mount.get("type") == "volume"
+                  and mount.get("source") == volume_name
+              }
+              assert actual == expected, (
+                  f"Unexpected mounts for {volume_name}: "
+                  f"{sorted(actual)}; expected {sorted(expected)}"
+              )
+          '
+
       - name: Validate Nginx gateway templates
         working-directory: .
         run: |
@@ -250,7 +330,7 @@ jobs:
           set -euo pipefail
           case "${COMPONENT}" in
             server)
-              baseline=$'CVE-2026-10536\nCVE-2026-11856\nCVE-2026-8924\nCVE-2026-8927\nCVE-2026-9079\nGHSA-5cgq-3rg8-m6cv\nGHSA-89gr-r52h-f8rx\nGHSA-f5wc-c3c7-36mc\nGHSA-jppx-rxg9-jmrx\nGHSA-p77j-4mvh-x3m3\nGHSA-rm3j-f69w-wqmq\nGHSA-vgwf-h737-ff37\nGHSA-x527-x647-q7gg\nGO-2026-4337\nGO-2026-5005\nGO-2026-5019\nGO-2026-5020'
+              baseline=$'CVE-2026-10536\nCVE-2026-11856\nCVE-2026-8924\nCVE-2026-8927\nCVE-2026-9079\nGHSA-5cgq-3rg8-m6cv\nGHSA-5cx5-wh4m-82fh\nGHSA-89gr-r52h-f8rx\nGHSA-f5wc-c3c7-36mc\nGHSA-jppx-rxg9-jmrx\nGHSA-jv87-32hw-hh99\nGHSA-p77j-4mvh-x3m3\nGHSA-rm3j-f69w-wqmq\nGHSA-vgwf-h737-ff37\nGHSA-x527-x647-q7gg\nGO-2026-4337\nGO-2026-5005\nGO-2026-5019\nGO-2026-5020'
               ;;
             client)
               baseline=$'GHSA-5cgq-3rg8-m6cv\nGHSA-89gr-r52h-f8rx\nGHSA-f5wc-c3c7-36mc\nGHSA-jppx-rxg9-jmrx\nGHSA-p77j-4mvh-x3m3\nGHSA-rm3j-f69w-wqmq\nGHSA-vgwf-h737-ff37\nGHSA-x527-x647-q7gg\nGO-2026-4337\nGO-2026-5005\nGO-2026-5019\nGO-2026-5020'
@@ -319,16 +399,44 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          $errors = $null
-          $tokens = $null
-          [System.Management.Automation.Language.Parser]::ParseFile(
-              (Resolve-Path ".\deploy\windows\manage.ps1"),
-              [ref]$tokens,
-              [ref]$errors
-          ) | Out-Null
-          if ($errors.Count -gt 0) {
-              $errors | Format-List
-              throw "manage.ps1 parser validation failed"
+          $PowerShellFiles = @(
+              Get-ChildItem `
+                  -LiteralPath ".\deploy\windows" `
+                  -Filter "*.ps1" `
+                  -Recurse `
+                  -File
+          )
+          if ($PowerShellFiles.Count -eq 0) {
+              throw "No deploy/windows PowerShell files were found"
+          }
+
+          foreach ($PowerShellFile in $PowerShellFiles) {
+              $Bytes = [System.IO.File]::ReadAllBytes($PowerShellFile.FullName)
+              if (
+                  $Bytes.Length -ge 3 -and
+                  $Bytes[0] -eq 0xEF -and
+                  $Bytes[1] -eq 0xBB -and
+                  $Bytes[2] -eq 0xBF
+              ) {
+                  throw "PowerShell file must not use a UTF-8 BOM: $($PowerShellFile.FullName)"
+              }
+              foreach ($Byte in $Bytes) {
+                  if ($Byte -gt 0x7F) {
+                      throw "PowerShell file must remain ASCII: $($PowerShellFile.FullName)"
+                  }
+              }
+
+              $Errors = $null
+              $Tokens = $null
+              [System.Management.Automation.Language.Parser]::ParseFile(
+                  $PowerShellFile.FullName,
+                  [ref]$Tokens,
+                  [ref]$Errors
+              ) | Out-Null
+              if ($Errors.Count -gt 0) {
+                  $Errors | Format-List
+                  throw "PowerShell 5.1 parser validation failed: $($PowerShellFile.FullName)"
+              }
           }
 
           $fakeBin = Join-Path $env:RUNNER_TEMP "enterprise-drive-fake-docker"
