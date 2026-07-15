@@ -457,6 +457,7 @@ jobs:
               @"
           @echo off
           echo %*>>"%FAKE_DOCKER_LOG%"
+          echo %* | findstr /c:"config --format json" >nul && (echo {"name":"enterprise-drive"}& exit /b 0)
           echo %* | findstr /c:"ps --quiet gateway" >nul && (echo fake-gateway& exit /b 0)
           echo %* | findstr /c:"port gateway 8080" >nul && (echo 0.0.0.0:80& exit /b 0)
           echo %* | findstr /c:"port gateway 8443" >nul && (echo 0.0.0.0:443& exit /b 0)
