@@ -22,6 +22,9 @@
 - 新增 `deploy/windows/tests/backup-restore.integration.ps1`，使用随机 source/target Compose project 和仓库外临时目录，真实写入并恢复 PostgreSQL、MinIO、Redis、OpenSearch、TLS lineage 和 CMS 环境文件，同时校验 API、全部 Worker、beat、gateway、宿主端口边界、ACL、损坏 manifest 拒绝和运行中 target 拒绝。
 - `.github/workflows/backend-ci.yml` 的 Windows job 已加入独立 backup/restore smoke，并继续递归检查 `deploy/windows/**/*.ps1` 的 PowerShell 5.1 语法、ASCII 和无 BOM。
 - 已同步 `AGENT.md`、`PROJECT_PLAN.md`、`README.md`、`backend/README.md`、`docs/deployment-windows-docker.md` 和《企业网盘开发者技术计划书.md》的 `v0.4.0` 行为、安全边界、操作入口和验收要求。
+- 已提交并推送 `dev`：
+  - `9383659 feat: 完成 Windows 备份恢复自动化`
+  - `8141e0f fix: 补齐 Windows CI Compose 模型响应`
 
 ### 版本影响
 
@@ -42,6 +45,8 @@
   - 备份目录和 CMS 输出 ACL 断言通过。
 - 演练结束后已确认 `enterprise-drive-backup-*` containers、volumes、networks、宿主临时目录和测试 CMS 证书均为 0。
 - Workflow YAML 已由 PyYAML 解析，顶层 `name`、`on`、`jobs` 和四个 job 均存在；`git diff --check` 已通过。
+- GitHub Actions 首次 run `29436231488` 的 backend、MinIO image policy、MinIO supply-chain 及新增 backup/restore smoke 均通过；Windows TLS fake Docker guard 因旧 fixture 未返回新增 mutex 所需的 Compose JSON model 而失败。补齐最小 fake `config --format json` 响应后，已在本机直接执行 workflow 原始 PowerShell block 并通过。
+- GitHub Actions 最终功能验证 run `29436565873` 已通过全部 backend、windows-deployment、minio-image-policy 和两组 minio-supply-chain job；Windows job 同时通过 PowerShell parser/编码、24 项 backup/restore smoke 和 TLS fake Docker guards。
 
 ### 阻塞与风险
 
@@ -54,9 +59,8 @@
 
 ### 下一步
 
-1. 提交并推送 `v0.4.0` 备份恢复实现到 `dev`，等待 GitHub Actions `backend-ci` 全部通过，并把最终 run ID 回填到本记录。
-2. 按生产恢复演练周期配置独立备份介质、保留策略、离线副本、告警和定期抽样恢复记录。
-3. 恢复推进 MinIO multipart 稳定封装、真实对象存储异常恢复与升级兼容、高密级代理下载、多维配额和治理任务告警。
+1. 按生产恢复演练周期配置独立备份介质、保留策略、离线副本、告警和定期抽样恢复记录。
+2. 恢复推进 MinIO multipart 稳定封装、真实对象存储异常恢复与升级兼容、高密级代理下载、多维配额和治理任务告警。
 
 ### 涉及文件
 
