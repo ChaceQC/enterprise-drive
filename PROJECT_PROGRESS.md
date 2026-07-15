@@ -1,76 +1,79 @@
 # PROJECT_PROGRESS.md
 
-## 2026-07-15 备份恢复阶段暂停记录
+## 2026-07-16 Windows 备份恢复自动化完成
 
-### 已完成并已推送
+### 已完成
 
-- 已将 MinIO Server 固定为 `RELEASE.2025-09-07T16-13-09Z@sha256:14cea493...8936e`，MinIO Client 固定为 `RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349e...11727`，正式 Compose、开发 Compose、环境模板和 CI 真实 MinIO 集成测试均使用同一组不可变引用。
-- 已新增 MinIO 镜像策略与供应链 CI：拒绝 `latest` 回归，校验 release tag、Compose 渲染和 registry digest，一并生成 Syft SPDX JSON SBOM 与 Grype JSON 漏洞报告，并上传独立 artifact。
-- 当前 Grype 基线为 MinIO Server 19 个 Critical ID、MinIO Client 12 个 Critical ID；CI 会在 Job Summary 明列现有问题并阻断新增 Critical，不能把当前基线解释为漏洞已修复。
-- 已新增 Windows Compose JSON 结构门禁，严格确认只有 gateway 发布宿主端口，五个备份卷的物理名、挂载目标和 TLS 读写模式符合预期。
-- 已把 Windows CI 的 PowerShell 门禁扩展为递归解析 `deploy/windows/**/*.ps1`，逐文件检查 PowerShell 5.1 语法、ASCII 和无 BOM。
-- 已提交并推送：
-  - `93438b0 chore: 固定 MinIO 镜像并增加供应链扫描`
-  - `29cf98a test: 强化 Windows Compose 与镜像基线门禁`
-- GitHub Actions `backend-ci` run `29368754274` 已通过全部 backend、Windows、MinIO image policy 和 MinIO supply-chain jobs。
+- 项目版本已统一提升到 `0.4.0`，应用配置、`pyproject.toml`、`uv.lock`、健康检查测试、README、执行计划和完整技术计划书保持一致；本轮不修改数据库结构、业务 API、对象存储 key 或 Worker payload。
+- `deploy/windows/manage.ps1` 已正式提供 `backup`、`backup-verify` 和 `restore`，并对动作专属参数、TLS 模式、环境文件、备份路径、CMS 输出路径、`-ForceRestore` 和 `-NoStartAfterRestore` 做入口门禁。
+- `deploy/windows/backup-restore.ps1` 已形成完整 Windows Docker Desktop 备份恢复流程：
+  - 从实际 `docker compose config --format json` 和 Docker runtime 读取 Compose project、Git commit、项目版本、网络、逻辑卷、物理卷、服务 image reference 及实际 image ID，不手拼运行时资源名称。
+  - 备份 manifest 固定记录 15 个默认 Compose 服务的实际 image ID，并记录 PostgreSQL revision/WAL、MinIO bucket、OpenSearch index、TLS certificate lineage、源服务运行/退出/健康状态及配置摘要。
+  - PostgreSQL 使用 custom-format `pg_dump`；MinIO、Redis、OpenSearch 和 TLS 证书卷在停止写入面后归档；成功校验的受限 ACL staging 目录才会原子发布。
+  - 备份与恢复同时持有 project mutex 和按物理卷名称排序的 volume mutex，避免不同 project 实际映射到同一卷时并发读写。
+  - 备份目录、回滚目录和解密后的 CMS 文件自动应用受保护 NTFS DACL，只允许当前用户、SYSTEM 和 Administrators 完全控制，并在发布前后复核。
+  - tar 工件会先在临时卷中以只读根文件系统、无网络、drop capabilities 和 `no-new-privileges` 方式预解包扫描，拒绝特殊文件、hardlink、绝对 symlink、越界 symlink 和缺失 symlink 目标，再允许写入目标卷。
+  - 恢复严格校验嵌套 manifest schema、manifest 与工件 SHA-256、Compose 配置 SHA、Git commit、项目版本、所有服务 image reference/image ID、bucket/index/TLS lineage、逻辑卷/物理卷唯一性和 source/target 物理卷不重叠。
+  - 目标卷必须属于目标 Compose project、具有正确 logical-volume label 且无 foreign container attachment；默认拒绝现有容器和非空卷。
+  - `-ForceRestore` 会先为原非空目标卷创建受限 ACL rollback archive；恢复失败时按卷原始 `missing`、`empty`、`nonempty` 三态删除、清空或回灌，若回滚本身异常则保留并报告归档路径。
+  - 恢复失败会停止并清理本轮 target 运行资源、删除本轮新建卷、恢复原空卷或原非空卷，并保持 target 隔离；备份结束会按 source 原始 running/exited/absent 状态和健康状态完整对账。
+  - CMS 明文输出必须是仓库和备份目录之外的绝对路径，父目录必须预先存在且路径链不得含 reparse point；明文只保存在内存，完整恢复成功末尾才以受限 ACL 临时文件原子发布。
+- 新增 `deploy/windows/tests/backup-restore.smoke.ps1`，共 24 项 fake Docker/CMS smoke，覆盖路径边界、备份根目录祖先/卷根与既有非空目录 ACL 门禁、manifest/工件损坏、嵌套 manifest、mutex 竞争、CMS 正负例与发布竞态、ACL、source 状态恢复、非空卷、物理卷重叠、错误卷标签、foreign attachment、image ID 不匹配、`-NoStartAfterRestore`、CMS 延迟发布、target 失败隔离，以及恢复提交后的 rollback 清理失败不反向回滚数据。
+- 新增 `deploy/windows/tests/backup-restore.integration.ps1`，使用随机 source/target Compose project 和仓库外临时目录，真实写入并恢复 PostgreSQL、MinIO、Redis、OpenSearch、TLS lineage 和 CMS 环境文件，同时校验 API、全部 Worker、beat、gateway、宿主端口边界、ACL、损坏 manifest 拒绝和运行中 target 拒绝。
+- `.github/workflows/backend-ci.yml` 的 Windows job 已加入独立 backup/restore smoke，并继续递归检查 `deploy/windows/**/*.ps1` 的 PowerShell 5.1 语法、ASCII 和无 BOM。
+- 已同步 `AGENT.md`、`PROJECT_PLAN.md`、`README.md`、`backend/README.md`、`docs/deployment-windows-docker.md` 和《企业网盘开发者技术计划书.md》的 `v0.4.0` 行为、安全边界、操作入口和验收要求。
 
-### 本地工作树中的未提交实现
+### 版本影响
 
-- `deploy/windows/manage.ps1` 已增加 `backup`、`backup-verify`、`restore` 动作及参数校验，并让 `up`、`down`、`tls-init`、`tls-renew`、计划任务注册和备份恢复共用 project-scoped Windows named mutex。
-- 新增 `deploy/windows/backup-restore.ps1` 初版：
-  - 从 `docker compose config --format json` 读取真实 project、network、service image 和 physical volume name，不手拼卷名。
-  - 在维护窗口按 gateway、API/beat、Worker、MinIO/Redis/OpenSearch 顺序静默写入面，PostgreSQL 使用 custom-format `pg_dump`。
-  - 以停止状态原始卷 tar 保存 MinIO、Redis、OpenSearch 和 `tls-certificates`，保留 MinIO 元数据、Redis 队列/AOF、OpenSearch 单节点索引及 Certbot symlink。
-  - 生成 UTF-8 manifest、工件大小、SHA-256、镜像引用/ID、Alembic revision、WAL LSN、原运行服务集合和原子发布目录。
-  - `.env.windows` 默认使用 Windows CMS 文档加密证书保存；`-SkipEnvironmentBackup` 仅供隔离测试。
-  - 恢复前校验 manifest、全部 SHA-256、`pg_restore --list` 和 tar 条目，拒绝同名 source/target project、运行中的目标容器和默认非空目标卷；原始数据卷要求相同 image reference 和 image ID。
-  - 恢复 PostgreSQL dump、MinIO/Redis/OpenSearch/TLS 卷，支持 `-ForceRestore`、显式配置解密输出和 `-NoStartAfterRestore`。
-- 新增 `deploy/windows/tests/backup-restore.integration.ps1` 初版，使用随机 source/target project、高端口和仓库外临时备份目录，写入 PostgreSQL、MinIO、Redis、OpenSearch 和测试 TLS lineage 后执行真实备份恢复。
-- 项目版本提升到 `0.4.0` 的代码和锁文件改动已在本地工作树准备，但相关说明文档尚未全部同步，因此尚未提交。
+- 本轮新增可执行的备份、校验、隔离恢复和失败回滚能力，属于向后兼容的部署功能扩展，项目版本从 `0.3.0` 提升到 `0.4.0`。
+- 数据库 migration、业务 OpenAPI path、对象存储 key、认证模型和 Worker payload 未发生破坏性变化；正式发布 tag 仍在后续合并 `main` 时创建。
 
-### 当前真实演练进度
+### 验证
 
-- 最新隔离演练已经实际完成：
-  - source project 完整启动并健康。
-  - PostgreSQL custom dump、MinIO/Redis/OpenSearch/TLS 卷归档成功。
-  - 正式备份目录原子发布，`backup-verify` 通过。
-  - 修改 `manifest.sha256` 的损坏备份被正确拒绝。
-  - 备份点之后继续修改 source PostgreSQL 与 MinIO，再停止 source。
-  - 备份成功恢复到名称、网络、卷和宿主端口均不同的 target project。
-  - PostgreSQL 只包含备份点记录，MinIO 对象内容回到备份点，Redis key、OpenSearch index、Alembic revision、TLS symlink/SAN、`/healthz` 和 `/readyz` 均已通过实际校验。
-- 最新一次演练在恢复后的 Compose 端口边界断言处暂停：PowerShell StrictMode 直接读取没有 `ports` 属性的 service，触发 `PropertyNotFoundStrict`。核心 restore 已完成，下一步应改为先检查 `PSObject.Properties["ports"]` 再判断集合。
-- 尚未跑到最新脚本末尾的 Worker/beat 显式集合断言和“运行中 target project 再次 restore 必须失败”负例。
-- 前几轮演练暴露并已修正：OpenSearch JSON 命令行 quoting、空 `List[string]` 参数绑定、PowerShell 5.1 native stderr 对探测命令的干扰、空卷 shell quoting、Compose volume label 警告和 MinIO Client 临时 OOM。
-- 每轮演练的临时 containers、volumes、networks 和宿主临时备份目录均已清理；当前没有 `enterprise-drive-backup-*` 资源残留。
+- 后端门禁已通过：`uv sync --frozen --all-extras --dev`、`uv lock --check`、Ruff format/check、Mypy、Pytest、Alembic SQL 和 OpenAPI；结果为 186 个文件格式通过、140 个 source file 无类型问题、`148 passed, 3 skipped`、OpenAPI `version=0.4.0` 且 29 条 path。
+- 真实 MinIO 集成测试已通过，结果为 `3 passed`。
+- 本机 HTTP/TLS 两套 Compose config、runtime/preview 镜像构建、默认/TLS/ACME 三套 Nginx `nginx -t` 和 `manage.ps1 config` 均已通过。
+- 2026-07-16 独立复跑 `backup-restore.smoke.ps1`，结果为 `24/24 passed`。
+- 四个 PowerShell 文件均通过 PowerShell 5.1 parser、ASCII 和无 BOM 检查；PSScriptAnalyzer `1.25.0` 结果为 `0 Error`、44 个命名/ShouldProcess/测试 runspace 等非阻塞 Warning。
+- 2026-07-16 最终真实 integration 使用 source project `enterprise-drive-backup-source-9f05318c92` 和 target project `enterprise-drive-backup-target-9f05318c92` 完成 source -> backup -> corrupt verify -> target restore：
+  - PostgreSQL 只恢复备份点数据，MinIO 对象回到备份点内容，Redis key、OpenSearch index、Alembic revision、TLS symlink/SAN 和 CMS 环境文件均通过。
+  - API `/healthz`、真实 PostgreSQL `/readyz`、全部 Worker、beat、gateway 和仅 gateway 发布宿主端口的边界均通过。
+  - 损坏 `manifest.sha256` 被拒绝，运行中的 target project 再次 restore 被拒绝。
+  - 备份目录和 CMS 输出 ACL 断言通过。
+- 演练结束后已确认 `enterprise-drive-backup-*` containers、volumes、networks、宿主临时目录和测试 CMS 证书均为 0。
+- Workflow YAML 已由 PyYAML 解析，顶层 `name`、`on`、`jobs` 和四个 job 均存在；`git diff --check` 已通过。
 
-### 暂停时的风险与未完成项
+### 阻塞与风险
 
-- `deploy/windows/backup-restore.ps1`、管理入口、集成脚本、`0.4.0` 版本改动和大部分文档同步仍在本地工作树，尚未提交。
-- 尚需补 fake Docker 参数/失败恢复 smoke，覆盖备份中途失败后的原服务状态恢复、同名 project、非空目标卷、镜像不匹配、路径穿越和 `-NoStartAfterRestore`。
-- Windows CMS 正例/错误证书解密负例尚未执行。
-- 当前只有 `.env.windows` 使用 CMS 加密；数据库、对象、索引和 TLS 私钥归档依赖备份宿主目录的 BitLocker、ACL 和外部备份介质加密，不能描述为完整包级应用层加密。
-- Redis/OpenSearch 使用停止后的原始卷快照，恢复仅支持相同镜像 ID、单节点同拓扑；切换版本或分布式拓扑前必须改用受支持的迁移/快照方案。
-- MinIO Server/Client 当前仍存在已记录 Critical 基线，正式上线前必须升级到修复镜像或完成可审计的自建修复镜像替换。
-- `README.md`、`backend/README.md`、`AGENT.md`、`PROJECT_PLAN.md`、`docs/deployment-windows-docker.md` 和《企业网盘开发者技术计划书.md》尚未按最终行为完整同步。
+- Windows CMS 只保护 `.env.windows`；PostgreSQL dump、MinIO/Redis/OpenSearch 原始卷和含 TLS 私钥的归档仍依赖 BitLocker、受限 NTFS ACL、加密外部介质和受控保管链。
+- `manifest.sha256` 和工件 SHA-256 只提供完整性检查，不认证备份制作者身份；来源认证仍需受保护签名或受控传输与保管链。
+- Redis/OpenSearch 原始卷恢复限定相同 image reference、相同实际 image ID 和单节点同拓扑；跨版本或拓扑变化必须使用对应产品支持的迁移/快照机制。
+- MinIO Server/Client 仍有已记录的 19/12 个 Critical 基线；CI 只阻断新增 Critical，正式上线前仍需升级到修复镜像或替换为可审计的自建修复镜像。
+- `-ForceRestore` 回滚属于尽力恢复；回滚异常时会保留受限 ACL rollback archive 并报告路径，仍需人工确认数据状态。
+- 真实公网 DNS、受信证书签发、外部双域名 HTTPS 和实际 Certbot renewal lineage 续期仍属于生产环境验收项。
 
-### 恢复工作时的下一步
+### 下一步
 
-1. 修复 integration 脚本的 StrictMode `ports` 属性判断，重新跑完整 source -> backup -> corrupt verify -> target restore 演练直至全部断言和清理通过。
-2. 增加 Windows fake Docker smoke 与 CMS 证书正负例，并接入现有 Windows CI job。
-3. 审计 helper 的失败恢复、路径边界、目标卷清理和敏感信息输出，重新运行 PowerShell 5.1 parser、ASCII/no-BOM、Compose JSON 和 `git diff --check`。
-4. 同步全部治理文档与 `0.4.0` 版本说明，再运行 uv、Ruff、Mypy、Pytest、Alembic SQL、OpenAPI、两套 Compose/Nginx 和镜像构建门禁。
-5. 分小步中文 commit 并 push `dev`，等待 GitHub Actions 全部通过后再结束本阶段。
+1. 提交并推送 `v0.4.0` 备份恢复实现到 `dev`，等待 GitHub Actions `backend-ci` 全部通过，并把最终 run ID 回填到本记录。
+2. 按生产恢复演练周期配置独立备份介质、保留策略、离线副本、告警和定期抽样恢复记录。
+3. 恢复推进 MinIO multipart 稳定封装、真实对象存储异常恢复与升级兼容、高密级代理下载、多维配额和治理任务告警。
 
-### 当前涉及文件
+### 涉及文件
 
+- `.github/workflows/backend-ci.yml`
+- `AGENT.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `README.md`
+- `backend/README.md`
+- `backend/app/core/config.py`
+- `backend/pyproject.toml`
+- `backend/tests/test_app.py`
+- `backend/uv.lock`
 - `deploy/windows/manage.ps1`
 - `deploy/windows/backup-restore.ps1`
 - `deploy/windows/tests/backup-restore.integration.ps1`
-- `backend/pyproject.toml`
-- `backend/uv.lock`
-- `backend/app/core/config.py`
-- `backend/tests/test_app.py`
-- `README.md`
+- `deploy/windows/tests/backup-restore.smoke.ps1`
 - `docs/deployment-windows-docker.md`
 - `企业网盘开发者技术计划书.md`
 

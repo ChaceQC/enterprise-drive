@@ -1,6 +1,6 @@
 # Windows 11 Docker 正式部署说明
 
-> 适用项目版本：`v0.3.0`
+> 适用项目版本：`v0.4.0`
 >
 > 当前代码基线：Windows 本机 HTTP `18080/19000` 与公网 ACME/TLS `80/443` 双模式；真实受信证书签发和双域名 HTTPS 验收需要生产 DNS/网络环境。
 
@@ -205,6 +205,9 @@ CERTBOT_EMAIL=ops@example.com
 | `up -Tls [-Build]` | 使用已有证书启动或更新公网 TLS gateway |
 | `status` | 查看全部容器与健康状态 |
 | `logs [-Service NAME] [-Tail N]` | 查看全部或指定服务日志 |
+| `backup -BackupDirectory PATH -ConfigEncryptionCertificateThumbprint THUMBPRINT` | 静默 source 写入面并创建 PostgreSQL、MinIO、Redis、OpenSearch、TLS 和 CMS 环境文件备份 |
+| `backup-verify -BackupPath PATH` | 校验 manifest、工件、PostgreSQL dump、隔离 tar 预扫描、精确代码/configuration lineage 及 15 个默认服务 image reference/actual image ID |
+| `restore -BackupPath PATH` | 把已校验备份恢复到不同且已停止的 Compose project，支持受限 ACL ForceRestore rollback |
 | `tls-init -Tls [-TlsEmail EMAIL] [-TlsStaging]` | 用 ACME webroot bootstrap 首次签发双域名证书并切换到 TLS gateway |
 | `tls-renew -Tls [-ForceRenewal]` | 执行 Certbot 续期，随后校验并热重载 Nginx |
 | `tls-certificates -Tls` | 查看 Certbot 管理的证书和到期时间 |
@@ -423,27 +426,117 @@ gateway 必须负责：
 - 续期由宿主 PowerShell 命令或同一 Windows 用户的计划任务触发，不向容器挂载 Docker socket。
 - 当前机器已用自签名双域名证书在标准宿主 `80/443` 启动完整正式编排，验证 HTTP `308`、API `/healthz`/`/readyz`、HSTS、MinIO CORS、S3v4 对象往返、未知 Host 拒绝、临时 one-off bootstrap、原 gateway 恢复、大小写无关计划任务删除和全部卷/端口清理。真实受信证书、外部 DNS/网络、浏览器信任链和 Certbot renewal lineage 实际续期仍需在生产网络验收。
 
-## 11. 备份与恢复检查清单
+## 11. 自动化备份、校验与隔离恢复
 
-本节是上线前操作要求，不代表自动化备份恢复已经交付。当前仓库尚未提供 `pg_dump`/`pg_restore`、MinIO 镜像、证书卷导出、加密校验和同一业务时间点编排脚本，也尚未完成隔离环境恢复演练。
+`v0.4.0` 已通过 `deploy/windows/manage.ps1` 交付 `backup`、`backup-verify` 和 `restore`。脚本从 `docker compose config --format json` 获取真实 project、network、service image 和 physical volume name，不手工拼接 Compose 资源名。备份、恢复、`up`、`down` 和 TLS 写操作共用按 project 名称派生的 Windows named mutex；`backup`、`restore` 还会按每个 source/target physical volume name 获取独立 mutex，防止不同 Compose project 通过同一物理卷并发维护。
 
-更新前至少备份：
+### 11.1 备份内容与一致性
 
-1. PostgreSQL：一致性 `pg_dump`。
-2. MinIO：对象镜像或版本化备份。
-3. `.env.windows`：加密保存，不进入仓库。
-4. TLS 证书和 gateway 配置。
-5. 当前镜像 tag、Compose 文件版本、migration 版本。
+`backup` 会在维护窗口按 gateway、API/beat、各类 Worker、MinIO/Redis/OpenSearch 的顺序静默写入面，并逐服务记录 source 容器 ID、原始 `running`/`exited` 状态和 health。PostgreSQL 使用 custom-format `pg_dump`；MinIO、Redis、OpenSearch 和 `tls-certificates` 使用停止状态原始卷 tar。备份完成或中途失败后，脚本都会恢复并对账 source 原运行、退出与健康状态。
 
-Redis 主要保存缓存、限流和队列状态，不作为权限、容量、文件或审计事实来源。OpenSearch 索引可从 PostgreSQL 与对象存储重建，但仍需记录索引重建步骤和耗时。
+正式备份目录只由校验通过的 `.partial-*` staging 原子发布，主要内容包括：
 
-备份要求：
+- `postgres/postgres.dump`
+- `volumes/minio-data.tar.gz`
+- `volumes/redis-data.tar.gz`
+- `volumes/opensearch-data.tar.gz`
+- `volumes/tls-certificates.tar.gz`
+- `secrets/environment.cms`
+- 归档时的 `compose.windows.yml` 与 Nginx templates
+- UTF-8 `manifest.json` 与 `manifest.sha256`
 
-- 输出到专用 Windows 目录或备份卷。
-- 设置保留期和容量告警。
-- 备份文件加密。
-- 定期在隔离环境执行恢复演练。
-- 恢复 PostgreSQL 与 MinIO 时保持同一业务时间点，避免元数据和对象版本错位。
+manifest 记录工件大小和 SHA-256、source project、逐服务原状态、精确 Compose SHA-256、项目版本、Git commit、Alembic revision、PostgreSQL WAL LSN、CMS 证书 thumbprint，以及 `DRIVE_S3_BUCKET`、`DRIVE_OPENSEARCH_INDEX_NAME`、`DRIVE_TLS_CERT_NAME` lineage 名称。镜像清单覆盖 15 个无 profile 默认服务（`gateway`、`api`、`migration`、`seed`、`minio-init`、`beat`、5 个 Worker、PostgreSQL、Redis、MinIO、OpenSearch），每项 image ID 都来自该服务实际 Compose 容器，并在备份时确认与当前 image reference 指向的本地 image ID 一致。
+
+备份根目录和 `.partial-*` staging 会自动关闭 ACL 继承，只允许当前 Windows 用户、SYSTEM、Administrators 完全控制；校验通过后 staging 原子改名为正式备份目录并保留该 restricted ACL。路径链中检测到 NTFS reparse point 时拒绝继续。
+
+### 11.2 CMS 证书与私钥保管
+
+正式备份默认要求当前 Windows 用户 `Cert:\CurrentUser\My` 中存在 CMS 文档加密证书。建议创建专用、可导出私钥的证书：
+
+```powershell
+$backupCertificate = New-SelfSignedCertificate `
+    -Subject "CN=Enterprise Drive Backup" `
+    -Type DocumentEncryptionCert `
+    -KeyExportPolicy Exportable `
+    -CertStoreLocation "Cert:\CurrentUser\My" `
+    -NotAfter (Get-Date).AddYears(3)
+
+$pfxPassword = Read-Host "Backup certificate PFX password" -AsSecureString
+New-Item -ItemType Directory -Path "E:\offline-key-escrow" -Force
+Export-PfxCertificate `
+    -Cert "Cert:\CurrentUser\My\$($backupCertificate.Thumbprint)" `
+    -FilePath "E:\offline-key-escrow\enterprise-drive-backup.pfx" `
+    -Password $pfxPassword
+```
+
+PFX 私钥必须与备份数据分开保存在受保护的加密介质中，并演练重新导入和 CMS 解密。丢失私钥后，`environment.cms` 将失去恢复条件。`-SkipEnvironmentBackup` 只用于隔离测试，不用于正式备份。
+
+### 11.3 创建并校验备份
+
+`-BackupDirectory` 必须是仓库外的绝对专用目录，不得是卷根、仓库目录或仓库祖先。若目录已经存在且非空，它必须已经应用本项目 restricted ACL；脚本会拒绝直接重写任意既有宽范围目录的 ACL：
+
+```powershell
+$backupRoot = "D:\enterprise-drive-backups"
+$backupPath = [string](
+    .\deploy\windows\manage.ps1 backup `
+        -EnvFile .env.windows `
+        -BackupDirectory $backupRoot `
+        -ConfigEncryptionCertificateThumbprint $backupCertificate.Thumbprint `
+        -QuiesceTimeoutSeconds 300 |
+        Select-Object -Last 1
+)
+
+.\deploy\windows\manage.ps1 backup-verify `
+    -EnvFile .env.windows `
+    -BackupPath $backupPath
+```
+
+`backup-verify` 会执行以下门禁：
+
+- 校验 `manifest.sha256` 格式和 `manifest.json` SHA-256。
+- 校验每个工件的路径边界、唯一性、大小和 SHA-256。
+- 使用 `pg_restore --list` 验证 PostgreSQL custom dump。
+- 要求当前 `compose.windows.yml` SHA-256、Git commit、`backend/pyproject.toml` 项目版本、S3 bucket、OpenSearch index 和 `DRIVE_TLS_CERT_NAME` lineage 名称与 manifest 精确一致。
+- 要求 15 个默认服务逐项具有相同 image reference 和 image ID；归档工具也必须与 manifest 中 PostgreSQL 实际容器 image ID 一致。
+- 先在 `--network none`、只读根文件系统、只读备份 bind、`--cap-drop ALL`、`no-new-privileges` 的容器中检查 tar 路径，再预解包到一次性临时 Docker volume；拒绝绝对路径、父目录穿越、硬链接、块/字符设备、FIFO、socket、悬空 symlink 和解析后越出临时卷的 symlink。
+- tar 检查结束后必须删除临时卷；扫描失败或临时卷清理失败都会使校验失败。
+
+因此，复制备份到另一台主机时，应先检出 manifest 记录的精确 Git commit，保持相同 `compose.windows.yml`、项目版本和 bucket/index/TLS lineage 配置，并准备全部 15 个服务对应的固定镜像，再执行 `backup-verify`。
+
+### 11.4 隔离恢复
+
+恢复必须使用与 source 不同的 `COMPOSE_PROJECT_NAME`。建议复制环境文件并修改 project 名、API/S3 宿主端口及其他会冲突的宿主资源：
+
+```powershell
+Copy-Item .env.windows .env.restore.windows
+# 编辑 .env.restore.windows：
+# - 使用不同的 COMPOSE_PROJECT_NAME
+# - 使用不与 source 冲突的 DRIVE_GATEWAY_PORT / DRIVE_STORAGE_GATEWAY_PORT
+
+.\deploy\windows\manage.ps1 restore `
+    -EnvFile .env.restore.windows `
+    -BackupPath $backupPath `
+    -RestoreEnvironmentOutput "D:\enterprise-drive-secure\restored-source.env" `
+    -NoStartAfterRestore
+```
+
+恢复前脚本会再次执行完整备份校验，并要求全部 15 个默认服务的 target image reference 和本地 image ID 与 manifest 一致。target 有运行中或过渡态容器时始终拒绝恢复；source/target 任一 physical volume 重叠、已有卷 Compose project/logical-volume 标签不符，或卷仍附着到 foreign container 时也会拒绝。默认还会拒绝已有容器和非空目标卷。
+
+`-ForceRestore` 只用于显式清理已停止的 target 容器或非空卷，不会跳过同 project、运行状态、卷重叠/标签/attachment、路径、SHA-256、tar、dump、代码/configuration lineage 或镜像一致性门禁。清空任何原非空目标卷前，脚本会在 Windows 临时目录创建 restricted ACL rollback archive；正常恢复成功后删除它。恢复一旦提交，后续归档清理失败只会返回 maintenance cleanup error、保留并报告归档路径，不会再次清空或回滚已经恢复的数据。`-NoStartAfterRestore` 会在 PostgreSQL dump 恢复和 Alembic revision 校验后停止 PostgreSQL，不启动完整业务栈，适合先检查数据卷和解密配置。
+
+`-RestoreEnvironmentOutput` 必须是仓库和备份目录外的绝对、尚不存在文件路径，父目录必须预先存在且不得经过 NTFS reparse point；它不会覆盖当前 target 的 `-EnvFile`。CMS 明文先保存在 PowerShell 内存中，只有本次恢复模式的数据卷、PostgreSQL、Alembic revision 和镜像门禁全部验证成功后，才在最后一步写入同目录 restricted ACL 临时文件并原子改名发布；未使用 `-NoStartAfterRestore` 时还会先完成完整服务健康与实际容器 image ID 对账。原子发布前失败不会创建输出；若发布竞态中目标路径被其他进程创建，脚本会保留该 foreign file，不在恢复失败清理中删除。
+
+未使用 `-NoStartAfterRestore` 时，脚本会启动完整 target Compose project 并等待健康，再逐项核对 15 个默认服务实际容器 image ID。恢复中途失败后，脚本会执行 Compose down、删除本轮新建卷、把原本为空的既有卷清回空状态，并从 rollback archive 还原 `-ForceRestore` 前的原非空卷；卷回滚失败时会保留并报告受限 ACL rollback archive 绝对路径。target 不会以半恢复状态继续对外提供服务。
+
+### 11.5 安全与兼容边界
+
+- Windows CMS 只加密 `.env.windows`。PostgreSQL dump、MinIO/Redis/OpenSearch 原始卷 tar 和包含 TLS 私钥的证书卷 tar 不具备完整包级应用层加密，必须依赖备份宿主 BitLocker、脚本自动应用的 restricted NTFS ACL 和加密外部介质。
+- `manifest.sha256` 和工件 SHA-256 只校验完整性，不认证备份制作者身份。需要认证来源时，应另外使用受保护签名、受控传输和可审计保管链。
+- Redis/OpenSearch 使用停止状态原始卷归档，只支持相同 image reference、相同 image ID、单节点同拓扑。跨版本或拓扑变化应使用 Redis/OpenSearch 支持的迁移、导出或快照机制。
+- `-ForceRestore` rollback archive 是失败时的尽力恢复机制；底层卷驱动、磁盘或 Docker 故障仍可能需要人工处理，因此发现回滚异常后不得删除脚本报告的受限 ACL 归档。
+- PostgreSQL 是核心事实来源；Redis 主要保存缓存、限流和队列状态，OpenSearch 索引可由 PostgreSQL 与对象存储重建，但仍应记录重建步骤和耗时。
+- 当前固定 MinIO Server/Client 镜像仍有 19/12 个 Critical 基线。供应链门禁只阻断新增 Critical，正式上线前仍需升级到修复镜像或完成可审计的自建修复镜像替换。
+- 备份目录必须设置保留期、容量告警、最小权限 ACL、离线副本和周期隔离恢复演练。
 
 ## 12. 发布与更新
 
@@ -451,7 +544,14 @@ Redis 主要保存缓存、限流和队列状态，不作为权限、容量、�
 
 ```powershell
 .\deploy\windows\manage.ps1 config -Quiet
-# 按本章备份要求完成 PostgreSQL、MinIO、配置和证书备份
+$backupPath = [string](
+    .\deploy\windows\manage.ps1 backup `
+        -EnvFile .env.windows `
+        -BackupDirectory "D:\enterprise-drive-backups" `
+        -ConfigEncryptionCertificateThumbprint BACKUP_CERTIFICATE_THUMBPRINT |
+        Select-Object -Last 1
+)
+.\deploy\windows\manage.ps1 backup-verify -EnvFile .env.windows -BackupPath $backupPath
 .\deploy\windows\manage.ps1 up -Build
 .\deploy\windows\manage.ps1 status
 ```
@@ -471,6 +571,7 @@ Redis 主要保存缓存、限流和队列状态，不作为权限、容量、�
 - Preview 工具版本可读取。
 - 容器无持续重启。
 - Windows 宿主磁盘空间正常。
+- 发布前备份已通过 `backup-verify`，并且最近一次不同 Compose project 隔离恢复演练有记录。
 
 ## 13. 回滚
 
@@ -489,6 +590,7 @@ Redis 主要保存缓存、限流和队列状态，不作为权限、容量、�
 - 应用回滚不依赖自动回滚 DDL。
 - 破坏性 migration 必须提前使用影子字段、双写和分阶段删除。
 - 数据库备份恢复只在明确维护窗口执行。
+- 恢复前先在不同 Compose project 使用 `-NoStartAfterRestore` 验证 dump、数据卷、Alembic revision、CMS 解密和镜像一致性，再决定是否切换业务流量。
 - Worker payload 至少兼容一个旧版本。
 
 ## 14. 验收命令
@@ -541,6 +643,22 @@ Invoke-WebRequest https://drive.example.com/readyz
 ```
 
 HTTP 检查应返回 `308` 并跳到同 Host 的 HTTPS。随后检查响应包含预期 HSTS、安全头和受信证书链，并通过 `https://storage.example.com` 的真实预签名 PUT/GET 验证 Host、查询参数、请求体和签名未被 gateway 改写。`tls-renew -Tls -ForceRenewal` 只在受控演练窗口使用，用于验证续期和热重载；日常计划任务不要强制续期。
+
+备份与隔离恢复：
+
+```powershell
+.\deploy\windows\manage.ps1 backup-verify `
+    -EnvFile .env.windows `
+    -BackupPath "D:\enterprise-drive-backups\BACKUP_ID"
+
+.\deploy\windows\manage.ps1 restore `
+    -EnvFile .env.restore.windows `
+    -BackupPath "D:\enterprise-drive-backups\BACKUP_ID" `
+    -RestoreEnvironmentOutput "D:\enterprise-drive-secure\restored-source.env" `
+    -NoStartAfterRestore
+```
+
+隔离恢复后应检查 PostgreSQL 备份点、MinIO 对象、Redis key、OpenSearch index、Alembic revision、TLS symlink/SAN 和 CMS 环境文件；随后按需启动 target，验证 `/healthz`、`/readyz`、全部 Worker、beat、gateway 以及只有 gateway 发布宿主端口。验证结束后清理 target containers、volumes、networks、解密环境文件和临时证书。
 
 内部服务端口检查：
 

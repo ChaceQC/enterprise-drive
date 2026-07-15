@@ -36,7 +36,7 @@ async def test_healthz(client: AsyncClient) -> None:
     assert response.json() == {
         "status": "ok",
         "service": "企业网盘",
-        "version": "0.3.0",
+        "version": "0.4.0",
         "environment": "test",
     }
 

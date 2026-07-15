@@ -1,5 +1,7 @@
 # 后端工程
 
+> 适用项目版本：`v0.4.0`
+
 本目录承载企业网盘后端，使用 Python 3.12+、uv、FastAPI、SQLAlchemy、PostgreSQL、Redis、S3 兼容对象存储、OpenSearch 和 Celery。
 
 ## 本地准备
@@ -44,6 +46,66 @@ Copy-Item .env.windows.example .env.windows
 公网入口使用 `https://drive.example.com` 和 `https://storage.example.com`，gateway 在 `80/443` 按 Host 分流并把 HTTP 重定向到 HTTPS。外部 S3 端点不能使用 `/s3` 等路径前缀。生产证书签发和续期要求两个域名解析到当前 Windows 宿主、外部 TCP 80/443 可达，并且 Docker Desktop 运行；`tls-renew` 和计划任务注册只接受 `tls-init` 建立的 Certbot renewal lineage，单独挂载的手工证书不具备该续期状态。Preview Worker 的 CPU、内存和临时磁盘配额请参考 `../docs/deployment-preview-worker.md`。
 
 正式 Compose 中 API 使用受控 SQLAlchemy QueuePool；各 Celery Worker 会覆盖 `DRIVE_DATABASE_POOL_MODE=null`。这是因为当前同步 Celery task 使用 `asyncio.run()` 执行异步服务，不能跨任务事件循环复用 asyncpg 连接池。
+
+### 备份、校验与隔离恢复
+
+`v0.4.0` 已通过根目录 `deploy/windows/manage.ps1` 提供 `backup`、`backup-verify` 和 `restore`。备份目录必须是仓库外的绝对专用目录，不得是卷根、仓库目录或仓库祖先；若既有目录非空，则必须已经使用本项目 restricted ACL，脚本不会直接重写任意宽范围目录 ACL。正式备份默认使用当前 Windows 用户证书存储中的 CMS 文档加密证书保护 `.env.windows`。建议创建可导出私钥的专用证书，并把 PFX 单独保存在加密离线介质中：
+
+```powershell
+$backupCertificate = New-SelfSignedCertificate `
+    -Subject "CN=Enterprise Drive Backup" `
+    -Type DocumentEncryptionCert `
+    -KeyExportPolicy Exportable `
+    -CertStoreLocation "Cert:\CurrentUser\My" `
+    -NotAfter (Get-Date).AddYears(3)
+
+$pfxPassword = Read-Host "Backup certificate PFX password" -AsSecureString
+New-Item -ItemType Directory -Path "E:\offline-key-escrow" -Force
+Export-PfxCertificate `
+    -Cert "Cert:\CurrentUser\My\$($backupCertificate.Thumbprint)" `
+    -FilePath "E:\offline-key-escrow\enterprise-drive-backup.pfx" `
+    -Password $pfxPassword
+```
+
+创建备份后立即执行校验：
+
+```powershell
+$backupRoot = "D:\enterprise-drive-backups"
+$backupPath = [string](
+    .\deploy\windows\manage.ps1 backup `
+        -EnvFile .env.windows `
+        -BackupDirectory $backupRoot `
+        -ConfigEncryptionCertificateThumbprint $backupCertificate.Thumbprint |
+        Select-Object -Last 1
+)
+
+.\deploy\windows\manage.ps1 backup-verify `
+    -EnvFile .env.windows `
+    -BackupPath $backupPath
+```
+
+manifest 会记录 15 个无 profile 默认服务实际 Compose 容器的 image ID，而不是只记录 PostgreSQL 镜像；校验还要求当前 `compose.windows.yml` SHA-256、Git commit、`backend/pyproject.toml` 项目版本、`DRIVE_S3_BUCKET`、`DRIVE_OPENSEARCH_INDEX_NAME` 和 `DRIVE_TLS_CERT_NAME` lineage 名称与备份完全一致。卷 tar 会先在无网络、只读根文件系统、只读备份挂载、drop all capabilities 和 `no-new-privileges` 的临时容器/临时卷中预解包，拒绝路径穿越、硬链接、特殊文件及越界 symlink 后才进入恢复。
+
+隔离恢复必须使用另一个 `COMPOSE_PROJECT_NAME`。复制目标环境文件后，应同时调整目标宿主端口，并确认目标 project 没有运行中的容器：
+
+```powershell
+Copy-Item .env.windows .env.restore.windows
+# 编辑 .env.restore.windows：
+# - 使用不同的 COMPOSE_PROJECT_NAME
+# - 使用不与 source 冲突的 gateway 宿主端口
+
+.\deploy\windows\manage.ps1 restore `
+    -EnvFile .env.restore.windows `
+    -BackupPath $backupPath `
+    -RestoreEnvironmentOutput "D:\enterprise-drive-secure\restored-source.env" `
+    -NoStartAfterRestore
+```
+
+`backup` 和 `restore` 会同时获取 project 级及每个 source/target physical volume 的 Windows named mutex。默认恢复会拒绝已有容器、非空目标卷、source/target physical volume 重叠、错误 Compose 卷标签或 foreign container attachment；15 个默认服务的 image reference/actual image ID 任一不一致也会拒绝。`-ForceRestore` 只允许清理已停止的 target 容器或非空卷，并会在清空原非空卷前创建 restricted ACL rollback archive；恢复失败时会停止 target、删除新卷、清空原空卷并还原原非空卷，回滚异常时保留并报告归档绝对路径。恢复一旦提交，后续 rollback archive 清理失败只会返回 maintenance cleanup error 并保留归档，不会再次清空或回滚已恢复卷。`-NoStartAfterRestore` 会在 PostgreSQL 恢复和 Alembic revision 校验后停止服务，适合隔离验收。
+
+`-RestoreEnvironmentOutput` 只把备份中的 CMS 环境文件解密到仓库和备份目录外的绝对、尚不存在文件路径，不会替换当前 target 的 `-EnvFile`；父目录必须预先存在且不得经过 reparse point。CMS 明文先保存在内存中，只在本次恢复模式的数据、Alembic revision 和镜像门禁全部成功后的最后一步，通过同目录 restricted ACL 临时文件原子发布；未使用 `-NoStartAfterRestore` 时还会先完成全栈健康和实际容器 image ID 对账。若原子发布时目标路径已被其他进程创建，失败清理会保留该 foreign file。备份根目录、staging/正式备份、rollback archive 和最终 CMS 输出会自动关闭 ACL 继承，并只允许当前用户、SYSTEM、Administrators 完全控制。
+
+Windows CMS 只加密 `.env.windows`。PostgreSQL dump、MinIO/Redis/OpenSearch 原始卷 tar 和包含私钥的 TLS 证书卷 tar 仍依赖 BitLocker、restricted NTFS ACL 与加密外部介质。`manifest.sha256` 和工件 SHA-256 只提供完整性校验，不认证备份制作者身份。Redis/OpenSearch 原始卷恢复只支持相同 image reference、相同 image ID、单节点同拓扑；`-ForceRestore` rollback 属于尽力恢复。当前 MinIO Server/Client 仍有 19/12 个 Critical 基线，正式上线前仍需升级到修复镜像或使用可审计的自建修复镜像。完整操作和验收边界见 `../docs/deployment-windows-docker.md`。
 
 ## 常用验证
 

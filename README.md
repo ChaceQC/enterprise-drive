@@ -1,6 +1,6 @@
 # 企业网盘
 
-企业网盘后端工程，当前项目版本为 `0.3.0`，目标是实现一个可试点上线的企业级文件管理服务。项目以《企业网盘开发者技术计划书.md》为技术基线，优先保障文件元数据、对象存储、权限、审计、搜索和异步任务之间的一致性。
+企业网盘后端工程，当前项目版本为 `0.4.0`，目标是实现一个可试点上线的企业级文件管理服务。项目以《企业网盘开发者技术计划书.md》为技术基线，优先保障文件元数据、对象存储、权限、审计、搜索和异步任务之间的一致性。
 
 ## 技术基线
 
@@ -26,7 +26,7 @@
 - 目录权限、空间角色、拒绝优先、权限缓存和高危动作二次校验。
 - 内部分享、外链分享、提取码、过期、次数限制、撤销。
 - 预览 Worker、搜索索引 Worker、审计 outbox dispatcher。
-- Docker Compose 本地开发环境、Windows 11 Docker 正式部署、Alembic migration、CI 质量门禁。
+- Docker Compose 本地开发环境、Windows 11 Docker 正式部署、自动化备份/校验/隔离恢复、Alembic migration、CI 质量门禁。
 
 ## 当前状态
 
@@ -82,4 +82,10 @@ GitHub `backend-ci` 会启动临时 MinIO，并运行这组真实对象存储集
 
 Compose 内的 Nginx gateway 是唯一宿主端口入口。默认本机模式继续使用 API `http://localhost:18080` 和 S3 外部端点 `http://localhost:19000`。公网 TLS 模式已提供 ACME HTTP-01 bootstrap、Certbot 证书卷、TLS server block、HTTP `308` 跳转、`80/443` 双域名 Host 分流、证书续期与 Nginx 热重载命令；生产使用 `https://drive.example.com`、`https://storage.example.com` 时，必须先配置真实 DNS、邮箱、API/MinIO CORS、Trusted Hosts、Secure Cookie 和 S3 公共端点，执行 `manage.ps1 tls-init -Tls` 后再运行 `manage.ps1 up -Tls -Build` 启动全部 Worker 和 beat。API、Worker、PostgreSQL、Redis、OpenSearch、MinIO API/Console 等内部服务不发布宿主端口。容器内 API/Worker 通过 `http://minio:9000` 访问对象存储，不能把内部服务名返回给浏览器。
 
-正式编排还包含真实 PostgreSQL `/readyz` 探针、独立 Celery beat、隔离的 Preview Worker 和 named volumes。本机已用自签名双域名证书在标准宿主 `80/443` 启动完整编排，验证 HTTP `308`、API readiness、MinIO CORS/S3v4、临时 ACME bootstrap、原 gateway 恢复和彻底清理；公网受信证书签发与真实续期仍需要生产 DNS/网络环境。自动化备份恢复仍是紧接着的上线任务。完整流程见 [Windows 11 Docker 部署说明](docs/deployment-windows-docker.md)，预览资源限制见 [预览 Worker 部署说明](docs/deployment-preview-worker.md)。Kubernetes、systemd 仅作为未来可选迁移方案。
+正式编排还包含真实 PostgreSQL `/readyz` 探针、独立 Celery beat、隔离的 Preview Worker、named volumes 和 `v0.4.0` 自动化备份恢复。`manage.ps1 backup` 会生成 PostgreSQL custom dump、MinIO/Redis/OpenSearch/TLS 停止状态卷归档、CMS 环境文件密文和严格 manifest；manifest 从 15 个无 profile 默认服务的实际 Compose 容器记录 image ID，并记录工件大小/SHA-256、精确 `compose.windows.yml` SHA-256、Git commit、项目版本、S3 bucket、OpenSearch index、`DRIVE_TLS_CERT_NAME` lineage 名称、Alembic revision 与 WAL LSN。`backup-verify` 要求当前 Git HEAD、Compose、项目版本、configuration lineage 和全部 15 个服务镜像与 manifest 精确一致，并在无网络、只读、drop capabilities 的临时容器/卷中预解包扫描 tar。
+
+`backup` 和 `restore` 同时使用 project 级与逐 physical volume Windows mutex；备份根目录会拒绝卷根、仓库目录/祖先及未预先使用 restricted ACL 的既有非空目录，staging/正式备份、`-ForceRestore` rollback archive 和恢复后的 CMS 文件会自动应用只允许当前用户、SYSTEM、Administrators 的 restricted ACL。`restore` 只接受不同且已停止的 Compose project，并拒绝 source/target 卷重叠、错误卷标签、foreign attachment；使用 `-ForceRestore` 时会先归档原非空卷，失败后还原原非空卷、清空原空卷、删除新卷并停止 target，回滚异常则保留并报告归档路径。恢复提交后的 rollback cleanup 异常只报告维护失败，不会反向回滚已恢复数据。CMS 明文输出必须使用仓库和备份目录外的绝对新文件路径、已有父目录，并只在本次恢复模式全部门禁成功的末尾原子发布；若发布竞态中目标被其他进程创建，脚本保留该 foreign file。真实随机 source/target project 演练已验证数据库和对象回到同一备份点、CMS 环境文件解密、TLS lineage、Worker/beat、gateway 与健康检查。
+
+备份安全边界如下：Windows CMS 只加密 `.env.windows`，PostgreSQL dump、MinIO/Redis/OpenSearch 原始卷归档和 TLS 证书卷归档仍依赖 BitLocker、restricted NTFS ACL 与加密外部介质；SHA-256 只证明内容与 manifest 一致，不认证备份制作者身份；Redis/OpenSearch 原始卷只适用于相同 image reference/image ID、单节点同拓扑；`-ForceRestore` rollback 属于尽力恢复。当前 MinIO Server/Client 仍有 19/12 个 Critical 基线，CI 阻断新增 Critical 不代表现有风险已经消除。
+
+本机已用自签名双域名证书在标准宿主 `80/443` 启动完整编排，验证 HTTP `308`、API readiness、MinIO CORS/S3v4、临时 ACME bootstrap、原 gateway 恢复和彻底清理；公网受信证书签发与真实续期仍需要生产 DNS/网络环境。完整流程见 [Windows 11 Docker 部署说明](docs/deployment-windows-docker.md)，预览资源限制见 [预览 Worker 部署说明](docs/deployment-preview-worker.md)。Kubernetes、systemd 仅作为未来可选迁移方案。

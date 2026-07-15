@@ -439,6 +439,16 @@ jobs:
               }
           }
 
+      - name: Run Windows backup and restore smoke tests
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          .\deploy\windows\tests\backup-restore.smoke.ps1
+
+      - name: Validate Windows TLS fake Docker guards
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
           $fakeBin = Join-Path $env:RUNNER_TEMP "enterprise-drive-fake-docker"
           New-Item -ItemType Directory -Path $fakeBin -Force | Out-Null
           $env:FAKE_DOCKER_LOG = Join-Path $env:RUNNER_TEMP "enterprise-drive-docker-args.log"

@@ -7,6 +7,9 @@ param(
         "down",
         "status",
         "logs",
+        "backup",
+        "backup-verify",
+        "restore",
         "tls-init",
         "tls-renew",
         "tls-certificates",
@@ -30,6 +33,24 @@ param(
 
     [switch]$Tls,
 
+    [string]$BackupDirectory,
+
+    [string]$BackupPath,
+
+    [ValidatePattern("^[A-Fa-f0-9]{40}$")]
+    [string]$ConfigEncryptionCertificateThumbprint,
+
+    [switch]$SkipEnvironmentBackup,
+
+    [string]$RestoreEnvironmentOutput,
+
+    [switch]$ForceRestore,
+
+    [switch]$NoStartAfterRestore,
+
+    [ValidateRange(30, 3600)]
+    [int]$QuiesceTimeoutSeconds = 300,
+
     [string]$TlsEmail,
 
     [switch]$TlsStaging,
@@ -45,6 +66,10 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+$InvocationParameters = @{}
+foreach ($ParameterName in $PSBoundParameters.Keys) {
+    $InvocationParameters[$ParameterName] = $PSBoundParameters[$ParameterName]
+}
 
 $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [Console]::InputEncoding = $Utf8NoBom
@@ -80,7 +105,10 @@ if (-not (Test-Path -LiteralPath $ComposeFile -PathType Leaf)) {
 }
 
 if (-not (Test-Path -LiteralPath $EnvFile -PathType Leaf)) {
-    if ($Action -eq "config" -and (Test-Path -LiteralPath $ExampleEnvFile -PathType Leaf)) {
+    if (
+        $Action -in @("config", "backup-verify") -and
+        (Test-Path -LiteralPath $ExampleEnvFile -PathType Leaf)
+    ) {
         $EnvFile = $ExampleEnvFile
     }
     else {
@@ -163,6 +191,79 @@ function Set-ProcessEnvironmentValue {
         $Value,
         [System.EnvironmentVariableTarget]::Process
     )
+}
+
+function Assert-ActionParameters {
+    $BackupParameterNames = @(
+        "BackupDirectory",
+        "BackupPath",
+        "ConfigEncryptionCertificateThumbprint",
+        "SkipEnvironmentBackup",
+        "RestoreEnvironmentOutput",
+        "ForceRestore",
+        "NoStartAfterRestore",
+        "QuiesceTimeoutSeconds"
+    )
+
+    switch ($Action) {
+        "backup" {
+            if ([string]::IsNullOrWhiteSpace($BackupDirectory)) {
+                throw "backup requires -BackupDirectory."
+            }
+            if (-not [string]::IsNullOrWhiteSpace($BackupPath)) {
+                throw "backup does not accept -BackupPath."
+            }
+            if (
+                -not $SkipEnvironmentBackup -and
+                [string]::IsNullOrWhiteSpace($ConfigEncryptionCertificateThumbprint)
+            ) {
+                throw "backup requires -ConfigEncryptionCertificateThumbprint or -SkipEnvironmentBackup."
+            }
+            if (
+                $SkipEnvironmentBackup -and
+                -not [string]::IsNullOrWhiteSpace($ConfigEncryptionCertificateThumbprint)
+            ) {
+                throw "-SkipEnvironmentBackup cannot be combined with -ConfigEncryptionCertificateThumbprint."
+            }
+            foreach ($Name in @("RestoreEnvironmentOutput", "ForceRestore", "NoStartAfterRestore")) {
+                if ($InvocationParameters.ContainsKey($Name)) {
+                    throw "backup does not accept -$Name."
+                }
+            }
+        }
+        "backup-verify" {
+            if ([string]::IsNullOrWhiteSpace($BackupPath)) {
+                throw "backup-verify requires -BackupPath."
+            }
+            foreach ($Name in $BackupParameterNames) {
+                if ($Name -ne "BackupPath" -and $InvocationParameters.ContainsKey($Name)) {
+                    throw "backup-verify does not accept -$Name."
+                }
+            }
+        }
+        "restore" {
+            if ([string]::IsNullOrWhiteSpace($BackupPath)) {
+                throw "restore requires -BackupPath."
+            }
+            foreach ($Name in @(
+                "BackupDirectory",
+                "ConfigEncryptionCertificateThumbprint",
+                "SkipEnvironmentBackup",
+                "QuiesceTimeoutSeconds"
+            )) {
+                if ($InvocationParameters.ContainsKey($Name)) {
+                    throw "restore does not accept -$Name."
+                }
+            }
+        }
+        default {
+            foreach ($Name in $BackupParameterNames) {
+                if ($InvocationParameters.ContainsKey($Name)) {
+                    throw "$Action does not accept -$Name."
+                }
+            }
+        }
+    }
 }
 
 function Enable-TlsComposeMode {
@@ -755,8 +856,23 @@ function Register-TlsRenewalTask {
         -Force
 }
 
+$BackupRestoreScript = Join-Path $PSScriptRoot "backup-restore.ps1"
+if (-not (Test-Path -LiteralPath $BackupRestoreScript -PathType Leaf)) {
+    throw "Backup and restore helper does not exist: $BackupRestoreScript"
+}
+. $BackupRestoreScript
+Assert-ActionParameters
+
+$DeploymentMutex = $null
 Push-Location $RepoRoot
 try {
+    if ($Action -in @("up", "down", "tls-init", "tls-renew", "tls-register-renewal")) {
+        $ComposeProjectName = Get-WindowsComposeProjectName `
+            -ComposeBaseArguments $ComposeBaseArguments
+        $DeploymentMutex = Enter-WindowsDeploymentMutex `
+            -ProjectName $ComposeProjectName
+    }
+
     switch ($Action) {
         "config" {
             if ($TlsMode) {
@@ -818,6 +934,54 @@ try {
                 $Arguments += $Service
             }
             Invoke-Compose -Arguments $Arguments
+        }
+        "backup" {
+            Assert-DockerEngine
+            $BackupArguments = @{
+                RepoRoot = $RepoRoot
+                ComposeFile = $ComposeFile
+                EnvFile = $EnvFile
+                ComposeBaseArguments = $ComposeBaseArguments
+                BackupDirectory = $BackupDirectory
+                QuiesceTimeoutSeconds = $QuiesceTimeoutSeconds
+                SkipEnvironmentBackup = [bool]$SkipEnvironmentBackup
+            }
+            if (-not [string]::IsNullOrWhiteSpace($ConfigEncryptionCertificateThumbprint)) {
+                $BackupArguments["ConfigEncryptionCertificateThumbprint"] = (
+                    $ConfigEncryptionCertificateThumbprint
+                )
+            }
+            Invoke-WindowsBackup @BackupArguments
+        }
+        "backup-verify" {
+            Assert-DockerEngine
+            $Manifest = Test-WindowsBackup `
+                -RepoRoot $RepoRoot `
+                -ComposeFile $ComposeFile `
+                -EnvFile $EnvFile `
+                -ComposeBaseArguments $ComposeBaseArguments `
+                -BackupPath $BackupPath
+            Write-Output (
+                "Backup verified: {0} ({1})" -f
+                $Manifest.backup_id,
+                $Manifest.created_at_utc
+            )
+        }
+        "restore" {
+            Assert-DockerEngine
+            $RestoreArguments = @{
+                RepoRoot = $RepoRoot
+                ComposeFile = $ComposeFile
+                EnvFile = $EnvFile
+                ComposeBaseArguments = $ComposeBaseArguments
+                BackupPath = $BackupPath
+                ForceRestore = [bool]$ForceRestore
+                NoStartAfterRestore = [bool]$NoStartAfterRestore
+            }
+            if (-not [string]::IsNullOrWhiteSpace($RestoreEnvironmentOutput)) {
+                $RestoreArguments["RestoreEnvironmentOutput"] = $RestoreEnvironmentOutput
+            }
+            Invoke-WindowsRestore @RestoreArguments
         }
         "tls-init" {
             Assert-DockerEngine
@@ -989,5 +1153,8 @@ try {
     }
 }
 finally {
+    if ($null -ne $DeploymentMutex) {
+        Exit-WindowsDeploymentMutex -Mutex $DeploymentMutex
+    }
     Pop-Location
 }
