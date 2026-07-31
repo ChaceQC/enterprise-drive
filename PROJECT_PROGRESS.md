@@ -5,7 +5,7 @@
 ### 当前状态
 
 - `BE-029` 已通过提交 `f0302e2` 和 GitHub Actions run `30652675576` 闭环。
-- `BE-030` 已完成依赖、静态代码、登录入口和错误响应的第一轮攻击者可达审计，以及完整后端、部署配置和真实 Docker 门禁；当前待提交推送并确认 GitHub Actions。
+- `BE-030` 首轮依赖、静态代码、登录入口和错误响应修复已通过提交 `25acecf` 和 GitHub Actions run `30660034411` 闭环。
 
 ### 已完成
 
@@ -18,9 +18,9 @@
 - 422 校验错误统一移除 Pydantic 原始 `input`，避免密码、外链口令和 token 被错误响应重复保存。
 - 新增 `docs/security-testing.md`，记录威胁模型、命令、首轮结果、有效边界和后续动态测试范围。
 
-### 待提交与远端验证
+### 已闭环
 
-- 提交并推送首轮 `BE-030` 修复，等待新增 Bandit、pip-audit 和既有构建、测试、Windows 部署 job 全部通过。
+- `backend-ci` 的 backend、windows-deployment、minio-image-policy 和两个 MinIO supply-chain job 全部成功；新增 Bandit 与 pip-audit 门禁已在远端真实执行。
 
 ### 阻塞与风险
 
@@ -30,9 +30,8 @@
 
 ### 下一步
 
-1. 提交并推送首轮 `BE-030` 修复，等待 GitHub Actions。
-2. 增加 production `Settings` 自校验，防止绕过 `manage.ps1` 直接启动时使用默认 secret、示例管理员密码或不安全公网配置。
-3. 建立 34 个 API route 的身份/租户矩阵和恶意图片、文档、Range、外链穷举动态安全测试。
+1. 增加 production `Settings` 自校验，防止绕过 `manage.ps1` 直接启动时使用默认 secret、示例管理员密码或不安全公网配置。
+2. 建立 34 个 API route 的身份/租户矩阵和恶意图片、文档、Range、外链穷举动态安全测试。
 
 ### 验证
 
@@ -47,6 +46,7 @@
 - 隔离真实 Compose 使用 `--no-build --pull never` 启动 API 必需依赖；错误登录首次返回 `401/AUTH_INVALID_CREDENTIALS`，同账号第二次返回 `429/RATE_LIMITED`，`details.action=auth.login.account`。
 - 真实 Compose 采样峰值为 5 个运行容器、`123.1%` aggregate Docker CPU、`1426.3 MiB` 容器内存和 `4826.4 MiB` Docker/WSL 私有工作集；结束后该 project 的容器、网络和卷均为 0。
 - `docker compose --env-file .env.windows.example -f compose.windows.yml config --quiet`、`deploy/windows/manage.ps1 config -EnvFile .env.windows.example -Quiet` 和 `git diff --check`：全部通过；当前运行中和全部容器均为 0，本地 10 个镜像对应 10 个唯一 image ID。
+- 提交 `25acecf fix: 修复首轮安全测试高危问题` 已推送到 `origin/dev`；GitHub Actions run `30660034411` 的 5 个 job 全部成功，backend job 实际执行新增 Bandit 与 pip-audit 门禁并完成两类镜像构建。
 
 ### 涉及文件
 

@@ -70,6 +70,7 @@ DRIVE_LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
 - runtime 与 preview 镜像分别在 `1 CPU / 2 GiB`、`1 CPU / 3 GiB` BuildKit 上限下使用 `--pull=false` 串行重建，两个镜像都确认安装 `Pillow 12.3.0`。
 - 隔离真实 Compose 使用已有本地镜像和 `--no-build --pull never` 启动 API 必需依赖。账号限流阈值临时设为 1 后，错误登录第一次返回 `401/AUTH_INVALID_CREDENTIALS`，第二次返回 `429/RATE_LIMITED`，动作是 `auth.login.account`。
 - 真实 Compose 采样峰值为 5 个运行容器、`123.1%` aggregate Docker CPU 和 `1426.3 MiB` 容器内存；验证结束后隔离 project 的容器、网络和卷全部清理。
+- 提交 `25acecf` 对应 GitHub Actions run `30660034411`，backend、Windows 部署、镜像策略和两个 MinIO supply-chain job 全部成功。
 
 ## 现有有效边界
 
