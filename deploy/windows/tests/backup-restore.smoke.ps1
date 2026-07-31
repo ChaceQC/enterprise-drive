@@ -601,6 +601,16 @@ try {
                 'COMPOSE_PARALLEL_LIMIT = "1"'
             ) `
             -Message "The backup integration does not serialize Compose work."
+        Assert-SmokeTrue `
+            -Condition $IntegrationText.Contains(
+                'OPENSEARCH_MEMORY_LIMIT = "1280m"'
+            ) `
+            -Message "The backup integration OpenSearch memory guard is too small."
+        Assert-SmokeTrue `
+            -Condition $IntegrationText.Contains(
+                "Write-IntegrationProjectDiagnostics"
+            ) `
+            -Message "The backup integration no longer captures failure diagnostics."
     }
 
     Invoke-SmokeCase -Name "path boundary checks" -Body {

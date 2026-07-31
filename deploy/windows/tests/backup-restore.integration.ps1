@@ -250,7 +250,7 @@ function Set-IntegrationEnvironment {
         PREVIEW_TMPFS_SIZE = "268435456"
         OPENSEARCH_JAVA_OPTS = "-Xms512m -Xmx512m"
         OPENSEARCH_CPU_LIMIT = "1.00"
-        OPENSEARCH_MEMORY_LIMIT = "1024m"
+        OPENSEARCH_MEMORY_LIMIT = "1280m"
         API_CPU_LIMIT = "0.50"
         API_MEMORY_LIMIT = "512m"
         MIGRATION_CPU_LIMIT = "0.50"
@@ -750,6 +750,109 @@ function Remove-IntegrationProject {
     )
 }
 
+function Write-IntegrationProjectDiagnostics {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ProjectName,
+
+        [Parameter(Mandatory = $true)]
+        [int]$ApiPort,
+
+        [Parameter(Mandatory = $true)]
+        [int]$StoragePort
+    )
+
+    Set-IntegrationEnvironment `
+        -ProjectName $ProjectName `
+        -ApiPort $ApiPort `
+        -StoragePort $StoragePort
+    Write-Host "[integration:diagnostics] project=$ProjectName"
+
+    try {
+        Invoke-Compose -Arguments @("ps", "--all") |
+            ForEach-Object { Write-Host $_ }
+    }
+    catch {
+        Write-Warning "Compose status diagnostics failed: $($_.Exception.Message)"
+    }
+
+    foreach ($ServiceName in @(
+        "opensearch",
+        "postgres",
+        "redis",
+        "minio",
+        "migration",
+        "minio-init",
+        "seed",
+        "api"
+    )) {
+        try {
+            $ContainerId = [string](
+                (
+                    Invoke-Compose -Arguments @(
+                        "ps",
+                        "--all",
+                        "--quiet",
+                        $ServiceName
+                    )
+                ) -join ""
+            )
+            $ContainerId = $ContainerId.Trim()
+            if ([string]::IsNullOrWhiteSpace($ContainerId)) {
+                continue
+            }
+
+            $State = (
+                (
+                    Invoke-Docker -Arguments @(
+                        "inspect",
+                        "--format", "{{json .State}}",
+                        $ContainerId
+                    )
+                ) -join "`n"
+            ) | ConvertFrom-Json
+            $Health = if ($null -eq $State.Health) {
+                ""
+            }
+            else {
+                [string]$State.Health.Status
+            }
+            if (
+                [string]$State.Status -eq "running" -and
+                (
+                    [string]::IsNullOrWhiteSpace($Health) -or
+                    $Health -eq "healthy"
+                )
+            ) {
+                continue
+            }
+
+            Write-Host (
+                "[integration:diagnostics] service={0} status={1} " +
+                "health={2} oom_killed={3} exit_code={4}" -f
+                $ServiceName,
+                $State.Status,
+                $Health,
+                $State.OOMKilled,
+                $State.ExitCode
+            )
+            Invoke-Compose -Arguments @(
+                    "logs",
+                    "--no-color",
+                    "--tail", "120",
+                    $ServiceName
+                ) |
+                ForEach-Object { Write-Host $_ }
+        }
+        catch {
+            Write-Warning (
+                "Diagnostics failed for service '$ServiceName': " +
+                $_.Exception.Message
+            )
+        }
+    }
+}
+
 $SourceCreated = $false
 $TargetCreated = $false
 $CmsCertificate = $null
@@ -1160,6 +1263,23 @@ try {
 }
 catch {
     $IntegrationFailure = $_
+    try {
+        if ($TargetCreated) {
+            Write-IntegrationProjectDiagnostics `
+                -ProjectName $TargetProject `
+                -ApiPort $TargetApiPort `
+                -StoragePort $TargetStoragePort
+        }
+        elseif ($SourceCreated) {
+            Write-IntegrationProjectDiagnostics `
+                -ProjectName $SourceProject `
+                -ApiPort $SourceApiPort `
+                -StoragePort $SourceStoragePort
+        }
+    }
+    catch {
+        Write-Warning "Integration diagnostics failed: $($_.Exception.Message)"
+    }
 }
 finally {
     if ($SourceCreated) {

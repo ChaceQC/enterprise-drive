@@ -532,13 +532,13 @@ $backupPath = [string](
 .\deploy\windows\tests\backup-restore.integration.ps1 -PreflightOnly
 ```
 
-preflight 会渲染 Compose 并逐一检查本地镜像；缺少任一镜像时在创建证书、容器或卷之前快速退出。完整执行时固定 `COMPOSE_PARALLEL_LIMIT=1`、API/Worker 并发为 `1`，并降低测试专用 CPU/内存上限；默认恢复使用 `-NoStartAfterRestore`，随后只启动 PostgreSQL、Redis、MinIO、OpenSearch 验证恢复点。只有需要重新验收 gateway、API、全部 Worker 和 beat 时才显式执行：
+preflight 会渲染 Compose 并逐一检查本地镜像；缺少任一镜像时在创建证书、容器或卷之前快速退出。完整执行时固定 `COMPOSE_PARALLEL_LIMIT=1`、API/Worker 并发为 `1`，并降低测试专用 CPU/内存上限；OpenSearch 测试预算固定为 `1 CPU / 1280m` 容器内存和 `512m` JVM heap，正式 `.env.windows.example` 的 `2 CPU / 3g` 容器内存和 `1g` JVM heap 不受影响。默认恢复使用 `-NoStartAfterRestore`，随后只启动 PostgreSQL、Redis、MinIO、OpenSearch 验证恢复点。只有需要重新验收 gateway、API、全部 Worker 和 beat 时才显式执行：
 
 ```powershell
 .\deploy\windows\tests\backup-restore.integration.ps1 -FullStackRestore
 ```
 
-集成脚本不再重复调用一次成功的 `backup-verify`：`backup` 在发布前已经执行同一完整校验，`restore` 开始前还会再次完整校验；损坏 manifest 的拒绝用例继续保留。各阶段会分别输出镜像 preflight、source 启动、备份、source 停止、恢复和数据服务启动耗时。
+集成脚本不再重复调用一次成功的 `backup-verify`：`backup` 在发布前已经执行同一完整校验，`restore` 开始前还会再次完整校验；损坏 manifest 的拒绝用例继续保留。各阶段会分别输出镜像 preflight、source 启动、备份、source 停止、恢复和数据服务启动耗时。若任一阶段失败，脚本会在删除 source/target project 前输出 Compose 状态，并为异常数据服务、初始化任务或 API 打印 health、OOM、退出码和最近 120 行日志。
 
 ### 11.4 隔离恢复
 

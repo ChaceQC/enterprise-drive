@@ -1,12 +1,12 @@
 # PROJECT_PROGRESS.md
 
-## 2026-07-31 BE-028 备份测试资源失控修复
+## 2026-07-31 BE-028 Windows Docker Compose 正式部署闭环
 
 ### 当前状态
 
-- 已终止此前误启动的备份恢复 integration 进程并删除其 source Compose project；当前运行中容器和残留容器均为 `0`。
-- 此前集成命令把镜像构建、15 服务启动、备份、成功 `backup-verify`、恢复和全栈验收串成一个黑盒任务，出现 CPU 长时间接近满载、Docker Desktop 内存压力和空数据备份长时间无阶段反馈。
-- 当前第三方 Compose 镜像与 Python build base 已按官方引用准备；`enterprise-drive-backend:windows-local` 已使用受限 BuildKit 独立构建完成，`enterprise-drive-preview:windows-local` 待下一独立步骤构建。本轮尚未启动完整 Compose。
+- `BE-028` 已完成真实 Windows 11 Docker Desktop 闭环：runtime/preview 镜像独立构建、本地镜像 preflight、15 服务 source 启动、备份、默认数据服务恢复、显式完整 target 全栈恢复、gateway/API/Worker/beat/数据服务校验和彻底清理均已通过。
+- 当前 Docker client/server 为 `29.6.2`，Compose 为 `v5.3.1`，context 为 `desktop-linux`；运行中容器和全部残留容器均为 `0`。
+- `dev` 与 `origin/dev` 当前共同指向 `252fff61740286f8bdcf790d02228e2e325de01a`；该提交对应 GitHub Actions run `30645014214`，全部 5 个 job 成功。本节新增的 OpenSearch 测试预算与失败诊断增强尚待最终提交推送。
 
 ### 已完成
 
@@ -19,26 +19,35 @@
 - integration 不再对同一成功备份额外重复执行一次完整 `backup-verify`，因为 `backup` 发布前和 `restore` 开始前已经各执行一次完整校验；损坏 manifest 拒绝用例继续保留。
 - integration 固定 `COMPOSE_PARALLEL_LIMIT=1`、API/全部 Worker concurrency `1`，降低各服务 CPU/内存上限，并给 MinIO probe helper 设置独立 CPU/内存/swap/PID 边界。
 - integration 只调用一次 source `up`，随后轮询容器状态，不再用第二次 `compose up --wait` 重复触发启动流程。默认恢复使用 `-NoStartAfterRestore`，只启动 PostgreSQL、Redis、MinIO、OpenSearch 验证数据恢复；完整 target 全栈验收改为显式 `-FullStackRestore`。
+- 首次真实低资源 integration 暴露 OpenSearch 在 `1024m` 硬上限下启动不稳定：Docker 事件显示先转为 `unhealthy`，没有 OOM 事件，清理阶段的退出码 `137` 来自 SIGTERM 超时后的 SIGKILL。单容器复现的启动峰值为 `1018 MiB / 1024 MiB`，余量不足。
+- integration 的测试专用 OpenSearch 上限调整为 `1280m`，JVM heap 仍保持 `512m`、CPU 仍限制为 `1.00`；PostgreSQL、Redis、MinIO、OpenSearch 四服务并发探针在 `68.5s` 内全部健康，OpenSearch 峰值为 `1246.2 MiB`。
+- 新增 `Write-IntegrationProjectDiagnostics`：真实 integration 失败时在删除项目之前打印 Compose 状态，并对异常 OpenSearch、PostgreSQL、Redis、MinIO、migration、minio-init、seed 和 API 输出状态、health、OOM、退出码与尾部日志。
+- runtime 镜像 `enterprise-drive-backend:windows-local` 已使用 `1 CPU / 2 GiB` BuildKit 资源上限独立构建完成；preview 镜像 `enterprise-drive-preview:windows-local` 已使用 `1 CPU / 3 GiB` 上限独立构建完成。当前 10 个本地镜像没有重复 image ID。
+- integration `-PreflightOnly` 已确认 8 个唯一 Compose 镜像全部存在，执行前后容器数均为 `0`。
+- 默认真实 integration 已通过 source 15 服务启动、备份发布前校验、损坏 manifest 拒绝、source 停止、PostgreSQL/Redis/MinIO/OpenSearch 恢复点验证、运行中 target 拒绝和清理。
+- 显式 `-FullStackRestore` 已通过 target gateway、API、5 个 Worker、beat、PostgreSQL、Redis、MinIO、OpenSearch、migration/minio-init/seed 退出状态、唯一 gateway 宿主端口边界和实际镜像对账。
 - 已同步 `.env.windows.example`、`AGENT.md`、根/后端 README、Windows 部署文档、执行计划和完整技术计划书。
 - 资源修复已提交为 `b1113d1 fix: 限制备份测试资源并禁止隐式构建` 并推送到 `origin/dev`。
 - GitHub Actions run `30644453844` 的 backend、MinIO image policy 和两个 supply-chain job 全部成功；失败仅在 `windows-deployment / Validate Windows TLS fake Docker guards`。原因是 CI fake `docker.cmd` 仍只匹配旧 bootstrap 命令，新增 `--pull never` 后没有返回 `fake-bootstrap` 容器 ID。
 - `.github/workflows/backend-ci.yml` 已把 fake bootstrap 匹配更新为 `run --detach --no-deps --pull never --service-ports gateway`，并在本机从 workflow 原文提取、执行同一 PowerShell step，全部 TLS fake Docker guard 通过。
+- CI fixture 修复已提交为 `252fff6 fix: 同步 Windows TLS CI 假 Docker 命令` 并推送；后续 run `30645014214` 的 backend、windows-deployment、minio-image-policy 和两组 minio-supply-chain job 全部成功。
 
 ### 进行中
 
-- 提交并推送 CI fixture 修复，随后独立构建 preview 镜像。
+- 对 OpenSearch 测试预算与失败诊断增强执行最终 parser、编码、smoke、Compose 和 Git 检查，随后提交推送。
 
 ### 阻塞与风险
 
-- 本轮没有运行 15 服务完整 Compose 或真实全量 backup/restore integration；runtime 镜像已独立构建，preview 镜像仍待构建。
-- `BE-028` 完整门禁仍需要完成 preview 镜像、通过 `-PreflightOnly`，再按低资源 integration 执行；`-FullStackRestore` 不属于默认测试路径。
 - 低压缩等级会增加一定备份体积，但换取更低 CPU 峰值；正式环境应根据备份窗口、磁盘和恢复目标调整，不能取消 helper 容器资源上限。
+- `1280m` 是真实 integration 的测试专用 OpenSearch 上限；正式 `.env.windows.example` 仍使用 `3g` 容器内存和 `1g` JVM heap，不能把低资源测试预算直接当作生产容量规划。
+- 本轮验证覆盖本机 HTTP Compose 和自签名测试证书，不替代真实生产 DNS、受信证书链、外部网络、BitLocker/外部介质和周期恢复演练。
+- MinIO Server/Client 既有 Critical 漏洞基线仍属于上线风险；当前 CI 只阻断相对基线新增的 Critical。
 
 ### 下一步
 
-1. 提交并推送 CI fake Docker fixture 修复，确认新 run 不再在 TLS bootstrap 匹配处失败。
-2. 使用 BuildKit 资源上限独立构建 preview 镜像，然后运行 integration `-PreflightOnly`。
-3. preflight 通过后运行默认低资源 integration；完整 target 全栈验收继续使用显式 `-FullStackRestore`。
+1. 完成最终 parser、ASCII/无 BOM、smoke、Compose config、`git diff --check`，提交并推送 OpenSearch 测试预算与失败诊断增强，确认新 GitHub Actions run。
+2. 按工程编号审计 `BE-029 性能压测脚本`：先盘点现有 benchmark/load-test 代码、可复用真实 Docker 场景、指标采集点和性能目标，输出缺口矩阵。
+3. 在独立提交中实现 `BE-029` 的可重复基准入口，至少覆盖登录/列表、DTP/1 上传下载、搜索和权限热点，并固定并发、数据规模、资源上限、结果格式与清理流程。
 
 ### 验证
 
@@ -46,11 +55,15 @@
 - PowerShell 文件 ASCII 检查：4 个脚本的 non-ASCII byte 均为 `0`。
 - `deploy/windows/tests/backup-restore.smoke.ps1`：`27` 个用例全部通过。
 - `docker compose --env-file .env.windows.example -f compose.windows.yml config --quiet`：通过。
-- integration `-PreflightOnly`：最近一次约 `3.1s` 内准确报告缺少 `enterprise-drive-backend:windows-local` 和 `enterprise-drive-preview:windows-local`，执行前后运行中/全部容器数均为 `0`。
+- integration `-PreflightOnly`：8 个唯一镜像全部存在，结果为成功；执行前后运行中/全部容器数均为 `0`。
 - 受限真实 Docker helper：容器内 cgroup 为 `cpu.max=50000 100000`、`memory.max=536870912`、`pids.max=128`，与默认 `0.50 CPU / 512m / 128 PIDs` 一致。
 - 真实 64 KiB 临时卷使用新归档路径生成 `449` 字节 gzip 文件并通过隔离 tar 安全校验，归档加校验耗时约 `3.78s`；临时卷、目录和容器已清理。
 - runtime 镜像使用 BuildKit `--resource memory=2g --resource cpu-quota=100000` 独立构建成功，用时约 `50.7s`；镜像 ID 为 `sha256:782beca9aa4708b8912a1b4487b4a9c1350220549a1898a824287f6fc8b75677`，大小 `108031695` 字节。
+- preview 镜像使用 BuildKit `--resource memory=3g --resource cpu-quota=100000` 独立构建成功，用时约 `127.9s`；镜像 ID 为 `sha256:707a67e424fb38aa96e7bef806b1d0277c5cb81a272200e706728496c3c218b3`，大小 `361680759` 字节。
+- 默认真实 integration：`409.6s` 通过，监测采样峰值约为 `311.6%` aggregate Docker CPU 和 `2254 MiB` 容器内存；测试结束后 source/target 容器均为 `0`。
+- `-FullStackRestore`：`357.3s` 通过，12 个同时运行容器，采样峰值为 `123.5%` aggregate Docker CPU、`2226 MiB` 容器内存和 `4528 MiB` Docker 相关宿主进程 working set；测试结束后 source/target 容器均为 `0`。
 - 已从 `.github/workflows/backend-ci.yml` 原文提取并本地执行 `Validate Windows TLS fake Docker guards` step，结果通过。
+- GitHub Actions run `30645014214`：5 个 job 全部成功。
 - 当前 `docker ps` 和 `docker ps -a`：容器数均为 `0`。
 
 ### 涉及文件
