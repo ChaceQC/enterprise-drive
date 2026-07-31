@@ -5,6 +5,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.core.transfer_protocol import DriveTransferProtocolResponse
+
 
 class CreateFolderRequest(BaseModel):
     space_id: UUID
@@ -60,7 +62,7 @@ class PurgeNodeResponse(BaseModel):
     released_bytes: int
 
 
-class FileDownloadUrlResponse(BaseModel):
+class FileDownloadUrlResponse(DriveTransferProtocolResponse):
     node_id: UUID
     version_id: UUID
     file_name: str

@@ -66,6 +66,7 @@ async def test_init_multipart_upload_status_and_presign(
 
     assert init_response.status_code == 201
     init_payload = init_response.json()
+    assert init_payload["protocol_version"] == "DTP/1"
     assert init_payload["mode"] == "multipart"
     assert init_payload["part_size_bytes"] == settings.upload_part_size_bytes
     assert init_payload["total_parts"] == 2
@@ -84,9 +85,11 @@ async def test_init_multipart_upload_status_and_presign(
     )
 
     assert status_response.status_code == 200
+    assert status_response.json()["protocol_version"] == "DTP/1"
     assert status_response.json()["status"] == "initiated"
     assert status_response.json()["uploaded_parts"] == []
     assert presign_response.status_code == 200
+    assert presign_response.json()["protocol_version"] == "DTP/1"
     assert presign_response.json()["part_no"] == 1
     assert "upload_id=" in presign_response.json()["upload_url"]
     assert status_after_presign.status_code == 200
@@ -107,6 +110,28 @@ async def test_init_multipart_upload_status_and_presign(
     assert upload_session.status == "uploading"
     assert audit.request_id == "req_upload_init"
     assert outbox_event.aggregate_type == "audit_log"
+
+
+@pytest.mark.asyncio
+async def test_upload_rejects_unsupported_transfer_protocol(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    await login(client)
+
+    response = await client.get(
+        f"/api/v1/uploads/{UUID(int=1)}",
+        headers={"X-Drive-Transfer-Protocol": "DTP/2"},
+    )
+
+    assert response.status_code == 426
+    assert response.json()["code"] == "TRANSFER_PROTOCOL_UNSUPPORTED"
+    assert response.json()["details"] == {
+        "requested": "DTP/2",
+        "supported": ["DTP/1"],
+    }
 
 
 @pytest.mark.asyncio
@@ -151,6 +176,7 @@ async def test_init_upload_uses_instant_upload_when_blob_exists(
 
     assert response.status_code == 201
     payload = response.json()
+    assert payload["protocol_version"] == "DTP/1"
     assert payload["mode"] == "instant"
     assert payload["blob_id"] == str(blob_id)
 
@@ -297,6 +323,7 @@ async def test_complete_multipart_upload_creates_file_version_and_is_idempotent(
     )
 
     assert complete_response.status_code == 200
+    assert complete_response.json()["protocol_version"] == "DTP/1"
     assert duplicate_response.status_code == 200
     assert duplicate_response.json() == complete_response.json()
     assert status_response.json()["status"] == "completed"
@@ -683,7 +710,11 @@ async def test_abort_upload_marks_session_terminal(
     )
 
     assert abort_response.status_code == 200
-    assert abort_response.json() == {"session_id": session_id, "status": "aborted"}
+    assert abort_response.json() == {
+        "protocol_version": "DTP/1",
+        "session_id": session_id,
+        "status": "aborted",
+    }
     assert duplicate_abort_response.status_code == 200
     assert presign_response.status_code == 409
     assert presign_response.json()["code"] == "UPLOAD_NOT_ACTIVE"

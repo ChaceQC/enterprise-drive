@@ -1,5 +1,70 @@
 # PROJECT_PROGRESS.md
 
+## 2026-07-31 Drive Transfer Protocol v1
+
+### 已完成
+
+- 正式采用 `Drive Transfer Protocol v1`，线协议标识固定为 `DTP/1`。
+- 新增 `docs/drive-transfer-protocol-v1.md`，定义控制面、预签名 HTTPS 数据面、版本协商、上传状态机、断点恢复、complete 幂等、服务端 SHA-256、Range 下载、错误码、安全边界和验收。
+- 新增 `backend/app/core/transfer_protocol.py`，集中维护协议头、版本常量和传输响应基类。
+- 上传全部接口支持可选请求头 `X-Drive-Transfer-Protocol: DTP/1`；文件下载和外链下载也使用同一协商依赖。为兼容已有客户端，省略请求头时按 `DTP/1` 处理。
+- 客户端声明未知版本时返回 HTTP 426、`TRANSFER_PROTOCOL_UNSUPPORTED` 和当前支持版本列表。
+- 秒传、multipart 初始化、上传状态、分片签名、complete、abort、文件下载和外链下载响应统一返回 `protocol_version=DTP/1`。
+- 已同步 `AGENT.md`、README、执行计划和完整技术计划；明确不自研 TCP/UDP、TLS、QUIC、私有加密或可靠传输层。
+
+### 版本影响
+
+- OpenAPI 增加可选 `X-Drive-Transfer-Protocol` header parameter，并为 8 个传输响应 schema 增加只读语义的 `protocol_version` 字段。
+- 省略请求头的现有客户端继续可用；该改动为向后兼容的字段扩展，项目版本保持 `0.4.0`。
+
+### 进行中
+
+- 回到任务编号顺序，进入 `BE-027` metrics/tracing 接入缺口审计。
+
+### 阻塞与风险
+
+- 当前 DTP/1 核心兼容档仍使用单分片签名接口；批量签名、服务端建议并发数和 Rust 持久化传输队列属于 `DC-006`。
+- 当前上传分片大小由服务端全局配置决定；在真实 MinIO、磁盘和网络基准完成前，不把固定高并发或更大分片写死到协议。
+- HTTP/2、HTTP/3 只作为透明承载升级；当前未完成网关编译能力、UDP 网络和自动回退实测。
+
+### 下一步
+
+1. 审计并实现 `BE-027` 请求、数据库、队列、任务指标和 tracing 缺口。
+2. 在 `DC-006` 实现 DTP/1 批量分片签名、并发提示和 Rust 传输队列。
+3. 在 `BE-029` 性能基准后决定默认分片和并发策略，并验证 HTTP/2/HTTP/3 回退。
+
+### 验证
+
+- `uv run pytest`：153 passed，4 skipped。
+- `uv run ruff check .`：通过。
+- `uv run ruff format --check .`：196 个文件格式通过。
+- `uv run mypy app`：通过，146 个源文件无类型问题。
+- `uv lock --check`：通过，解析 97 个包。
+- OpenAPI：版本 `0.4.0`、30 条 path；上传、文件下载和外链下载均公开 `X-Drive-Transfer-Protocol` header。
+- OpenAPI：`AbortUploadResponse`、`CompleteUploadResponse`、`InstantUploadResponse`、`MultipartUploadResponse`、`UploadPartUrlResponse`、`UploadSessionStatusResponse`、`FileDownloadUrlResponse` 和 `ExternalShareDownloadResponse` 均包含 `protocol_version`。
+- 测试覆盖 `DTP/1` 正常响应和 `DTP/2` 返回 HTTP 426。
+
+### 涉及文件
+
+- `AGENT.md`
+- `docs/drive-transfer-protocol-v1.md`
+- `backend/app/core/transfer_protocol.py`
+- `backend/app/api/deps.py`
+- `backend/app/modules/upload/router.py`
+- `backend/app/modules/upload/schemas.py`
+- `backend/app/modules/file/router.py`
+- `backend/app/modules/file/schemas.py`
+- `backend/app/modules/share/router.py`
+- `backend/app/modules/share/schemas.py`
+- `backend/tests/test_upload.py`
+- `backend/tests/test_download.py`
+- `backend/tests/test_share_router.py`
+- `README.md`
+- `backend/README.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-07-31 BE-026 回收站保留期自动清理
 
 ### 已完成
@@ -50,6 +115,7 @@
 - `DRIVE_RUN_POSTGRES_TESTS=1 uv run pytest tests/test_trash_cleanup_postgres_integration.py -q`：1 passed。
 - `docker compose --env-file .env.windows.example -f compose.windows.yml config --quiet`：通过，15 个默认服务。
 - 临时 PostgreSQL 测试容器已删除。
+- GitHub Actions `backend-ci` run `30612418629`：提交 `ba51270` 全部通过。
 
 ### 涉及文件
 

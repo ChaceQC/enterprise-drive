@@ -191,7 +191,7 @@
 
 2026-07-31 已把 Rust 桌面客户端从笼统的二期增强项提升为 Sprint 7 和 Sprint 8 正式路线。当前仓库仍没有桌面客户端代码；先完成 Sprint 6、发布 `v0.4.0`，随后以 `0.5.0` 为桌面 Alpha 目标建立 `desktop/` Cargo workspace。开工顺序固定为：先提交桌面架构 ADR 和后端设备会话/增量同步契约，再实现 Rust API client、本地索引和单向传输，最后进入双向同步、冲突处理和签名发布。
 
-2026-07-31 已把传输协议从“直接使用上传接口”的概念补为 Sprint 7 正式前置契约：自定义的是 HTTPS 之上的 `Drive Transfer Protocol v1` 应用层状态机，而不是裸 TCP/UDP 或私有加密。控制面负责初始化、批量分片签名、断点查询、幂等 complete/abort 和错误码，数据面继续使用预签名 HTTPS 直达 MinIO/S3；下载使用短期签名与 HTTP Range，Rust 客户端按文件大小和网络质量协商分片、并发、重试和带宽限制，后续可在网关支持时透明使用 HTTP/2 或 HTTP/3 并保留回退。
+2026-07-31 已正式启用 `Drive Transfer Protocol v1`（线协议标识 `DTP/1`）：新增 `docs/drive-transfer-protocol-v1.md`，上传、文件下载和外链下载公开可选 `X-Drive-Transfer-Protocol` 协商头，未知版本返回 HTTP 426，全部传输响应返回 `protocol_version=DTP/1`。协议自定义的是 HTTPS 之上的分片、断点、校验、幂等和错误状态机，数据面继续使用预签名 HTTPS 直达 MinIO/S3，不自研 TCP/UDP、TLS、QUIC 或私有加密。批量分片签名、服务端并发提示和 Rust 持久化传输队列继续由 `DC-006` 实现。
 
 2026-07-16 的 `v0.4.0` 上线治理阶段已固定 MinIO Server/Client release 与 digest，接入 SBOM、Grype 和新增 Critical 阻断，并交付 `backup`、`backup-verify`、`restore` 自动化。manifest 从 15 个无 profile 默认服务的实际 Compose 容器记录 image ID，并把当前 `compose.windows.yml` SHA-256、Git commit、项目版本、S3 bucket、OpenSearch index 和 `DRIVE_TLS_CERT_NAME` lineage 名称作为精确恢复门禁；备份和恢复同时持有 project 与逐 physical volume mutex。备份根目录还会拒绝卷根、仓库目录/祖先及未预先使用 restricted ACL 的既有非空目录。真实随机 source/target Compose project 演练已验证 PostgreSQL、MinIO、Redis、OpenSearch、TLS、CMS 环境文件、API、Worker、beat、gateway 和宿主端口边界；备份失败会恢复 source 原运行、退出与健康状态，恢复失败会停止 target、删除新卷、清空原空卷，并从受限 ACL rollback archive 还原 `-ForceRestore` 前的原非空卷。
 

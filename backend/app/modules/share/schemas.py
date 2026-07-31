@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.core.transfer_protocol import DriveTransferProtocolResponse
+
 ShareType = Literal["internal", "external"]
 SharePermission = Literal["preview", "download"]
 ShareRecipientType = Literal["user", "department", "group"]
@@ -93,7 +95,7 @@ class ExternalShareDownloadRequest(BaseModel):
     passcode: str | None = Field(default=None, min_length=1, max_length=128)
 
 
-class ExternalShareDownloadResponse(BaseModel):
+class ExternalShareDownloadResponse(DriveTransferProtocolResponse):
     share_id: UUID
     node_id: UUID
     version_id: UUID

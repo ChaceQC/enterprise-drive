@@ -3,11 +3,15 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Annotated
 
-from fastapi import Depends, Request
+from fastapi import Depends, Header, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ApiError
 from app.core.config import Settings, get_settings
+from app.core.transfer_protocol import (
+    DRIVE_TRANSFER_PROTOCOL_HEADER,
+    DRIVE_TRANSFER_PROTOCOL_V1,
+)
 from app.db.session import get_db_session
 from app.infrastructure.rate_limit.base import RateLimiter, RateLimitRule
 from app.infrastructure.rate_limit.redis import RedisFixedWindowRateLimiter
@@ -61,6 +65,25 @@ def build_audit_context(request: Request) -> AuditContext:
         request_id=str(request_id) if request_id else None,
         ip=client_ip,
         user_agent=user_agent,
+    )
+
+
+def ensure_supported_transfer_protocol(
+    requested_version: Annotated[
+        str | None,
+        Header(alias=DRIVE_TRANSFER_PROTOCOL_HEADER),
+    ] = None,
+) -> None:
+    if requested_version is None or requested_version.strip() == DRIVE_TRANSFER_PROTOCOL_V1:
+        return
+    raise ApiError(
+        "TRANSFER_PROTOCOL_UNSUPPORTED",
+        "不支持的文件传输协议版本",
+        status_code=426,
+        details={
+            "requested": requested_version.strip(),
+            "supported": [DRIVE_TRANSFER_PROTOCOL_V1],
+        },
     )
 
 

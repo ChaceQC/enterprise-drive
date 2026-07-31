@@ -161,6 +161,7 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - 空间创建时同步初始化默认空间容量账户。
 - MinIO Python SDK 对象存储适配器，业务层通过 `StorageAdapter` 协议隔离具体 SDK。
 - 上传初始化、上传状态查询、分片预签名 URL、multipart complete 和 abort 接口。
+- 上传、文件下载和外链下载响应使用 `Drive Transfer Protocol v1`（`DTP/1`）标识；客户端可通过 `X-Drive-Transfer-Protocol: DTP/1` 显式协商，未知版本返回 HTTP 426。
 - 秒传分支：命中同租户同 hash、同大小 blob 时直接创建文件节点和版本，并增加 blob 引用计数。
 - multipart complete 成功合并后服务端校验 `sha256`，通过后将新对象归档到 `objects/{tenant_id}/{hash_prefix}/{content_hash}`，再写入 `file_blobs`、`nodes`、`file_versions`、`upload_parts` 和上传会话完成结果。
 - 秒传和 multipart complete 创建文件版本时原子增加空间容量快照，并写入 `quota_ledger` 容量流水。

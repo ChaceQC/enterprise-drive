@@ -449,6 +449,7 @@ async def test_external_share_download_returns_url_and_records_count(
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["protocol_version"] == "DTP/1"
     assert payload["share_id"] == create_response.json()["id"]
     assert payload["node_id"] == file_payload["node_id"]
     assert payload["file_name"] == "外链下载.txt"

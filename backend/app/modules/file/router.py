@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import (
     build_audit_context,
     enforce_rate_limit,
+    ensure_supported_transfer_protocol,
     get_current_user,
     get_rate_limiter,
     get_storage_adapter,
@@ -205,7 +206,11 @@ async def purge_node(
     )
 
 
-@router.get("/{node_id}/download", response_model=FileDownloadUrlResponse)
+@router.get(
+    "/{node_id}/download",
+    response_model=FileDownloadUrlResponse,
+    dependencies=[Depends(ensure_supported_transfer_protocol)],
+)
 async def create_download_url(
     http_request: Request,
     node_id: UUID,

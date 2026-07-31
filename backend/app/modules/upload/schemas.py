@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.core.transfer_protocol import DriveTransferProtocolResponse
+
 
 class InitUploadRequest(BaseModel):
     space_id: UUID
@@ -18,14 +20,14 @@ class InitUploadRequest(BaseModel):
     conflict_policy: Literal["fail"] = "fail"
 
 
-class InstantUploadResponse(BaseModel):
+class InstantUploadResponse(DriveTransferProtocolResponse):
     mode: Literal["instant"] = "instant"
     node_id: UUID
     version_id: UUID
     blob_id: UUID
 
 
-class MultipartUploadResponse(BaseModel):
+class MultipartUploadResponse(DriveTransferProtocolResponse):
     mode: Literal["multipart"] = "multipart"
     session_id: UUID
     part_size_bytes: int
@@ -33,14 +35,14 @@ class MultipartUploadResponse(BaseModel):
     expires_at: datetime
 
 
-class UploadPartUrlResponse(BaseModel):
+class UploadPartUrlResponse(DriveTransferProtocolResponse):
     part_no: int
     upload_url: str
     expires_at: datetime
     headers: dict[str, str]
 
 
-class UploadSessionStatusResponse(BaseModel):
+class UploadSessionStatusResponse(DriveTransferProtocolResponse):
     session_id: UUID
     status: str
     file_name: str
@@ -63,7 +65,7 @@ class CompleteUploadRequest(BaseModel):
     parts: list[CompleteUploadPartRequest] = Field(min_length=1)
 
 
-class CompleteUploadResponse(BaseModel):
+class CompleteUploadResponse(DriveTransferProtocolResponse):
     session_id: UUID
     status: Literal["completed"] = "completed"
     node_id: UUID
@@ -71,7 +73,7 @@ class CompleteUploadResponse(BaseModel):
     blob_id: UUID
 
 
-class AbortUploadResponse(BaseModel):
+class AbortUploadResponse(DriveTransferProtocolResponse):
     session_id: UUID
     status: Literal["aborted"] = "aborted"
 

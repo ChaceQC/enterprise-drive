@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import (
     build_audit_context,
     enforce_rate_limit,
+    ensure_supported_transfer_protocol,
     get_current_user,
     get_rate_limiter,
     get_storage_adapter,
@@ -41,7 +42,7 @@ from app.modules.upload.schemas import (
 )
 from app.modules.upload.service import UploadService
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(ensure_supported_transfer_protocol)])
 
 
 def get_upload_service(

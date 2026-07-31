@@ -93,6 +93,7 @@ async def test_create_download_url_records_audit(
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["protocol_version"] == "DTP/1"
     assert payload["node_id"] == completed["node_id"]
     assert payload["version_id"] == completed["version_id"]
     assert payload["file_name"] == "下载文件.txt"

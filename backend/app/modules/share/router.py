@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import (
     build_audit_context,
     enforce_public_rate_limit,
+    ensure_supported_transfer_protocol,
     get_current_user,
     get_rate_limiter,
     get_storage_adapter,
@@ -180,7 +181,11 @@ async def access_external_share(
     )
 
 
-@public_router.post("/download", response_model=ExternalShareDownloadResponse)
+@public_router.post(
+    "/download",
+    response_model=ExternalShareDownloadResponse,
+    dependencies=[Depends(ensure_supported_transfer_protocol)],
+)
 async def create_external_download_url(
     http_request: Request,
     request: ExternalShareDownloadRequest,
