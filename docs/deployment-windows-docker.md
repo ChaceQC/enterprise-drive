@@ -212,6 +212,7 @@ CERTBOT_EMAIL=ops@example.com
 - `outbox_pending_total` 和 `search_index_lag_seconds` 在 API scrape 时以短超时刷新。PostgreSQL 不可用时 `/metrics` 仍返回已有进程指标，但数据库 gauge 可能短暂保留上次成功值。
 - `DRIVE_RATE_LIMIT_ENABLED` 默认必须保持 `true`；根 Compose 会把该值传入 API 和 Worker。只有隔离容量基准可以临时设为 `false`，并应通过 `PERF_RATE_LIMIT_MODE` 写入性能报告，不能把关闭限流的测试配置直接用于生产。
 - 登录同时按来源 IP 和规范化账号标识限流；账号 key 只保存哈希，不保存原始用户名。默认分别为每分钟 `30` 和 `10` 次，正式环境可收紧但不能关闭；阶梯延迟、临时锁定和验证码由 Sprint 11 继续实现。
+- `DRIVE_ENVIRONMENT=production` 会触发应用内 `Settings` fail-fast 校验，覆盖 API、Worker、beat、migration 和 seed。即使绕过 `manage.ps1`，示例/过短 secret、无强密码数据库或 Redis/Celery URL、关闭限流、Wildcard Trusted Hosts、带凭据或路径的公共端点，以及非回环 HTTP CORS/S3 或未启用 Secure Cookie 的公网配置也会阻断进程启动。默认本机 HTTP 模式只有在全部公共 Host 均为 localhost/回环地址时才允许。
 
 ## 5. PowerShell 管理入口
 

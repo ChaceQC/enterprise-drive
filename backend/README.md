@@ -142,6 +142,19 @@ uv run python scripts/smoke_observability_docker.py `
 
 `backend-ci` 会在 runtime image 构建后运行同一脚本，避免只在同进程单测中验证 API/Worker 指标。
 
+### Production Settings 自校验
+
+当 `DRIVE_ENVIRONMENT=production` 时，`Settings` 在 API、Worker、beat、migration 和 seed 读取配置时统一执行 fail-fast 校验：
+
+- `DRIVE_DEBUG=false`、`DRIVE_RATE_LIMIT_ENABLED=true`。
+- `DRIVE_SECRET_KEY` 至少 32 字符；S3 secret 和初始管理员密码至少 16 字符；拒绝 `change-me`、已知开发默认值和 `$` 间接插值。
+- PostgreSQL、Redis、Celery broker/result URL 必须包含至少 16 字符的非示例密码。
+- Trusted Hosts 必须显式列出且不能包含 wildcard；CORS 与 S3 公共端点必须是无凭据、无路径/query/fragment 的 HTTP(S) 根 URL。
+- 只有全部公共 Host 都是 localhost/回环地址时才允许本机 HTTP 与非 Secure Cookie；出现任何非回环生产 Host 后，CORS 和 S3 公共端点必须使用 HTTPS、Cookie 必须启用 Secure，S3 外部端点只能使用 443。
+- Pydantic 隐藏校验输入，启动失败日志不会把传入 secret 回显到异常文本。
+
+本机 HTTP 基线仍使用 `http://localhost:18080` 与 `http://localhost:19000`；公网配置继续先通过 `deploy/windows/manage.ps1 config -Tls` 校验 DNS 名称、MinIO CORS 对齐、HSTS、bind 和 Certbot 邮箱等宿主部署条件。
+
 真实 MinIO 集成测试默认跳过，避免普通单元测试依赖外部服务。需要验证对象存储真实行为时，先启动本地 MinIO，再显式设置环境变量：
 
 ```powershell

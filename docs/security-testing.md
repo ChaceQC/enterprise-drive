@@ -64,6 +64,20 @@ DRIVE_LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
 
 422 请求校验错误不再把 Pydantic 的原始 `input` 写入响应 `details`，避免密码、外链口令、原始 token 或其他敏感字段被错误响应、代理或客户端日志重复保存。
 
+### Production Settings fail-fast
+
+`Settings` 现在在 `DRIVE_ENVIRONMENT=production` 时执行应用内安全自校验，不能只依赖宿主 `manage.ps1`：
+
+- 禁止 debug 和关闭限流。
+- 关键 secret、初始管理员密码、S3 secret 与 PostgreSQL/Redis/Celery URL 密码必须达到既定长度，并拒绝示例值、开发默认值和 `$` 间接插值。
+- Trusted Hosts 必须显式列出且禁止 wildcard；CORS 与 S3 公共端点必须是无凭据、无路径/query/fragment 的 HTTP(S) 根 URL。
+- localhost/回环地址继续允许本机 HTTP 基线；出现任何非回环生产 Host 后，CORS 和 S3 公共端点必须使用 HTTPS、Cookie 必须启用 Secure，S3 外部端点必须使用 443。
+- `hide_input_in_errors` 会阻止 Pydantic 在启动异常中回显原始配置输入。
+
+该校验由 FastAPI、Celery Worker/beat、Alembic migration 和管理员 seed 的共同 `get_settings()` 路径触发。单元测试覆盖本机与公网正例、默认/示例 secret、无密码 URL、Wildcard、带凭据/路径端点、HTTP 公网 origin、非 443 S3、SameSite=None 和 secret 不回显。
+
+真实 Docker 负例确认弱 production 配置在联网前以退出码 1 阻断且不回显传入 secret；正例分别通过独立 PostgreSQL/认证 Redis/API/Worker 可观测性 smoke，以及根 Compose migration、seed、minio-init 和 API healthy 依赖链。两次隔离验证结束后相关容器、网络和卷均为 0。
+
 ### 首轮验证闭环
 
 - 完整锁文件、同步、Ruff、格式、Bandit、pip-audit、Mypy 和 pytest 门禁全部通过；完整测试结果为 `172 passed, 4 skipped`。
@@ -84,7 +98,6 @@ DRIVE_LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
 ## 后续审计
 
 - 对 34 个 API route 建立未认证、普通用户、跨租户、撤权并发和管理员矩阵。
-- 增加生产 `Settings` 自校验，避免绕过 `manage.ps1` 直接启动时使用默认 secret、示例管理员密码或不安全公网配置。
 - 增加动态安全测试，覆盖 Host/CORS/CSRF、请求走私边界、超大请求、恶意图片/文档、Range、预签名 URL 和外链穷举。
 - Sprint 11 再实现阶梯延迟、临时锁定、管理员解锁、验证码和登录安全告警；当前固定窗口不替代完整账号安全治理。
 - 正式上线前处理 MinIO Server/Client 既有 Critical 基线，并完成真实公网 DNS、受信 TLS、外部扫描和恢复演练。

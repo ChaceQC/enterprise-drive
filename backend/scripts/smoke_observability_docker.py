@@ -37,6 +37,11 @@ WORKER_ONLY_METRICS = (
     "trash_cleanup_total",
     "trash_cleanup_released_bytes_total",
 )
+POSTGRES_PASSWORD = "drive_test_password"
+REDIS_PASSWORD = "ObservabilityRedisSecret2026"
+PRODUCTION_SECRET_KEY = "Observability-Smoke-Secret-Key-2026-0123456789abcdef"
+S3_SECRET_ACCESS_KEY = "ObservabilityMinioSecret2026"
+ADMIN_PASSWORD = "ObservabilityAdminSecret2026"
 
 
 def main() -> None:
@@ -277,7 +282,7 @@ def _start_postgres(*, docker: str, name: str, network: str, image: str) -> None
         "-e",
         "POSTGRES_USER=drive",
         "-e",
-        "POSTGRES_PASSWORD=drive_test_password",
+        f"POSTGRES_PASSWORD={POSTGRES_PASSWORD}",
         image,
     )
     _wait_command(
@@ -307,10 +312,24 @@ def _start_redis(*, docker: str, name: str, network: str, image: str) -> None:
         network,
         "--network-alias",
         "redis",
+        "-e",
+        f"REDIS_PASSWORD={REDIS_PASSWORD}",
         image,
+        "redis-server",
+        "--requirepass",
+        REDIS_PASSWORD,
     )
     _wait_command(
-        lambda: _run(docker, "exec", name, "redis-cli", "ping", check=False),
+        lambda: _run(
+            docker,
+            "exec",
+            "-e",
+            f"REDISCLI_AUTH={REDIS_PASSWORD}",
+            name,
+            "redis-cli",
+            "ping",
+            check=False,
+        ),
         description="Redis readiness",
         expected_stdout="PONG",
     )
@@ -326,7 +345,7 @@ def _run_migrations(*, docker: str, network: str, image: str) -> None:
         "-e",
         _database_url(),
         "-e",
-        "DRIVE_SECRET_KEY=docker-smoke-secret",
+        f"DRIVE_SECRET_KEY={PRODUCTION_SECRET_KEY}",
         image,
         "alembic",
         "upgrade",
@@ -346,28 +365,14 @@ def _start_api(*, docker: str, name: str, network: str, image: str) -> int:
         network,
         "-p",
         "127.0.0.1::18080",
-        "-e",
-        _database_url(),
-        "-e",
-        "DRIVE_SECRET_KEY=docker-smoke-secret",
-        "-e",
-        "DRIVE_ENVIRONMENT=production",
-        "-e",
-        "DRIVE_SERVICE_NAME=enterprise-drive-api-smoke",
-        "-e",
-        'DRIVE_TRUSTED_HOSTS=["localhost","127.0.0.1"]',
-        "-e",
-        "DRIVE_CORS_ORIGINS=[]",
-        "-e",
-        "DRIVE_TRACING_ENABLED=true",
-        "-e",
-        "DRIVE_TRACING_SAMPLE_RATIO=1.0",
-        "-e",
-        "DRIVE_TRACING_EXPORTER=none",
-        "-e",
-        "DRIVE_METRICS_DATABASE_REFRESH_TIMEOUT_SECONDS=2.0",
-        "-e",
-        "PROMETHEUS_MULTIPROC_DIR=/tmp/enterprise-drive/prometheus",
+        *_production_environment_args(
+            "DRIVE_SERVICE_NAME=enterprise-drive-api-smoke",
+            "DRIVE_TRACING_ENABLED=true",
+            "DRIVE_TRACING_SAMPLE_RATIO=1.0",
+            "DRIVE_TRACING_EXPORTER=none",
+            "DRIVE_METRICS_DATABASE_REFRESH_TIMEOUT_SECONDS=2.0",
+            "PROMETHEUS_MULTIPROC_DIR=/tmp/enterprise-drive/prometheus",
+        ),
         image,
         "uvicorn",
         "app.main:app",
@@ -393,32 +398,15 @@ def _start_worker(*, docker: str, name: str, network: str, image: str) -> int:
         network,
         "-p",
         "127.0.0.1::9100",
-        "-e",
-        _database_url(),
-        "-e",
-        "DRIVE_DATABASE_POOL_MODE=null",
-        "-e",
-        "DRIVE_REDIS_URL=redis://redis:6379/0",
-        "-e",
-        "DRIVE_CELERY_BROKER_URL=redis://redis:6379/1",
-        "-e",
-        "DRIVE_CELERY_RESULT_BACKEND=redis://redis:6379/2",
-        "-e",
-        "DRIVE_SECRET_KEY=docker-smoke-secret",
-        "-e",
-        "DRIVE_ENVIRONMENT=production",
-        "-e",
-        "DRIVE_SERVICE_NAME=enterprise-drive-worker-smoke",
-        "-e",
-        "DRIVE_WORKER_METRICS_PORT=9100",
-        "-e",
-        "DRIVE_TRACING_ENABLED=true",
-        "-e",
-        "DRIVE_TRACING_SAMPLE_RATIO=1.0",
-        "-e",
-        "DRIVE_TRACING_EXPORTER=none",
-        "-e",
-        "PROMETHEUS_MULTIPROC_DIR=/tmp/enterprise-drive/prometheus",
+        *_production_environment_args(
+            "DRIVE_DATABASE_POOL_MODE=null",
+            "DRIVE_SERVICE_NAME=enterprise-drive-worker-smoke",
+            "DRIVE_WORKER_METRICS_PORT=9100",
+            "DRIVE_TRACING_ENABLED=true",
+            "DRIVE_TRACING_SAMPLE_RATIO=1.0",
+            "DRIVE_TRACING_EXPORTER=none",
+            "PROMETHEUS_MULTIPROC_DIR=/tmp/enterprise-drive/prometheus",
+        ),
         image,
         "celery",
         "-A",
@@ -438,8 +426,32 @@ def _start_worker(*, docker: str, name: str, network: str, image: str) -> int:
 def _database_url() -> str:
     return (
         "DRIVE_DATABASE_URL="
-        "postgresql+asyncpg://drive:drive_test_password@postgres:5432/enterprise_drive"
+        f"postgresql+asyncpg://drive:{POSTGRES_PASSWORD}@postgres:5432/enterprise_drive"
     )
+
+
+def _redis_url(database: int) -> str:
+    return f"redis://:{REDIS_PASSWORD}@redis:6379/{database}"
+
+
+def _production_environment_args(*extra_values: str) -> list[str]:
+    values = (
+        _database_url(),
+        f"DRIVE_REDIS_URL={_redis_url(0)}",
+        f"DRIVE_CELERY_BROKER_URL={_redis_url(1)}",
+        f"DRIVE_CELERY_RESULT_BACKEND={_redis_url(2)}",
+        f"DRIVE_SECRET_KEY={PRODUCTION_SECRET_KEY}",
+        "DRIVE_ENVIRONMENT=production",
+        'DRIVE_TRUSTED_HOSTS=["localhost","127.0.0.1"]',
+        "DRIVE_CORS_ORIGINS=[]",
+        "DRIVE_S3_PUBLIC_ENDPOINT_URL=http://localhost:19000",
+        f"DRIVE_S3_SECRET_ACCESS_KEY={S3_SECRET_ACCESS_KEY}",
+        f"DRIVE_ADMIN_PASSWORD={ADMIN_PASSWORD}",
+        "DRIVE_SESSION_COOKIE_SECURE=false",
+        "DRIVE_RATE_LIMIT_ENABLED=true",
+        *extra_values,
+    )
+    return [argument for value in values for argument in ("-e", value)]
 
 
 def _published_port(*, docker: str, container: str, container_port: int) -> int:
@@ -495,7 +507,10 @@ def _wait_metric(
 def _http_get(url: str, *, headers: dict[str, str] | None = None) -> str:
     request = urllib.request.Request(url, headers=headers or {})
     with urllib.request.urlopen(request, timeout=5) as response:
-        return response.read().decode("utf-8")
+        body = response.read()
+    if not isinstance(body, bytes):
+        raise RuntimeError(f"unexpected HTTP response body type: {type(body).__name__}")
+    return body.decode("utf-8")
 
 
 def _find_json_log(
@@ -509,9 +524,12 @@ def _find_json_log(
     output = _run(docker, "logs", container).stdout
     for line in reversed(output.splitlines()):
         try:
-            payload = json.loads(line)
+            parsed_payload = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if not isinstance(parsed_payload, dict):
+            continue
+        payload: dict[str, Any] = {str(key): item for key, item in parsed_payload.items()}
         if payload.get("message") == message and payload.get(field) == value:
             return payload
     raise RuntimeError(f"JSON log not found in {container}: {message}, {field}={value}")

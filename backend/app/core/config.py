@@ -1,10 +1,110 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Literal
+from ipaddress import ip_address
+from typing import Literal, Self
+from urllib.parse import SplitResult, unquote, urlsplit
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+_PRODUCTION_SECRET_MARKERS = (
+    "change-me",
+    "change_me",
+    "change me",
+    "changeme",
+)
+_KNOWN_EXAMPLE_SECRETS = frozenset(
+    {
+        "change-me-before-first-run",
+        "dev-secret-change-me",
+        "drive-dev-password",
+        "drive_dev_password",
+        "minioadmin",
+    }
+)
+
+
+def _is_loopback_host(hostname: str | None) -> bool:
+    if hostname is None:
+        return False
+
+    normalized = hostname.rstrip(".").casefold()
+    if normalized == "localhost" or normalized.endswith(".localhost"):
+        return True
+    try:
+        return ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def _secret_error(name: str, value: str, *, minimum_length: int) -> str | None:
+    normalized = value.strip().casefold()
+    if (
+        len(value) < minimum_length
+        or not normalized
+        or normalized in _KNOWN_EXAMPLE_SECRETS
+        or any(marker in normalized for marker in _PRODUCTION_SECRET_MARKERS)
+        or "$" in value
+    ):
+        return (
+            f"{name} must be a non-interpolated, non-example value of at least "
+            f"{minimum_length} characters"
+        )
+    return None
+
+
+def _password_url_error(
+    name: str,
+    value: str,
+    *,
+    allowed_schemes: frozenset[str],
+) -> str | None:
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+        password = unquote(parsed.password or "")
+    except ValueError:
+        return f"{name} must be a valid credential URL"
+
+    if parsed.scheme not in allowed_schemes or hostname is None:
+        return f"{name} must use an expected scheme and include a host"
+    if parsed.username is None and parsed.password is None:
+        return f"{name} must include credential user info"
+    secret_error = _secret_error(name, password, minimum_length=16)
+    if secret_error is not None:
+        return secret_error
+    return None
+
+
+def _parse_http_root_url(
+    name: str,
+    value: str,
+    errors: list[str],
+) -> SplitResult | None:
+    try:
+        parsed = urlsplit(value)
+        hostname = parsed.hostname
+        _ = parsed.port
+    except ValueError:
+        errors.append(f"{name} must be a valid HTTP(S) root URL")
+        return None
+
+    if (
+        parsed.scheme not in {"http", "https"}
+        or hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.query
+        or parsed.fragment
+    ):
+        errors.append(
+            f"{name} must be an explicit HTTP(S) root URL without credentials, "
+            "path, query, or fragment"
+        )
+        return None
+    return parsed
 
 
 class Settings(BaseSettings):
@@ -13,6 +113,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         env_prefix="DRIVE_",
         extra="ignore",
+        hide_input_in_errors=True,
     )
 
     app_name: str = "企业网盘"
@@ -120,6 +221,112 @@ class Settings(BaseSettings):
     admin_username: str = "admin"
     admin_email: str = "admin@example.com"
     admin_password: str = "change-me-before-first-run"
+
+    @model_validator(mode="after")
+    def validate_production_security(self) -> Self:
+        if self.environment != "production":
+            return self
+
+        errors: list[str] = []
+        if self.debug:
+            errors.append("DRIVE_DEBUG must be false in production")
+        if not self.rate_limit_enabled:
+            errors.append("DRIVE_RATE_LIMIT_ENABLED must be true in production")
+
+        for name, value, minimum_length in (
+            ("DRIVE_SECRET_KEY", self.secret_key, 32),
+            ("DRIVE_S3_SECRET_ACCESS_KEY", self.s3_secret_access_key, 16),
+            ("DRIVE_ADMIN_PASSWORD", self.admin_password, 16),
+        ):
+            error = _secret_error(name, value, minimum_length=minimum_length)
+            if error is not None:
+                errors.append(error)
+
+        for name, value, allowed_schemes in (
+            (
+                "DRIVE_DATABASE_URL",
+                self.database_url,
+                frozenset({"postgresql", "postgresql+asyncpg"}),
+            ),
+            ("DRIVE_REDIS_URL", self.redis_url, frozenset({"redis", "rediss"})),
+            (
+                "DRIVE_CELERY_BROKER_URL",
+                self.celery_broker_url,
+                frozenset({"redis", "rediss"}),
+            ),
+            (
+                "DRIVE_CELERY_RESULT_BACKEND",
+                self.celery_result_backend,
+                frozenset({"redis", "rediss"}),
+            ),
+        ):
+            error = _password_url_error(name, value, allowed_schemes=allowed_schemes)
+            if error is not None:
+                errors.append(error)
+
+        public_surface = False
+        if not self.trusted_hosts:
+            errors.append("DRIVE_TRUSTED_HOSTS must not be empty in production")
+        for trusted_host in self.trusted_hosts:
+            normalized_host = trusted_host.strip()
+            if (
+                not normalized_host
+                or "*" in normalized_host
+                or "://" in normalized_host
+                or "/" in normalized_host
+            ):
+                errors.append(
+                    "DRIVE_TRUSTED_HOSTS entries must be explicit host names "
+                    "without wildcards, schemes, or paths"
+                )
+                continue
+            if not _is_loopback_host(normalized_host.strip("[]")):
+                public_surface = True
+
+        parsed_origins: list[SplitResult] = []
+        for origin in self.cors_origins:
+            parsed_origin = _parse_http_root_url("DRIVE_CORS_ORIGINS", origin, errors)
+            if parsed_origin is None:
+                continue
+            parsed_origins.append(parsed_origin)
+            if not _is_loopback_host(parsed_origin.hostname):
+                public_surface = True
+
+        if self.s3_public_endpoint_url is None:
+            errors.append("DRIVE_S3_PUBLIC_ENDPOINT_URL must be set in production")
+            parsed_s3_public_endpoint = None
+        else:
+            parsed_s3_public_endpoint = _parse_http_root_url(
+                "DRIVE_S3_PUBLIC_ENDPOINT_URL",
+                self.s3_public_endpoint_url,
+                errors,
+            )
+            if parsed_s3_public_endpoint is not None and not _is_loopback_host(
+                parsed_s3_public_endpoint.hostname
+            ):
+                public_surface = True
+
+        if public_surface:
+            if not self.session_cookie_secure:
+                errors.append(
+                    "DRIVE_SESSION_COOKIE_SECURE must be true for public production hosts"
+                )
+            if any(origin.scheme != "https" for origin in parsed_origins):
+                errors.append("Public DRIVE_CORS_ORIGINS entries must use HTTPS")
+            if parsed_s3_public_endpoint is not None:
+                if parsed_s3_public_endpoint.scheme != "https":
+                    errors.append("Public DRIVE_S3_PUBLIC_ENDPOINT_URL must use HTTPS")
+                if parsed_s3_public_endpoint.port not in {None, 443}:
+                    errors.append("Public DRIVE_S3_PUBLIC_ENDPOINT_URL must use port 443")
+
+        if self.session_cookie_samesite == "none" and not self.session_cookie_secure:
+            errors.append(
+                "DRIVE_SESSION_COOKIE_SAMESITE=none requires DRIVE_SESSION_COOKIE_SECURE=true"
+            )
+
+        if errors:
+            raise ValueError("Production settings validation failed: " + "; ".join(errors))
+        return self
 
 
 @lru_cache

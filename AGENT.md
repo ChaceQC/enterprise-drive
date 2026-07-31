@@ -315,6 +315,7 @@ uv run mypy app
 - 外部 URL 预览或远程拉取默认不做，避免 SSRF。
 - 登录失败、初始化上传、分片签名、下载、外链访问和搜索必须有限流策略。
 - CORS、Trusted Host、Cookie、CSRF、限流必须按公网部署设计。
+- `Settings` 必须在 `DRIVE_ENVIRONMENT=production` 时自行拒绝 debug、关闭限流、示例或过短 secret、无强密码连接 URL、Wildcard Trusted Hosts、带凭据/路径的公共端点，以及非回环 HTTP CORS/S3 端点或未启用 Secure Cookie 的公网配置；该应用内门禁不能只依赖宿主 `manage.ps1`。
 - 公网 TLS 管理入口必须拒绝回环或非 IPv4 bind、示例密钥、过短或 `${...}` 间接插值的关键 secret/连接 URL、数据库/Redis URL 与独立密码不一致、Wildcard Trusted Hosts、HTTP API CORS origin、与 API CORS 不一致或非 HTTPS 的 MinIO CORS、带凭据/非 443 的 S3 外部端点和示例 Certbot 邮箱，不能仅因证书配置存在就允许绑定 `0.0.0.0:80/443`。
 - 正式环境只允许 Compose 内的 Nginx gateway 发布宿主端口；默认本机为 HTTP `18080/19000`，公网模式通过已实现的 TLS 配置映射 `80/443`，但必须先完成真实 DNS、证书和 Host 分流验证。应用容器、数据库、Redis、OpenSearch、MinIO API/Console 等服务只监听 Compose 内部网络。
 

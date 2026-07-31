@@ -1,5 +1,58 @@
 # PROJECT_PROGRESS.md
 
+## 2026-07-31 BE-030 production Settings 自校验
+
+### 当前状态
+
+- 已完成 production 配置的应用内 fail-fast 实现、单元回归、完整后端门禁和真实 Docker API/Worker 正负例；当前待提交推送并确认 GitHub Actions。
+
+### 已完成
+
+- `Settings` 在 `environment=production` 时统一校验 debug、限流、关键 secret、PostgreSQL/Redis/Celery 凭据 URL、Trusted Hosts、CORS、S3 公共端点、SameSite 与 Secure Cookie。
+- 关键 secret 拒绝过短值、`change-me`/开发默认值和 `$` 间接插值；Pydantic 启用 `hide_input_in_errors`，启动异常不回显传入 secret。
+- 本机 HTTP 只在 Trusted Hosts、CORS 和 S3 公共端点全部为 localhost/回环地址时允许；任何非回环生产 Host 会强制 HTTPS、Secure Cookie，并要求 S3 外部端点使用 443。
+- FastAPI、Celery Worker/beat、Alembic migration 和管理员 seed 都通过现有 `get_settings()` 触发同一校验，不新增可绕过的第二套启动入口。
+- 可观测性 Docker smoke 改用带密码 Redis 和完整 production 安全配置，继续验证 2-worker API、maintenance Worker、真实任务、指标隔离和 trace 关联。
+- 新增 `tests/test_config.py` 16 个用例，覆盖本机/公网正例和 debug、关闭限流、弱 secret、无密码 URL、Wildcard、带凭据/路径端点、HTTP 公网 origin、非 443/公网回环 HTTP S3、SameSite=None 与 secret 不回显。
+
+### 阻塞与风险
+
+- 应用内校验不替代 `manage.ps1 -Tls` 的宿主 bind、HSTS、API/MinIO CORS 精确对齐、真实 DNS、证书和 Certbot 邮箱检查。
+- 完整 34 route 身份/租户矩阵以及恶意图片、文档、Range、预签名 URL 和外链穷举动态测试仍未完成。
+
+### 下一步
+
+1. 提交并推送 production `Settings` 自校验，等待 GitHub Actions。
+2. 建立 34 个 API route 的身份/租户矩阵。
+3. 增加恶意图片/文档、Range、预签名 URL 和外链穷举动态安全测试。
+
+### 验证
+
+- production Settings 定向测试：`16 passed`；FastAPI、Celery、可观测性和 S3 相关回归合计 `35 passed`。
+- Ruff、格式检查、Bandit 和 `uv run mypy app`：全部通过；Bandit 中危/高危为 0。
+- `uv run pip-audit --local --progress-spinner off`：0 已知漏洞。
+- 完整 `uv run pytest`：`188 passed, 4 skipped`。
+- runtime 镜像使用 `1 CPU / 2 GiB` BuildKit 上限和 `--pull=false` 重建为 `sha256:d1e18de9bee6a3e725c1cd9bc7c02326cf4b8ce63bcb96dd2eccf567341302b0`，耗时 `8.5s`。
+- 真实 Docker 负例：production 仅提供弱/默认配置时容器退出码为 1，错误包含 `Production settings validation failed` 且不包含传入 secret。
+- 真实 Docker 正例：PostgreSQL、带密码 Redis、2-worker API 和 maintenance Worker 启动成功，24 次 ping、3 个多进程 gauge 文件、真实 `upload.expire_sessions` 任务、API/Worker trace 均通过。
+- Docker smoke 采样峰值为 4 个容器、`53.3%` aggregate Docker CPU、`473.4 MiB` 容器内存和 `3371.8 MiB` Docker/WSL 私有工作集；结束后容器和网络均为 0。
+- 根 `compose.windows.yml` 使用 `--no-build --pull never` 和强 production 配置启动成功；migration、seed、minio-init 均退出 0，API 为 healthy，容器内读取到 `environment=production`、`rate_limit=True`。峰值为 5 个运行容器、`123.3%` aggregate Docker CPU 和 `1462.8 MiB` 容器内存；结束后隔离 project 的容器、网络和卷均为 0。
+
+### 涉及文件
+
+- `backend/app/core/config.py`
+- `backend/tests/test_config.py`
+- `backend/scripts/smoke_observability_docker.py`
+- `.env.windows.example`
+- `AGENT.md`
+- `README.md`
+- `backend/README.md`
+- `docs/deployment-windows-docker.md`
+- `docs/security-testing.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-07-31 BE-030 安全测试修复首轮
 
 ### 当前状态
@@ -30,8 +83,8 @@
 
 ### 下一步
 
-1. 增加 production `Settings` 自校验，防止绕过 `manage.ps1` 直接启动时使用默认 secret、示例管理员密码或不安全公网配置。
-2. 建立 34 个 API route 的身份/租户矩阵和恶意图片、文档、Range、外链穷举动态安全测试。
+1. 建立 34 个 API route 的身份/租户矩阵。
+2. 增加恶意图片、文档、Range、预签名 URL 和外链穷举动态安全测试。
 
 ### 验证
 
