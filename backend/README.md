@@ -125,6 +125,8 @@ Windows CMS 只加密 `.env.windows`。PostgreSQL dump、MinIO/Redis/OpenSearch 
 ```powershell
 uv run ruff check .
 uv run ruff format --check .
+uv run bandit -r app -ll --skip B101
+uv run pip-audit --local --progress-spinner off
 uv run mypy app
 uv run pytest
 ```
@@ -305,6 +307,9 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - `DRIVE_DOWNLOAD_PRESIGN_EXPIRES_SECONDS`
 - `DRIVE_DEFAULT_SPACE_QUOTA_BYTES`
 - `DRIVE_RATE_LIMIT_ENABLED`
+- `DRIVE_LOGIN_IP_RATE_LIMIT_COUNT`
+- `DRIVE_LOGIN_ACCOUNT_RATE_LIMIT_COUNT`
+- `DRIVE_LOGIN_RATE_LIMIT_WINDOW_SECONDS`
 - `DRIVE_UPLOAD_INIT_RATE_LIMIT_COUNT`
 - `DRIVE_UPLOAD_INIT_RATE_LIMIT_WINDOW_SECONDS`
 - `DRIVE_UPLOAD_PART_PRESIGN_RATE_LIMIT_COUNT`

@@ -89,6 +89,12 @@ jobs:
       - name: Ruff format check
         run: uv run ruff format --check .
 
+      - name: Bandit security scan
+        run: uv run bandit -r app -ll --skip B101
+
+      - name: Dependency vulnerability audit
+        run: uv run pip-audit --local --progress-spinner off
+
       - name: Mypy
         run: uv run mypy app
 

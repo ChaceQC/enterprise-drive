@@ -19,6 +19,7 @@ from app.modules.audit.models import AuditLog, OutboxEvent
 from app.modules.audit.repository import AuditRepository
 from app.modules.audit.schemas import AuditContext
 from app.modules.audit.service import AuditService
+from app.modules.auth import service as auth_service_module
 from app.modules.auth.models import AuthSession
 from app.modules.auth.repository import AuthRepository
 from app.modules.auth.service import AuthService
@@ -34,6 +35,7 @@ def auth_settings() -> Settings:
         database_url="sqlite+aiosqlite:///:memory:",
         admin_password="admin-password",
         session_days=30,
+        rate_limit_enabled=False,
     )
 
 
@@ -213,6 +215,39 @@ async def test_failed_login_writes_denied_audit(
 
 
 @pytest.mark.asyncio
+async def test_missing_tenant_and_user_consume_dummy_password_cost(
+    auth_service: AuthService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await auth_service.seed_admin()
+    verified_hashes: list[str] = []
+
+    def fake_verify_password(password: str, password_hash: str) -> bool:
+        verified_hashes.append(password_hash)
+        return False
+
+    monkeypatch.setattr(auth_service_module, "verify_password", fake_verify_password)
+
+    with pytest.raises(ApiError):
+        await auth_service.login(
+            tenant_slug="missing",
+            username="unknown",
+            password="wrong-password",
+        )
+    with pytest.raises(ApiError):
+        await auth_service.login(
+            tenant_slug="default",
+            username="unknown",
+            password="wrong-password",
+        )
+
+    assert verified_hashes == [
+        auth_service_module._DUMMY_PASSWORD_HASH,
+        auth_service_module._DUMMY_PASSWORD_HASH,
+    ]
+
+
+@pytest.mark.asyncio
 async def test_auth_api_login_rotate_me_and_logout_with_cookie_session(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
@@ -276,3 +311,22 @@ async def test_auth_api_login_rotate_me_and_logout_with_cookie_session(
 
     logged_out_response = await client.get("/api/v1/auth/me")
     assert logged_out_response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_login_validation_error_does_not_echo_password(client: AsyncClient) -> None:
+    sensitive_password = "sensitive-password-" * 20
+
+    response = await client.post(
+        "/api/v1/auth/login",
+        json={
+            "tenant_slug": "default",
+            "username": "admin",
+            "password": sensitive_password,
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "VALIDATION_ERROR"
+    assert sensitive_password not in response.text
+    assert all("input" not in detail for detail in response.json()["details"])

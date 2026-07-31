@@ -1,5 +1,77 @@
 # PROJECT_PROGRESS.md
 
+## 2026-07-31 BE-030 安全测试修复首轮
+
+### 当前状态
+
+- `BE-029` 已通过提交 `f0302e2` 和 GitHub Actions run `30652675576` 闭环。
+- `BE-030` 已完成依赖、静态代码、登录入口和错误响应的第一轮攻击者可达审计，以及完整后端、部署配置和真实 Docker 门禁；当前待提交推送并确认 GitHub Actions。
+
+### 已完成
+
+- 使用实际 `.venv` 审计 123 个安装包，发现的 20 条已知漏洞记录全部集中在 `Pillow 12.2.0`；预览 Worker 会读取用户上传图片，因此判定为可达而非误报。
+- 生产依赖下限和 `uv.lock` 已升级为 `Pillow 12.3.0`，预览定向测试全部通过；加入安全工具后审计 145 个环境包为 0 已知漏洞。
+- dev 依赖新增 `bandit 1.9.4` 和 `pip-audit 2.10.1`；`backend-ci` 在 Ruff 后执行中危/高危静态扫描和实际环境依赖漏洞审计。
+- Worker metrics 的 `0.0.0.0:9100` 只监听 Compose 内部网络且不发布宿主端口，对该行精确标注 `B104` 边界；Bandit 中危/高危结果为 0。
+- 登录新增 `auth.login.ip` 和 `auth.login.account` 两类 Redis 固定窗口；默认分别为每 60 秒 30 次和 10 次，账号 key 使用租户与用户名规范化值的 SHA-256，不保存原文。
+- 不存在租户、用户或停用用户的登录仍执行 Argon2id 校验成本，并统一返回 `AUTH_INVALID_CREDENTIALS`，降低账号存在性时序差异。
+- 422 校验错误统一移除 Pydantic 原始 `input`，避免密码、外链口令和 token 被错误响应重复保存。
+- 新增 `docs/security-testing.md`，记录威胁模型、命令、首轮结果、有效边界和后续动态测试范围。
+
+### 待提交与远端验证
+
+- 提交并推送首轮 `BE-030` 修复，等待新增 Bandit、pip-audit 和既有构建、测试、Windows 部署 job 全部通过。
+
+### 阻塞与风险
+
+- 当前固定窗口不包含阶梯延迟、临时锁定、管理员解锁和验证码，这些仍属于 Sprint 11 账号安全治理。
+- MinIO Server/Client 既有 Critical 基线仍未清零；Python 依赖审计通过不代表镜像供应链风险已经消失。
+- 尚未完成 34 个 API route 的未认证、普通用户、跨租户、撤权并发和管理员动态矩阵。
+
+### 下一步
+
+1. 提交并推送首轮 `BE-030` 修复，等待 GitHub Actions。
+2. 增加 production `Settings` 自校验，防止绕过 `manage.ps1` 直接启动时使用默认 secret、示例管理员密码或不安全公网配置。
+3. 建立 34 个 API route 的身份/租户矩阵和恶意图片、文档、Range、外链穷举动态安全测试。
+
+### 验证
+
+- `uv run pytest tests/test_auth.py tests/test_rate_limit.py -q`：15 个用例通过。
+- 图片、PDF、Office、LibreOffice、Poppler 和 preview Worker 定向测试：14 个用例通过。
+- `uv run bandit -r app -ll --skip B101`：中危、高危均为 0。
+- `uv run pip-audit --local --progress-spinner off`：审计 145 个环境包，已知漏洞为 0。
+- `uv lock --check`、`uv sync --frozen --all-extras --dev`、Ruff、格式检查和 `uv run mypy app`：全部通过；Mypy 检查 149 个源文件，Ruff 确认 210 个文件格式正确。
+- 完整 `uv run pytest`：`172 passed, 4 skipped`。
+- Compose 已验证登录限流三个环境变量可从宿主覆盖并传入 API。
+- runtime 镜像已在 `1 CPU / 2 GiB` BuildKit 上限和 `--pull=false` 下重建为 `sha256:2a6b5558b3031b0c8da6404ac7ca9809afb475ad5940ca3b6fc9c3e702e60928`；preview 镜像已在 `1 CPU / 3 GiB` 上限下重建为 `sha256:16710e0eab90942598a39fa8979275e4eea322ba31fb5064a3bd19484e715c47`，两者均确认使用 `Pillow 12.3.0`。
+- 隔离真实 Compose 使用 `--no-build --pull never` 启动 API 必需依赖；错误登录首次返回 `401/AUTH_INVALID_CREDENTIALS`，同账号第二次返回 `429/RATE_LIMITED`，`details.action=auth.login.account`。
+- 真实 Compose 采样峰值为 5 个运行容器、`123.1%` aggregate Docker CPU、`1426.3 MiB` 容器内存和 `4826.4 MiB` Docker/WSL 私有工作集；结束后该 project 的容器、网络和卷均为 0。
+- `docker compose --env-file .env.windows.example -f compose.windows.yml config --quiet`、`deploy/windows/manage.ps1 config -EnvFile .env.windows.example -Quiet` 和 `git diff --check`：全部通过；当前运行中和全部容器均为 0，本地 10 个镜像对应 10 个唯一 image ID。
+
+### 涉及文件
+
+- `backend/pyproject.toml`
+- `backend/uv.lock`
+- `backend/app/api/deps.py`
+- `backend/app/api/errors.py`
+- `backend/app/core/config.py`
+- `backend/app/core/worker_metrics.py`
+- `backend/app/modules/auth/router.py`
+- `backend/app/modules/auth/service.py`
+- `backend/tests/test_auth.py`
+- `backend/tests/test_rate_limit.py`
+- `.github/workflows/backend-ci.yml`
+- `.env.windows.example`
+- `compose.windows.yml`
+- `AGENT.md`
+- `README.md`
+- `backend/README.md`
+- `docs/deployment-windows-docker.md`
+- `docs/security-testing.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-07-31 BE-029 性能基准首份真实 Docker smoke
 
 ### 当前状态

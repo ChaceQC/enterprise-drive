@@ -21,6 +21,11 @@ from app.modules.auth.models import AuthSession, User
 from app.modules.auth.repository import AuthRepository
 from app.modules.auth.schemas import SessionResponse, UserProfileResponse
 
+_DUMMY_PASSWORD_HASH = (
+    "$argon2id$v=19$m=65536,t=3,p=4$rgPem9k9R8j+41iADiuEdA$"
+    "zRcQ86zm5XX5ebdXHXZ0+dVP/M0dXrKkElHiWtzWiuQ"
+)
+
 
 @dataclass(frozen=True)
 class SeedAdminResult:
@@ -59,10 +64,15 @@ class AuthService:
     ) -> IssuedSession:
         tenant = await self.repository.get_tenant_by_slug(tenant_slug)
         if tenant is None:
+            verify_password(password, _DUMMY_PASSWORD_HASH)
             raise self._invalid_credentials()
 
         user = await self.repository.get_user_by_login(tenant_id=tenant.id, login=username)
         if user is None or not user.is_active:
+            verify_password(
+                password,
+                user.password_hash if user is not None else _DUMMY_PASSWORD_HASH,
+            )
             await self._record_auth_event(
                 AuditEvent(
                     tenant_id=tenant.id,

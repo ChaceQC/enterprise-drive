@@ -145,12 +145,17 @@ async def enforce_public_rate_limit(
     action: str,
     request: Request,
     resource_key: str | None = None,
+    include_client_ip: bool = True,
 ) -> None:
     if not settings.rate_limit_enabled:
         return
     rule = _rate_limit_rule(settings=settings, action=action)
     decision = await rate_limiter.hit(
-        key=_public_rate_limit_key(resource_key=resource_key, request=request),
+        key=_public_rate_limit_key(
+            resource_key=resource_key,
+            request=request,
+            include_client_ip=include_client_ip,
+        ),
         rule=rule,
     )
     if decision.allowed:
@@ -161,6 +166,18 @@ async def enforce_public_rate_limit(
 
 
 def _rate_limit_rule(*, settings: Settings, action: str) -> RateLimitRule:
+    if action == "auth.login.ip":
+        return RateLimitRule(
+            action=action,
+            limit=settings.login_ip_rate_limit_count,
+            window_seconds=settings.login_rate_limit_window_seconds,
+        )
+    if action == "auth.login.account":
+        return RateLimitRule(
+            action=action,
+            limit=settings.login_account_rate_limit_count,
+            window_seconds=settings.login_rate_limit_window_seconds,
+        )
     if action == "upload.init":
         return RateLimitRule(
             action=action,
@@ -218,11 +235,13 @@ def _public_rate_limit_key(
     *,
     resource_key: str | None,
     request: Request,
+    include_client_ip: bool = True,
 ) -> str:
     parts = ["public"]
     if resource_key:
         parts.append(resource_key)
-    parts.append(f"ip:{request.client.host}" if request.client is not None else "ip:unknown")
+    if include_client_ip:
+        parts.append(f"ip:{request.client.host}" if request.client is not None else "ip:unknown")
     return ":".join(parts)
 
 

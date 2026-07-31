@@ -100,7 +100,12 @@ async def validation_error_handler(request: Request, exc: Exception) -> JSONResp
         code="VALIDATION_ERROR",
         message="请求参数不合法",
         request_id=_request_id(request),
-        details=jsonable_encoder(validation_error.errors()),
+        details=jsonable_encoder(
+            [
+                {key: value for key, value in error.items() if key != "input"}
+                for error in validation_error.errors()
+            ]
+        ),
     )
 
 

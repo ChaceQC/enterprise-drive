@@ -5,9 +5,16 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import build_audit_context, get_current_user
+from app.api.deps import (
+    build_audit_context,
+    enforce_public_rate_limit,
+    get_current_user,
+    get_rate_limiter,
+)
 from app.core.config import Settings, get_settings
+from app.core.security import hash_token
 from app.db.session import get_db_session
+from app.infrastructure.rate_limit.base import RateLimiter
 from app.modules.audit.repository import AuditRepository
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
@@ -39,8 +46,28 @@ async def login(
     http_request: Request,
     response: Response,
     request: LoginRequest,
+    settings: Annotated[Settings, Depends(get_settings)],
+    rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
     service: Annotated[AuthService, Depends(get_auth_service)],
 ) -> SessionResponse:
+    account_key = hash_token(
+        f"{request.tenant_slug.strip().casefold()}:{request.username.strip().casefold()}"
+    )
+    await enforce_public_rate_limit(
+        settings=settings,
+        rate_limiter=rate_limiter,
+        action="auth.login.ip",
+        request=http_request,
+        resource_key="login",
+    )
+    await enforce_public_rate_limit(
+        settings=settings,
+        rate_limiter=rate_limiter,
+        action="auth.login.account",
+        request=http_request,
+        resource_key=f"account:{account_key}",
+        include_client_ip=False,
+    )
     issued_session = await service.login(
         tenant_slug=request.tenant_slug,
         username=request.username,

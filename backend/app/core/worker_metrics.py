@@ -114,9 +114,10 @@ def worker_metrics_registry_for_exposition() -> CollectorRegistry:
 def start_worker_metrics_server(*, port: int) -> tuple[Any, Any] | None:
     if port <= 0:
         return None
+    # Worker metrics 只监听 Compose 内部网络，正式编排不发布宿主端口。
     return start_http_server(
         port,
-        addr="0.0.0.0",
+        addr="0.0.0.0",  # nosec B104
         registry=worker_metrics_registry_for_exposition(),
     )
 

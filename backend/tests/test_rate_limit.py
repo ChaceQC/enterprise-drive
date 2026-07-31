@@ -35,6 +35,58 @@ def zero_bytes_sha256(size_bytes: int) -> str:
     return hashlib.sha256(b"\x00" * size_bytes).hexdigest()
 
 
+@pytest.mark.asyncio
+async def test_login_ip_rate_limit_blocks_second_attempt(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    settings.rate_limit_enabled = True
+    settings.login_ip_rate_limit_count = 1
+    settings.login_account_rate_limit_count = 10
+    settings.login_rate_limit_window_seconds = 60
+    await seed_admin(session_factory, settings)
+
+    payload = {
+        "tenant_slug": "default",
+        "username": "admin",
+        "password": "wrong-password",
+    }
+    first_response = await client.post("/api/v1/auth/login", json=payload)
+    second_response = await client.post("/api/v1/auth/login", json=payload)
+
+    assert first_response.status_code == 401
+    assert second_response.status_code == 429
+    assert second_response.json()["code"] == "RATE_LIMITED"
+    assert second_response.json()["details"]["action"] == "auth.login.ip"
+
+
+@pytest.mark.asyncio
+async def test_login_account_rate_limit_is_independent_from_ip_limit(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    settings.rate_limit_enabled = True
+    settings.login_ip_rate_limit_count = 10
+    settings.login_account_rate_limit_count = 1
+    settings.login_rate_limit_window_seconds = 60
+    await seed_admin(session_factory, settings)
+
+    payload = {
+        "tenant_slug": "default",
+        "username": "admin",
+        "password": "wrong-password",
+    }
+    first_response = await client.post("/api/v1/auth/login", json=payload)
+    second_response = await client.post("/api/v1/auth/login", json=payload)
+
+    assert first_response.status_code == 401
+    assert second_response.status_code == 429
+    assert second_response.json()["code"] == "RATE_LIMITED"
+    assert second_response.json()["details"]["action"] == "auth.login.account"
+
+
 async def complete_small_file(
     client: AsyncClient,
     token: str,

@@ -391,6 +391,8 @@ checkout
   -> uv sync --frozen --all-extras --dev
   -> ruff check
   -> ruff format --check
+  -> bandit（中危/高危代码模式）
+  -> pip-audit（已锁定 Python 依赖）
   -> mypy app
   -> pytest
   -> docker compose --env-file .env.windows.example -f compose.windows.yml config --quiet
