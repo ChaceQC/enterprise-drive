@@ -40,6 +40,31 @@ jobs:
       - name: Install dependencies
         run: uv sync --frozen --all-extras --dev
 
+      - name: Start PostgreSQL
+        run: |
+          POSTGRES_IMAGE="$(sed -n 's/^POSTGRES_IMAGE=//p' ../.env.windows.example)"
+          test -n "${POSTGRES_IMAGE}"
+          docker run -d --name enterprise-drive-ci-postgres \
+            -p 15432:5432 \
+            -e POSTGRES_DB=enterprise_drive \
+            -e POSTGRES_USER=drive \
+            -e POSTGRES_PASSWORD=drive-ci-password \
+            "${POSTGRES_IMAGE}"
+          for _ in {1..60}; do
+            if docker exec enterprise-drive-ci-postgres \
+              pg_isready -U drive -d enterprise_drive; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs enterprise-drive-ci-postgres
+          exit 1
+
+      - name: Upgrade PostgreSQL schema
+        env:
+          DRIVE_DATABASE_URL: postgresql+asyncpg://drive:drive-ci-password@127.0.0.1:15432/enterprise_drive
+        run: uv run alembic upgrade head
+
       - name: Start MinIO
         run: |
           MINIO_IMAGE="$(sed -n 's/^MINIO_IMAGE=//p' ../.env.windows.example)"
@@ -74,6 +99,8 @@ jobs:
           DRIVE_TEST_MINIO_ACCESS_KEY: "drive-dev"
           DRIVE_TEST_MINIO_SECRET_KEY: "drive-dev-password"
           DRIVE_TEST_MINIO_BUCKET: "enterprise-drive-ci"
+          DRIVE_RUN_POSTGRES_TESTS: "1"
+          DRIVE_TEST_POSTGRES_URL: postgresql+asyncpg://drive:drive-ci-password@127.0.0.1:15432/enterprise_drive
         run: uv run pytest
 
       - name: Validate Windows Docker Compose
@@ -220,6 +247,12 @@ jobs:
 
       - name: Build Preview Worker image
         run: docker build --target preview --tag enterprise-drive-preview:ci .
+
+      - name: Stop integration containers
+        if: always()
+        run: |
+          docker rm -f enterprise-drive-ci-minio >/dev/null 2>&1 || true
+          docker rm -f enterprise-drive-ci-postgres >/dev/null 2>&1 || true
 
   minio-image-policy:
     runs-on: ubuntu-latest

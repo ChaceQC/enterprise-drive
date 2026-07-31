@@ -20,6 +20,19 @@ orphan_object_cleanup_total = Counter(
     registry=METRICS_REGISTRY,
 )
 
+trash_cleanup_total = Counter(
+    "trash_cleanup_total",
+    "回收站保留期扫描和清理计数",
+    ("status",),
+    registry=METRICS_REGISTRY,
+)
+
+trash_cleanup_released_bytes_total = Counter(
+    "trash_cleanup_released_bytes_total",
+    "回收站保留期清理释放的容量字节数",
+    registry=METRICS_REGISTRY,
+)
+
 
 def record_preview_failure(*, status: str, reason: str) -> None:
     preview_failures_total.labels(status=status, reason=reason).inc()
@@ -29,6 +42,18 @@ def record_orphan_object_cleanup(*, status: str, count: int = 1) -> None:
     if count <= 0:
         return
     orphan_object_cleanup_total.labels(status=status).inc(count)
+
+
+def record_trash_cleanup(*, status: str, count: int = 1) -> None:
+    if count <= 0:
+        return
+    trash_cleanup_total.labels(status=status).inc(count)
+
+
+def record_trash_cleanup_released_bytes(*, size_bytes: int) -> None:
+    if size_bytes <= 0:
+        return
+    trash_cleanup_released_bytes_total.inc(size_bytes)
 
 
 def register_metrics_route(app: FastAPI) -> None:

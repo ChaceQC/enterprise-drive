@@ -126,6 +126,7 @@ class Node(Base):
         ),
         Index("idx_nodes_list", "tenant_id", "space_id", "parent_id", "is_deleted"),
         Index("idx_nodes_updated", "tenant_id", "space_id", "updated_at"),
+        Index("idx_nodes_trash_cleanup", "tenant_id", "is_deleted", "deleted_at", "id"),
     )
 
 

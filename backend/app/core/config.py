@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     outbox_dispatch_interval_seconds: int = Field(default=5, ge=1)
     maintenance_task_batch_size: int = Field(default=100, ge=1)
     upload_cleanup_interval_seconds: int = Field(default=300, ge=1)
+    trash_retention_days: int = Field(default=30, ge=1)
+    trash_cleanup_interval_seconds: int = Field(default=3600, ge=1)
     blob_cleanup_interval_seconds: int = Field(default=3600, ge=1)
     orphan_object_scan_interval_seconds: int = Field(default=86400, ge=1)
     quota_reconciliation_interval_seconds: int = Field(default=86400, ge=1)

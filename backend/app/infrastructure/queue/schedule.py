@@ -34,6 +34,12 @@ def build_beat_schedule(settings: Settings) -> dict[str, dict[str, object]]:
             "kwargs": {"limit": batch_size},
             "options": {"queue": "maintenance"},
         },
+        "cleanup-expired-trash": {
+            "task": "file.cleanup_expired_trash",
+            "schedule": float(settings.trash_cleanup_interval_seconds),
+            "kwargs": {"limit": batch_size},
+            "options": {"queue": "maintenance"},
+        },
         "cleanup-unreferenced-blobs": {
             "task": "file.cleanup_unreferenced_blobs",
             "schedule": float(settings.blob_cleanup_interval_seconds),

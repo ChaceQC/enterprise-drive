@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.pagination import PageCursor
@@ -235,6 +237,69 @@ class FileRepository:
         )
         return list(result.scalars().all())
 
+    async def list_expired_trash_root_ids(
+        self,
+        *,
+        tenant_id: UUID,
+        cutoff: datetime,
+        limit: int,
+    ) -> list[UUID]:
+        result = await self.session.execute(
+            select(Node.id)
+            .where(
+                Node.tenant_id == tenant_id,
+                Node.is_deleted.is_(True),
+                Node.deleted_at.is_not(None),
+                Node.deleted_at <= cutoff,
+                Node.parent_id.is_not(None),
+                _node_is_trash_batch_root(),
+            )
+            .order_by(Node.deleted_at, Node.id)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def get_expired_trash_root_for_update(
+        self,
+        *,
+        tenant_id: UUID,
+        node_id: UUID,
+        cutoff: datetime,
+    ) -> Node | None:
+        result = await self.session.execute(
+            select(Node)
+            .where(
+                Node.tenant_id == tenant_id,
+                Node.id == node_id,
+                Node.is_deleted.is_(True),
+                Node.deleted_at.is_not(None),
+                Node.deleted_at <= cutoff,
+                Node.parent_id.is_not(None),
+                _node_is_trash_batch_root(),
+            )
+            .with_for_update(skip_locked=True)
+        )
+        return result.scalar_one_or_none()
+
+    async def list_child_nodes_for_update(
+        self,
+        *,
+        tenant_id: UUID,
+        space_id: UUID,
+        parent_id: UUID,
+    ) -> list[Node]:
+        result = await self.session.execute(
+            select(Node)
+            .where(
+                Node.tenant_id == tenant_id,
+                Node.space_id == space_id,
+                Node.parent_id == parent_id,
+            )
+            .order_by(Node.id)
+            .with_for_update()
+        )
+        return list(result.scalars().all())
+
     async def list_unreferenced_blob_ids(
         self,
         *,
@@ -413,6 +478,25 @@ def _blob_has_no_versions() -> ColumnElement[bool]:
         .where(
             FileVersion.tenant_id == FileBlob.tenant_id,
             FileVersion.blob_id == FileBlob.id,
+        )
+        .exists()
+    )
+
+
+def _node_is_trash_batch_root() -> ColumnElement[bool]:
+    parent = aliased(Node)
+    same_deleted_by = or_(
+        parent.deleted_by == Node.deleted_by,
+        and_(parent.deleted_by.is_(None), Node.deleted_by.is_(None)),
+    )
+    return ~(
+        select(parent.id)
+        .where(
+            parent.tenant_id == Node.tenant_id,
+            parent.id == Node.parent_id,
+            parent.is_deleted.is_(True),
+            parent.deleted_at == Node.deleted_at,
+            same_deleted_by,
         )
         .exists()
     )

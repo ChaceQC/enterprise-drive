@@ -13,6 +13,9 @@ from app.modules.audit.service import AuditService
 from app.modules.auth.repository import AuthRepository
 from app.modules.file.blob_cleanup import BlobCleanupService
 from app.modules.file.repository import FileRepository
+from app.modules.file.trash_cleanup import TrashCleanupService
+from app.modules.quota.repository import QuotaRepository
+from app.modules.quota.service import QuotaService
 
 _BLOB_COUNTER_KEYS = (
     "scanned",
@@ -31,6 +34,34 @@ _ORPHAN_OBJECT_COUNTER_KEYS = (
     "skipped",
     "storage_errors",
 )
+
+_TRASH_COUNTER_KEYS = (
+    "scanned",
+    "purged_roots",
+    "purged_nodes",
+    "released_bytes",
+    "skipped",
+    "failed",
+)
+
+
+def cleanup_expired_trash(
+    tenant_id: str | None = None,
+    limit: int = 100,
+    retention_days: int | None = None,
+    request_id: str | None = None,
+) -> dict[str, int]:
+    return asyncio.run(
+        _cleanup_expired_trash(
+            tenant_id=UUID(tenant_id) if tenant_id else None,
+            limit=limit,
+            retention_days=retention_days,
+            request_id=request_id,
+        )
+    )
+
+
+celery_app.task(name="file.cleanup_expired_trash")(cleanup_expired_trash)
 
 
 def cleanup_unreferenced_blobs(
@@ -71,6 +102,39 @@ def cleanup_orphaned_objects(
 
 
 celery_app.task(name="file.cleanup_orphaned_objects")(cleanup_orphaned_objects)
+
+
+async def _cleanup_expired_trash(
+    *,
+    tenant_id: UUID | None,
+    limit: int,
+    retention_days: int | None,
+    request_id: str | None,
+) -> dict[str, int]:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        tenant_ids = [tenant_id] if tenant_id else await AuthRepository(session).list_tenant_ids()
+        total = {key: 0 for key in _TRASH_COUNTER_KEYS}
+        for current_tenant_id in tenant_ids:
+            service = TrashCleanupService(
+                repository=FileRepository(session),
+                quota_service=QuotaService(
+                    repository=QuotaRepository(session),
+                    default_space_limit_bytes=settings.default_space_quota_bytes,
+                ),
+                audit_service=AuditService(repository=AuditRepository(session)),
+            )
+            result = await service.cleanup_expired_trash(
+                tenant_id=current_tenant_id,
+                retention_days=retention_days or settings.trash_retention_days,
+                limit=limit,
+                audit_context=AuditContext(request_id=request_id),
+            )
+            payload = result.to_dict()
+            for key in _TRASH_COUNTER_KEYS:
+                total[key] += payload[key]
+        return total
 
 
 async def _cleanup_unreferenced_blobs(

@@ -335,6 +335,7 @@ Preview Worker 不能和 audit/permission 队列混跑。
 `beat` 服务中的 Celery beat 只能运行一个有效调度实例，避免重复触发周期任务。正式计划至少覆盖：
 
 - `upload.expire_sessions`
+- `file.cleanup_expired_trash`
 - `file.cleanup_unreferenced_blobs`
 - `file.cleanup_orphaned_objects`
 - `quota.reconcile_space_usage`

@@ -40,6 +40,7 @@ celery_app.conf.update(
         "permission.invalidate_cache": {"queue": "permission"},
         "preview.dispatch_outbox": {"queue": "preview"},
         "search.dispatch_outbox": {"queue": "search"},
+        "file.cleanup_expired_trash": {"queue": "maintenance"},
         "file.cleanup_unreferenced_blobs": {"queue": "maintenance"},
         "file.cleanup_orphaned_objects": {"queue": "maintenance"},
         "upload.expire_sessions": {"queue": "maintenance"},

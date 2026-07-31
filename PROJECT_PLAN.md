@@ -72,7 +72,7 @@
 - MinIO Python SDK multipart 当前在 `infrastructure` 适配层使用 `_create_multipart_upload`、`_complete_multipart_upload`、`_abort_multipart_upload` 私有方法。这不属于业务层随意自研，但 SDK 升级稳定性不够企业级；后续要评估公开 API、稳定开源 S3 兼容客户端、标准 HTTP/SigV4 适配，或至少补齐版本探测、窄封装和真实对象存储集成测试。
 - 对象复制到最终 `objects/{tenant_id}/{hash_prefix}/{content_hash}` 成功但数据库最终化失败后，可能出现孤儿最终对象。当前已补 `file.cleanup_orphaned_objects` 反向扫描任务，但还需要继续补真实 MinIO 集成测试、生产调度、告警和运行指标，把它从可手动治理推进到可持续治理。
 - 容量治理当前主要覆盖空间维度。后续必须补齐用户维度、租户维度和策略化配额，例如空间默认额度、用户个人额度、部门额度、文件密级或扩展名策略、临时上传占用上限和租户总池限制。
-- 维护任务当前仍偏“可手动跑 / worker 可消费”。后续需要补齐定时调度、失败告警、清理吞吐指标和治理看板，至少覆盖过期上传、blob 清理、孤儿对象扫描、容量校准、过期分享和预览产物治理。
+- Celery beat 已定时调度过期上传、回收站保留期、blob 清理、孤儿对象扫描和容量校准；后续需要补齐连续失败告警、积压/吞吐看板，以及过期分享和预览产物治理。
 - 下载当前仍以短期预签名直连为主。高密级文件、外链和审计敏感场景需要补充后端代理下载、HTTP Range、增强审计、水印导出或 DLP 策略；低风险大文件仍可保留预签名直连以降低 API 带宽压力。
 - 并发下同 hash 首次上传竞争当前主要依赖数据库唯一约束和补偿路径，已有基础处理，但还需要补更细的并发测试、对象归档幂等检查和失败恢复路径，确保不会产生错误引用、漏容量或孤儿最终对象。
 - 真实对象存储集成测试已补首组 MinIO 覆盖，当前会在 CI 中验证 multipart 私有方法封装、预签名 PUT/GET、copy、delete、list、hash 校验和孤儿最终对象扫描。后续仍需扩展异常恢复、SDK 升级兼容、并发竞争和更完整的失败补偿场景。
@@ -97,7 +97,7 @@
 
 - 管理员审计查询 API。（已完成 `GET /api/v1/admin/audit-logs`，仅系统管理员可访问，按租户隔离，支持用户、资源、动作、结果、风险、请求 ID、时间范围和签名 cursor 筛选，并审计成功与拒绝查询）
 - 用户、部门、用户组、空间、配额、统计、维护和导出等完整管理 API 按 Sprint 9 的 `BE-044`、`BE-045` 继续交付。
-- 生命周期治理、孤儿对象扫描和容量治理增强。
+- 生命周期治理、孤儿对象扫描和容量治理增强。（`BE-026` 已完成过期上传、无引用 blob 和回收站保留期清理；回收站任务按删除批次根节点加锁清理，释放容量、扣减 blob 引用并写入审计、搜索事件和指标；完整策略化治理继续由 `BE-047` 承担）
 - 用户/租户维度配额和策略化配额；维护任务定时调度、失败告警、清理指标和运行看板。
 - 高密级下载治理：在预签名直连之外补充后端代理、HTTP Range、增强审计、水印或 DLP 策略能力。
 - Windows 11 Docker Desktop 正式部署：多阶段 Dockerfile、根 `compose.windows.yml`、Compose 内 Nginx gateway、根 `.env.windows.example` 和 `deploy/windows/manage.ps1`。（已完成本机 HTTP 基线、公网 ACME/TLS 配置、续期命令及 `backup`、`backup-verify`、`restore` 自动化；真实 DNS/受信证书验收待生产环境执行）
@@ -112,6 +112,7 @@
 - Rust crate 按职责拆分为 API client、设备会话、同步引擎、本地 SQLite 索引、传输队列、文件系统适配和系统凭据适配；界面层只消费状态和发送命令。
 - 后端新增桌面设备会话、设备列表与吊销、短期会话轮换；凭据只保存于 Windows Credential Manager 等系统凭据库，不写入普通配置文件或日志。
 - 后端新增按租户和用户隔离的增量变更游标、删除 tombstone、节点/版本前置条件和幂等客户端操作 ID，桌面端不通过高频全量目录轮询实现同步。
+- 固定 `Drive Transfer Protocol v1` 应用层契约：控制面使用版本化 HTTPS API，数据面使用短期预签名 HTTPS 直传 MinIO/S3；协议定义分片大小、并发提示、批量签名、断点状态、分片校验、整文件 SHA-256、幂等完成、取消和错误码，不自研 TCP/UDP、TLS 或可靠传输层。
 - 桌面 Alpha 首批功能包括登录、空间和目录浏览、上传/下载队列、暂停/继续/取消、任务栏托盘、同步目录选择、离线元数据浏览和错误诊断导出。
 - CI 增加 `cargo fmt --check`、Clippy、Rust 单元/集成测试、依赖许可证与漏洞门禁，以及 Windows 安装包构建。
 
@@ -182,13 +183,15 @@
 
 ## 5. 当前下一步
 
-2026-07-31 已完成最早未交付任务 `BE-025` 管理员审计查询：新增独立 `admin` 模块和 `GET /api/v1/admin/audit-logs`，使用系统管理员边界、租户隔离、倒序签名 cursor、用户/文件/时间等组合筛选，并对允许、越权和非法时间范围查询写入审计。Sprint 4 的高危操作二次查库和 Sprint 5 的搜索权限二次校验也已按现有代码与测试证据标记完成；紧接着进入 `BE-026` 生命周期清理任务缺口审计与实现。
+2026-07-31 已完成 `BE-026` lifecycle cleanup jobs：现有 `upload.expire_sessions` 和 `file.cleanup_unreferenced_blobs` 加上新增 `file.cleanup_expired_trash` 已覆盖原验收中的过期上传、blob 清理和回收站清理。新增任务按删除批次根节点扫描并锁定子树，删除版本和节点、释放容量、扣减 blob 引用、写入搜索删除事件与系统审计；迁移 head 更新为 `20260731_0013`，Celery beat、Windows Compose 环境、Prometheus 指标、SQLite 回归测试和真实 PostgreSQL Docker 集成测试均已同步。紧接着按编号审计并完成 `BE-027` metrics/tracing 接入缺口。
 
-2026-07-31 本机 Docker Desktop 已重新安装并恢复 `desktop-linux`：Docker client/server `29.6.2`、Linux `amd64` daemon 和 Docker Compose `v5.3.1` 可用；`compose.windows.yml` 使用 `.env.windows.example` 的静态配置校验通过，解析出当前 15 个默认服务。已从 `registry.k8s.io` 拉取小型 Linux 镜像，完成容器创建、运行状态检查、删除和镜像清理。当前 Codex Git Bash 会话仍继承安装前 PATH，需显式加入 Docker `resources/bin` 或重启终端；Docker Hub 匿名令牌请求在 daemon 内部代理路径连续出现 EOF，而宿主机直接请求返回 HTTP 200，因此完整镜像拉取、Compose 启动、备份恢复和全依赖集成门禁仍待修复该网络路径后补跑。
+2026-07-31 本机 Docker Desktop 已重新安装并恢复 `desktop-linux`：Docker client/server `29.6.2`、Linux `amd64` daemon 和 Docker Compose `v5.3.1` 可用；`compose.windows.yml` 使用 `.env.windows.example` 静态校验通过并解析出 15 个默认服务。已成功取得 `postgres:16-bookworm` 对应镜像，真实启动 PostgreSQL 容器、通过 `pg_isready`、从空库执行完整 Alembic 链到 `20260731_0013`，并运行回收站清理 PostgreSQL 集成测试；临时容器已删除。Docker Hub 其他项目镜像、完整 Compose 启动、健康检查和备份恢复仍需按 `BE-028` 门禁整体补跑。
 
 2026-07-31 已把此前仅停留在接口示例、技术建议或“后续接入”的能力补成 Sprint 9 至 Sprint 13、工程任务和远期 Backlog。当前执行顺序保持：先完成 Sprint 6 和 `v0.4.0` 正式发布，再推进 Sprint 7/8 Rust 桌面端；随后按核心产品闭环、Web 用户端与管理后台、身份安全、规模治理、`v1.0.0` 稳定发布推进。桌面端所依赖的版本前置条件和增量变更契约继续优先交付，Web 页面不得反向定义后端业务规则。
 
 2026-07-31 已把 Rust 桌面客户端从笼统的二期增强项提升为 Sprint 7 和 Sprint 8 正式路线。当前仓库仍没有桌面客户端代码；先完成 Sprint 6、发布 `v0.4.0`，随后以 `0.5.0` 为桌面 Alpha 目标建立 `desktop/` Cargo workspace。开工顺序固定为：先提交桌面架构 ADR 和后端设备会话/增量同步契约，再实现 Rust API client、本地索引和单向传输，最后进入双向同步、冲突处理和签名发布。
+
+2026-07-31 已把传输协议从“直接使用上传接口”的概念补为 Sprint 7 正式前置契约：自定义的是 HTTPS 之上的 `Drive Transfer Protocol v1` 应用层状态机，而不是裸 TCP/UDP 或私有加密。控制面负责初始化、批量分片签名、断点查询、幂等 complete/abort 和错误码，数据面继续使用预签名 HTTPS 直达 MinIO/S3；下载使用短期签名与 HTTP Range，Rust 客户端按文件大小和网络质量协商分片、并发、重试和带宽限制，后续可在网关支持时透明使用 HTTP/2 或 HTTP/3 并保留回退。
 
 2026-07-16 的 `v0.4.0` 上线治理阶段已固定 MinIO Server/Client release 与 digest，接入 SBOM、Grype 和新增 Critical 阻断，并交付 `backup`、`backup-verify`、`restore` 自动化。manifest 从 15 个无 profile 默认服务的实际 Compose 容器记录 image ID，并把当前 `compose.windows.yml` SHA-256、Git commit、项目版本、S3 bucket、OpenSearch index 和 `DRIVE_TLS_CERT_NAME` lineage 名称作为精确恢复门禁；备份和恢复同时持有 project 与逐 physical volume mutex。备份根目录还会拒绝卷根、仓库目录/祖先及未预先使用 restricted ACL 的既有非空目录。真实随机 source/target Compose project 演练已验证 PostgreSQL、MinIO、Redis、OpenSearch、TLS、CMS 环境文件、API、Worker、beat、gateway 和宿主端口边界；备份失败会恢复 source 原运行、退出与健康状态，恢复失败会停止 target、删除新卷、清空原空卷，并从受限 ACL rollback archive 还原 `-ForceRestore` 前的原非空卷。
 

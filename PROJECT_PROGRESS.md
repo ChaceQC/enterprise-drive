@@ -1,5 +1,79 @@
 # PROJECT_PROGRESS.md
 
+## 2026-07-31 BE-026 回收站保留期自动清理
+
+### 已完成
+
+- 对照 `AGENT.md`、`PROJECT_PLAN.md`、工程任务表和现有代码核对 `BE-026` 验收：`upload.expire_sessions` 已覆盖过期上传，`file.cleanup_unreferenced_blobs` 已覆盖无引用 blob，原任务真正缺少的是回收站保留期自动清理。
+- 新增 `file.cleanup_expired_trash` 服务与 Celery 任务，默认 `DRIVE_TRASH_RETENTION_DAYS=30`、`DRIVE_TRASH_CLEANUP_INTERVAL_SECONDS=3600`，并接入 `maintenance` route 和 Celery beat。
+- 清理查询按租户扫描超过保留期的删除批次根节点；父节点与子节点 `deleted_at/deleted_by` 相同时只领取父节点，避免同批子树重复处理。
+- 清理前使用 PostgreSQL `FOR UPDATE SKIP LOCKED` 领取根节点，并锁定全部子树节点；普通目录在单事务内删除版本和节点、扣减 blob 引用、释放空间容量并写入 `file_purged` 负向账本。
+- 为已彻底删除的文件写入 `reason=trash_retention_expired` 的 `search.index_requested`，并记录 `file.trash.retention_purged` 系统审计；冲突或容量/blob 异常会回滚该根节点并记录失败审计。
+- 新增迁移 `20260731_0013` 和 `idx_nodes_trash_cleanup(tenant_id, is_deleted, deleted_at, id)`。
+- 新增 `trash_cleanup_total{status}` 和 `trash_cleanup_released_bytes_total` Prometheus 指标。
+- 新增 SQLite 回归测试和真实 PostgreSQL Docker 集成测试，覆盖到期目录子树、未到期节点、删除批次去重、租户隔离、行锁查询、容量、blob 引用、审计、搜索 outbox 和迁移索引。
+- `backend-ci` 已增加临时 PostgreSQL 16 容器、`pg_isready`、Alembic upgrade 和真实数据库测试；原真实 MinIO 测试继续保留。
+- 已把 `Drive Transfer Protocol v1` 纳入 Sprint 7 前置计划：自定义 HTTPS 之上的分片、断点、校验、幂等和并发契约，数据仍通过预签名 HTTPS 直达 MinIO/S3，不自研 TCP/UDP、TLS 或可靠传输层。
+
+### 版本影响
+
+- 新增向后兼容的维护任务、环境变量和 Prometheus 指标；数据库只增加查询索引，无列、约束、对象 key 或 HTTP API 破坏性变更。
+- Alembic head 从 `20260701_0012` 更新为 `20260731_0013`；项目版本保持 `0.4.0`。
+
+### 进行中
+
+- 按编号进入 `BE-027` metrics/tracing 接入缺口审计，先区分现有 `/metrics`、预览/孤儿对象/回收站指标与尚未实现的请求、数据库、队列和 trace 能力。
+
+### 阻塞与风险
+
+- 当前每个删除批次根节点仍在一个数据库事务内遍历和删除整棵子树；超大目录需要 `BE-046` 的游标分片、任务状态和长事务边界。
+- 任务已暴露失败计数并写失败审计，但连续失败告警、积压阈值和治理看板属于 `BE-035`。
+- 当前保留期是全局配置，没有按空间/密级策略、dry-run 和运行记录；这些能力属于 `BE-047`，不提前混入 `BE-026`。
+- 本轮真实 PostgreSQL 容器门禁已通过；完整 15 服务 Compose 的拉取、构建、启动、健康和备份恢复仍属于 `BE-028`。
+
+### 下一步
+
+1. 审计 `BE-027` 现有 `/metrics` 覆盖范围，列出请求、数据库、队列、任务和 trace 的真实缺口。
+2. 实现 `BE-027` 缺少的基础指标与 tracing 能力，并补 Prometheus/OpenTelemetry 测试。
+3. 按 `BE-028` 使用真实 Docker Desktop 完整启动 15 服务并执行 readiness、Worker/beat、gateway、备份恢复门禁。
+
+### 验证
+
+- `uv run pytest`：152 passed，4 skipped。
+- `uv run ruff check .`：通过。
+- `uv run ruff format --check .`：195 个文件格式通过。
+- `uv run mypy app`：通过，145 个源文件无类型问题。
+- `uv lock --check`：通过，解析 97 个包。
+- `uv run alembic heads`：`20260731_0013 (head)`。
+- 真实 Docker PostgreSQL：`postgres:16-bookworm` 容器运行并通过 `pg_isready`。
+- 真实 PostgreSQL migration：从空库升级到 `20260731_0013`，`alembic current` 为 head。
+- `DRIVE_RUN_POSTGRES_TESTS=1 uv run pytest tests/test_trash_cleanup_postgres_integration.py -q`：1 passed。
+- `docker compose --env-file .env.windows.example -f compose.windows.yml config --quiet`：通过，15 个默认服务。
+- 临时 PostgreSQL 测试容器已删除。
+
+### 涉及文件
+
+- `backend/app/core/config.py`
+- `backend/app/core/metrics.py`
+- `backend/app/modules/file/models.py`
+- `backend/app/modules/file/repository.py`
+- `backend/app/modules/file/trash_cleanup.py`
+- `backend/app/workers/file_tasks.py`
+- `backend/app/infrastructure/queue/celery_app.py`
+- `backend/app/infrastructure/queue/schedule.py`
+- `backend/migrations/versions/20260731_0013_trash_cleanup_index.py`
+- `backend/tests/test_trash_cleanup.py`
+- `backend/tests/test_trash_cleanup_postgres_integration.py`
+- `.github/workflows/backend-ci.yml`
+- `.env.windows.example`
+- `compose.windows.yml`
+- `README.md`
+- `backend/README.md`
+- `docs/deployment-windows-docker.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-07-31 BE-025 管理员审计查询 API
 
 ### 已完成
