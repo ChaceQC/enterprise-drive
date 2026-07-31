@@ -33,6 +33,8 @@ Copy-Item .env.windows.example .env.windows
 .\deploy\windows\manage.ps1 status
 ```
 
+`up -Build` 是显式构建入口；普通 `up` 固定使用 `--no-build --pull never`，不会在后台补构建或拉取缺失镜像。第三方镜像应先单独 `docker pull`，项目 runtime/preview 镜像应先单独构建或明确执行一次 `up -Build`，随后再运行部署、备份或恢复门禁。
+
 正式环境中 API/Worker 使用 `http://minio:9000` 等 Compose 内部服务端点；默认浏览器预签名地址为 gateway 提供的 `http://localhost:19000`，默认 API 入口为 `http://localhost:18080`。公网模式把真实 `.env.windows` 中的 API/存储域名、`DRIVE_S3_PUBLIC_ENDPOINT_URL`、`DRIVE_CORS_ORIGINS`、`MINIO_CORS_ALLOWED_ORIGIN`、Trusted Hosts、Secure Cookie 和 Certbot 邮箱改为生产值后，可使用以下命令完成 ACME bootstrap、证书签发和 TLS gateway 启动：
 
 ```powershell
@@ -59,6 +61,8 @@ Copy-Item .env.windows.example .env.windows
 ### 备份、校验与隔离恢复
 
 `v0.4.0` 已通过根目录 `deploy/windows/manage.ps1` 提供 `backup`、`backup-verify` 和 `restore`。备份目录必须是仓库外的绝对专用目录，不得是卷根、仓库目录或仓库祖先；若既有目录非空，则必须已经使用本项目 restricted ACL，脚本不会直接重写任意宽范围目录 ACL。正式备份默认使用当前 Windows 用户证书存储中的 CMS 文档加密证书保护 `.env.windows`。建议创建可导出私钥的专用证书，并把 PFX 单独保存在加密离线介质中：
+
+备份、校验和恢复的临时容器统一使用 `--pull never`，默认限制为 `0.50 CPU`、`512m` 内存、无额外 swap 和 `128` 个 PID；卷归档与 `pg_dump` 默认使用压缩等级 `1`，避免 gzip 高压缩长时间占满 CPU。对应变量为 `DRIVE_BACKUP_HELPER_CPU_LIMIT`、`DRIVE_BACKUP_HELPER_MEMORY_LIMIT`、`DRIVE_BACKUP_HELPER_PIDS_LIMIT`、`DRIVE_BACKUP_GZIP_LEVEL` 和 `DRIVE_BACKUP_PG_DUMP_COMPRESSION_LEVEL`。
 
 ```powershell
 $backupCertificate = New-SelfSignedCertificate `

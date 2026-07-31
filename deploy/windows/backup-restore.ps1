@@ -59,6 +59,164 @@ function Test-WindowsDocker {
     return $ExitCode -eq 0
 }
 
+function Get-WindowsBackupSetting {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+
+        [Parameter(Mandatory = $true)]
+        [string]$DefaultValue
+    )
+
+    $ConfigGetter = Get-Command `
+        -Name "Get-ConfigValue" `
+        -CommandType Function `
+        -ErrorAction SilentlyContinue
+    if ($null -ne $ConfigGetter) {
+        return [string](
+            Get-ConfigValue -Name $Name -DefaultValue $DefaultValue
+        )
+    }
+
+    $Value = [System.Environment]::GetEnvironmentVariable(
+        $Name,
+        [System.EnvironmentVariableTarget]::Process
+    )
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $DefaultValue
+    }
+    return [string]$Value
+}
+
+function Get-WindowsBackupHelperSettings {
+    $CpuText = Get-WindowsBackupSetting `
+        -Name "DRIVE_BACKUP_HELPER_CPU_LIMIT" `
+        -DefaultValue "0.50"
+    $CpuValue = 0.0
+    if (
+        -not [double]::TryParse(
+            $CpuText,
+            [System.Globalization.NumberStyles]::Float,
+            [System.Globalization.CultureInfo]::InvariantCulture,
+            [ref]$CpuValue
+        ) -or
+        $CpuValue -lt 0.10 -or
+        $CpuValue -gt 4.00
+    ) {
+        throw "DRIVE_BACKUP_HELPER_CPU_LIMIT must be between 0.10 and 4.00."
+    }
+
+    $MemoryLimit = Get-WindowsBackupSetting `
+        -Name "DRIVE_BACKUP_HELPER_MEMORY_LIMIT" `
+        -DefaultValue "512m"
+    $MemoryMatch = [regex]::Match(
+        $MemoryLimit,
+        "^(?<value>[1-9][0-9]*)(?<unit>[kKmMgG]?)[bB]?$"
+    )
+    if (-not $MemoryMatch.Success) {
+        throw "DRIVE_BACKUP_HELPER_MEMORY_LIMIT has an invalid Docker memory value."
+    }
+    $MemoryNumber = 0L
+    if (
+        -not [long]::TryParse(
+            $MemoryMatch.Groups["value"].Value,
+            [System.Globalization.NumberStyles]::None,
+            [System.Globalization.CultureInfo]::InvariantCulture,
+            [ref]$MemoryNumber
+        )
+    ) {
+        throw "DRIVE_BACKUP_HELPER_MEMORY_LIMIT is too large."
+    }
+    $MemoryMultiplier = switch (
+        $MemoryMatch.Groups["unit"].Value.ToLowerInvariant()
+    ) {
+        "k" { 1KB }
+        "m" { 1MB }
+        "g" { 1GB }
+        default { 1 }
+    }
+    if (
+        $MemoryNumber -gt ([long]::MaxValue / $MemoryMultiplier)
+    ) {
+        throw "DRIVE_BACKUP_HELPER_MEMORY_LIMIT is too large."
+    }
+    $MemoryBytes = $MemoryNumber * $MemoryMultiplier
+    if ($MemoryBytes -lt 64MB -or $MemoryBytes -gt 4GB) {
+        throw "DRIVE_BACKUP_HELPER_MEMORY_LIMIT must be between 64m and 4g."
+    }
+
+    $PidsText = Get-WindowsBackupSetting `
+        -Name "DRIVE_BACKUP_HELPER_PIDS_LIMIT" `
+        -DefaultValue "128"
+    $PidsLimit = 0
+    if (
+        -not [int]::TryParse($PidsText, [ref]$PidsLimit) -or
+        $PidsLimit -lt 32 -or
+        $PidsLimit -gt 4096
+    ) {
+        throw "DRIVE_BACKUP_HELPER_PIDS_LIMIT must be between 32 and 4096."
+    }
+
+    $GzipText = Get-WindowsBackupSetting `
+        -Name "DRIVE_BACKUP_GZIP_LEVEL" `
+        -DefaultValue "1"
+    $GzipLevel = 0
+    if (
+        -not [int]::TryParse($GzipText, [ref]$GzipLevel) -or
+        $GzipLevel -lt 1 -or
+        $GzipLevel -gt 9
+    ) {
+        throw "DRIVE_BACKUP_GZIP_LEVEL must be between 1 and 9."
+    }
+
+    $PgDumpText = Get-WindowsBackupSetting `
+        -Name "DRIVE_BACKUP_PG_DUMP_COMPRESSION_LEVEL" `
+        -DefaultValue "1"
+    $PgDumpCompressionLevel = 0
+    if (
+        -not [int]::TryParse($PgDumpText, [ref]$PgDumpCompressionLevel) -or
+        $PgDumpCompressionLevel -lt 0 -or
+        $PgDumpCompressionLevel -gt 9
+    ) {
+        throw "DRIVE_BACKUP_PG_DUMP_COMPRESSION_LEVEL must be between 0 and 9."
+    }
+
+    return [pscustomobject][ordered]@{
+        cpu_limit = $CpuValue.ToString(
+            "0.00",
+            [System.Globalization.CultureInfo]::InvariantCulture
+        )
+        memory_limit = $MemoryLimit.ToLowerInvariant()
+        pids_limit = $PidsLimit.ToString(
+            [System.Globalization.CultureInfo]::InvariantCulture
+        )
+        gzip_level = $GzipLevel
+        pg_dump_compression_level = $PgDumpCompressionLevel
+    }
+}
+
+function Get-WindowsBackupHelperRunArguments {
+    $Settings = Get-WindowsBackupHelperSettings
+    return @(
+        "--cpus", [string]$Settings.cpu_limit,
+        "--memory", [string]$Settings.memory_limit,
+        "--memory-swap", [string]$Settings.memory_limit,
+        "--pids-limit", [string]$Settings.pids_limit
+    )
+}
+
+function Invoke-WindowsBackupHelperContainer {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments
+    )
+
+    $DockerArguments = @("run", "--rm", "--pull", "never") +
+        @(Get-WindowsBackupHelperRunArguments) +
+        @($Arguments)
+    return Invoke-WindowsDocker -Arguments $DockerArguments
+}
+
 function Get-WindowsComposeModel {
     param(
         [Parameter(Mandatory = $true)]
@@ -1274,7 +1432,13 @@ function Restore-WindowsSourceServiceState {
             }
             $null = Invoke-WindowsDocker -Arguments @(
                 $ComposeBaseArguments +
-                @("up", "--detach", "--no-deps") +
+                @(
+                    "up",
+                    "--detach",
+                    "--no-deps",
+                    "--no-build",
+                    "--pull", "never"
+                ) +
                 $Services
             )
             Wait-WindowsComposeServices `
@@ -1374,7 +1538,9 @@ function Invoke-WindowsVolumeArchive {
         [string]$BackupDirectory,
 
         [Parameter(Mandatory = $true)]
-        [string]$ArchiveRelativePath
+        [string]$ArchiveRelativePath,
+
+        [switch]$SkipImmediateVerification
     )
 
     $ArchivePath = Resolve-WindowsBackupArtifactPath `
@@ -1386,15 +1552,22 @@ function Invoke-WindowsVolumeArchive {
     $Bind = "type=bind,source=$BackupDirectory,target=/backup"
     $Volume = "type=volume,source=$VolumeName,target=/source,readonly"
     $ScriptPath = "/backup/$ArchiveRelativePath"
-    $null = Invoke-WindowsDocker -Arguments @(
-        "run", "--rm",
+    $Settings = Get-WindowsBackupHelperSettings
+    $ArchiveCommand = (
+        "tar --numeric-owner --use-compress-program='gzip " +
+        "-$($Settings.gzip_level)' -C /source -cf '$ScriptPath' ."
+    )
+    if (-not $SkipImmediateVerification) {
+        $ArchiveCommand += "; tar -tzf '$ScriptPath' >/dev/null"
+    }
+    $null = Invoke-WindowsBackupHelperContainer -Arguments @(
         "--network", "none",
         "--entrypoint", "sh",
         "--mount", $Volume,
         "--mount", $Bind,
         $ArchiveToolImage,
         "-ec",
-        "tar --numeric-owner -C /source -czf '$ScriptPath' .; tar -tzf '$ScriptPath' >/dev/null"
+        $ArchiveCommand
     )
 }
 
@@ -1534,8 +1707,7 @@ function Test-WindowsVolumeEmpty {
         [string]$VolumeName
     )
 
-    $Output = Invoke-WindowsDocker -Arguments @(
-        "run", "--rm",
+    $Output = Invoke-WindowsBackupHelperContainer -Arguments @(
         "--network", "none",
         "--entrypoint", "sh",
         "--mount", "type=volume,source=$VolumeName,target=/target",
@@ -1566,8 +1738,7 @@ function Clear-WindowsVolume {
         [string]$VolumeName
     )
 
-    $null = Invoke-WindowsDocker -Arguments @(
-        "run", "--rm",
+    $null = Invoke-WindowsBackupHelperContainer -Arguments @(
         "--network", "none",
         "--entrypoint", "sh",
         "--mount", "type=volume,source=$VolumeName,target=/target",
@@ -1595,8 +1766,7 @@ function Restore-WindowsVolumeArchive {
     $null = Resolve-WindowsBackupArtifactPath `
         -BackupRoot $BackupDirectory `
         -RelativePath $ArchiveRelativePath
-    $null = Invoke-WindowsDocker -Arguments @(
-        "run", "--rm",
+    $null = Invoke-WindowsBackupHelperContainer -Arguments @(
         "--network", "none",
         "--entrypoint", "sh",
         "--mount", "type=volume,source=$VolumeName,target=/target",
@@ -2029,8 +2199,7 @@ function Test-WindowsTarArchiveEntries {
     $OriginalFailure = $null
     $CleanupFailure = $null
     try {
-        $Output = Invoke-WindowsDocker -Arguments @(
-            "run", "--rm",
+        $Output = Invoke-WindowsBackupHelperContainer -Arguments @(
             "--network", "none",
             "--read-only",
             "--cap-drop", "ALL",
@@ -2091,8 +2260,7 @@ function Test-WindowsTarArchiveEntries {
                 "grep -Ev '^/target(/|`$)' | grep -q .; then exit 47; fi"
             )
         ) -join "; "
-        $null = Invoke-WindowsDocker -Arguments @(
-            "run", "--rm",
+        $null = Invoke-WindowsBackupHelperContainer -Arguments @(
             "--network", "none",
             "--read-only",
             "--cap-drop", "ALL",
@@ -2157,7 +2325,9 @@ function Test-WindowsBackup {
 
     $null = $EnvFile
 
+    $VerifyStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
     $Root = [System.IO.Path]::GetFullPath($BackupPath)
+    Write-Host "[backup-verify:start] $Root"
     if (-not (Test-Path -LiteralPath $Root -PathType Container)) {
         throw "Backup directory does not exist: $Root"
     }
@@ -2417,8 +2587,11 @@ function Test-WindowsBackup {
         }
     }
 
-    $null = Invoke-WindowsDocker -Arguments @(
-        "run", "--rm",
+    Write-Host (
+        "[backup-verify] validating PostgreSQL dump ({0:N1}s elapsed)" -f
+        $VerifyStopwatch.Elapsed.TotalSeconds
+    )
+    $null = Invoke-WindowsBackupHelperContainer -Arguments @(
         "--network", "none",
         "--entrypoint", "sh",
         "--mount", "type=bind,source=$Root,target=/backup,readonly",
@@ -2432,11 +2605,20 @@ function Test-WindowsBackup {
         "volumes/opensearch-data.tar.gz",
         "volumes/tls-certificates.tar.gz"
     )) {
+        Write-Host (
+            "[backup-verify] scanning {0} ({1:N1}s elapsed)" -f
+            $ArchivePath,
+            $VerifyStopwatch.Elapsed.TotalSeconds
+        )
         Test-WindowsTarArchiveEntries `
             -ArchiveToolImage $ArchiveToolImageId `
             -BackupDirectory $Root `
             -RelativePath $ArchivePath
     }
+    Write-Host (
+        "[backup-verify:done] {0:N1}s" -f
+        $VerifyStopwatch.Elapsed.TotalSeconds
+    )
     return $Manifest
 }
 
@@ -2465,6 +2647,8 @@ function Invoke-WindowsBackup {
         [int]$QuiesceTimeoutSeconds = 300
     )
 
+    $BackupStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    Write-Host "[backup:start] inspecting source containers, volumes, and images"
     $Root = Resolve-WindowsBackupRoot `
         -RepoRoot $RepoRoot `
         -BackupDirectory $BackupDirectory
@@ -2595,6 +2779,10 @@ function Invoke-WindowsBackup {
             throw "PostgreSQL image record was not created."
         }
 
+        Write-Host (
+            "[backup] quiescing source services ({0:N1}s elapsed)" -f
+            $BackupStopwatch.Elapsed.TotalSeconds
+        )
         $BackupId = [Guid]::NewGuid().ToString("N")
         $Timestamp = [System.DateTime]::UtcNow.ToString("yyyyMMddTHHmmssZ")
         $SafeProjectName = [regex]::Replace(
@@ -2683,8 +2871,12 @@ function Invoke-WindowsBackup {
         $PostgresImageId = [string]$PostgresImageRecord.id
         $BackendNetwork = Get-WindowsModelBackendNetwork `
             -ComposeModel $ComposeModel
-        $null = Invoke-WindowsDocker -Arguments @(
-            "run", "--rm",
+        $HelperSettings = Get-WindowsBackupHelperSettings
+        Write-Host (
+            "[backup] creating PostgreSQL dump ({0:N1}s elapsed)" -f
+            $BackupStopwatch.Elapsed.TotalSeconds
+        )
+        $null = Invoke-WindowsBackupHelperContainer -Arguments @(
             "--network", $BackendNetwork,
             "--entrypoint", "sh",
             "--mount", "type=bind,source=$PartialPath,target=/backup",
@@ -2695,7 +2887,9 @@ function Invoke-WindowsBackup {
             $PostgresImageId,
             "-ec",
             (
-                "pg_dump --format=custom --compress=6 --no-owner --no-acl " +
+                "pg_dump --format=custom " +
+                "--compress=$($HelperSettings.pg_dump_compression_level) " +
+                "--no-owner --no-acl " +
                 "--file=/backup/postgres/postgres.dump; " +
                 "pg_restore --list /backup/postgres/postgres.dump >/dev/null"
             )
@@ -2707,11 +2901,17 @@ function Invoke-WindowsBackup {
             "opensearch-data",
             "tls-certificates"
         )) {
+            Write-Host (
+                "[backup] archiving {0} ({1:N1}s elapsed)" -f
+                $LogicalName,
+                $BackupStopwatch.Elapsed.TotalSeconds
+            )
             Invoke-WindowsVolumeArchive `
                 -ArchiveToolImage $PostgresImageId `
                 -VolumeName $VolumeMap[$LogicalName] `
                 -BackupDirectory $PartialPath `
-                -ArchiveRelativePath "volumes/$LogicalName.tar.gz"
+                -ArchiveRelativePath "volumes/$LogicalName.tar.gz" `
+                -SkipImmediateVerification
         }
 
         Copy-Item `
@@ -2836,6 +3036,10 @@ function Invoke-WindowsBackup {
             -Path $PartialPath `
             -Label "Backup staging"
 
+        Write-Host (
+            "[backup] running publish-time verification ({0:N1}s elapsed)" -f
+            $BackupStopwatch.Elapsed.TotalSeconds
+        )
         $null = Test-WindowsBackup `
             -RepoRoot $RepoRoot `
             -ComposeFile $ComposeFile `
@@ -2905,6 +3109,11 @@ function Invoke-WindowsBackup {
     if ($RecoveryErrors.Count -gt 0) {
         throw "Backup was published, but source service recovery failed: $($RecoveryErrors -join '; '). Backup: $PublishedPath"
     }
+    Write-Host (
+        "[backup:done] {0} ({1:N1}s)" -f
+        $PublishedPath,
+        $BackupStopwatch.Elapsed.TotalSeconds
+    )
     Write-Output $PublishedPath
 }
 
@@ -3208,7 +3417,14 @@ function Invoke-WindowsRestore {
         $null = $TouchedLogicalNames.Add("postgres-data")
         $null = Invoke-WindowsDocker -Arguments @(
             $ComposeBaseArguments +
-            @("up", "--detach", "--no-deps", "postgres")
+            @(
+                "up",
+                "--detach",
+                "--no-deps",
+                "--no-build",
+                "--pull", "never",
+                "postgres"
+            )
         )
         Wait-WindowsComposeServices `
             -ComposeBaseArguments $ComposeBaseArguments `
@@ -3229,8 +3445,7 @@ function Invoke-WindowsRestore {
             -Name "POSTGRES_PASSWORD"
         $BackendNetwork = Get-WindowsModelBackendNetwork `
             -ComposeModel $ComposeModel
-        $null = Invoke-WindowsDocker -Arguments @(
-            "run", "--rm",
+        $null = Invoke-WindowsBackupHelperContainer -Arguments @(
             "--network", $BackendNetwork,
             "--entrypoint", "sh",
             "--mount", "type=bind,source=$Root,target=/backup,readonly",
@@ -3271,6 +3486,8 @@ function Invoke-WindowsRestore {
                     "up",
                     "--detach",
                     "--remove-orphans",
+                    "--no-build",
+                    "--pull", "never",
                     "--wait",
                     "--wait-timeout", "360"
                 )

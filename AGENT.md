@@ -7,6 +7,7 @@
 - 文件读写和终端输入输出统一使用 UTF-8。
 - 开发和正式部署宿主机统一以 Windows 11 为基线。
 - 正式部署使用 Docker Desktop 的 WSL2 后端和 Linux containers，仓库根目录 `compose.windows.yml` 是唯一正式编排入口；`backend/docker-compose.yml` 仅保留为本地依赖开发清单。
+- `deploy/windows/manage.ps1 up` 默认只能使用已经存在的本地镜像，必须带 `--no-build --pull never`；镜像拉取和项目镜像构建要作为独立、显式、可观察的步骤执行，只有用户明确执行 `up -Build` 时才允许构建，禁止把构建、下载、全栈启动和备份恢复测试串成一个黑盒命令。
 - 正式部署的 Nginx gateway 运行在 `compose.windows.yml` 中，并且是唯一允许发布宿主端口的服务；默认本机入口由 gateway 发布 API `18080` 和 S3 外部端点 `19000`。公网模式使用 `manage.ps1 -Tls`、ACME HTTP-01 bootstrap、Certbot 证书卷和 TLS Nginx 模板映射 `80/443`；启用前必须配置真实 DNS、受信证书邮箱、HTTPS 外部端点、CORS、Trusted Hosts 和 Secure Cookie，并完成双域名实测。API、Worker、PostgreSQL、Redis、OpenSearch、MinIO API/Console 等内部服务只加入 Compose 网络。
 - 后端技术基线：Python 3.12+、uv、FastAPI、SQLAlchemy 2.x、PostgreSQL 16+、Redis、S3 兼容对象存储、OpenSearch、Celery。
 - 二期桌面客户端技术基线：Rust stable、Cargo workspace、Tauri 2；Windows 11 优先交付，再评估 macOS 和 Linux。同步引擎、传输队列、本地索引、文件系统监听、凭据存储和更新签名校验必须由 Rust 实现，界面层不得成为同步状态的事实来源。
@@ -18,6 +19,7 @@
 - 一期目标是可试点上线的企业网盘后端，不要为了演示效果牺牲权限、审计、上传下载一致性和部署安全。
 - Rust 桌面客户端在一期后端与 Sprint 6 上线治理闭环后进入实现，默认目录为 `desktop/`。桌面端开工前必须先固定设备会话、增量变更游标、删除 tombstone、版本前置条件和冲突处理等后端契约，不得通过高频全量扫描模拟同步协议。
 - 项目正式文件传输契约使用 `Drive Transfer Protocol v1`（线协议标识 `DTP/1`）：控制面使用版本化 HTTPS API，数据面使用短期预签名 HTTPS 直达 MinIO/S3，上传复用秒传、multipart、断点状态、幂等 complete/abort 和服务端 SHA-256，下载使用短期签名与 HTTP Range；禁止自研 TCP/UDP、TLS、QUIC、私有加密或可靠传输层。协议规范以 `docs/drive-transfer-protocol-v1.md` 为准。
+- Windows 备份、校验和恢复使用的临时 Docker 容器必须统一设置 CPU、memory、memory-swap 和 PID 上限，默认使用低压缩等级并禁止隐式拉取镜像；真实集成测试必须先执行本地镜像 preflight，默认只启动恢复后的数据服务，完整 target 全栈恢复只能通过显式开关执行。
 - Web 页面必须使用生成的 TypeScript API client、服务端权限枚举和统一错误码；前端路由守卫、按钮隐藏、浏览器缓存和本地状态只用于体验，不得复制权限、容量、分享、版本或生命周期业务规则。
 - 本地开发服务避免使用常见端口；如无项目内配置，API 默认避免使用 `3000`、`5173`、`8000` 等常见开发端口，端口应放入环境变量或配置文件。
 - 后端依赖和命令必须通过 uv 管理，禁止直接使用系统 Python 或全局 Python 启动项目。

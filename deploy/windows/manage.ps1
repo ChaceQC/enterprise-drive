@@ -644,6 +644,7 @@ function Start-AcmeBootstrapGateway {
             "run",
             "--detach",
             "--no-deps",
+            "--pull", "never",
             "--service-ports",
             "gateway"
         )
@@ -774,6 +775,7 @@ function Assert-CertificateMatchesDomains {
         Invoke-Compose -Arguments @(
             "--profile", "tls-tools",
             "run", "--rm",
+            "--pull", "never",
             "--entrypoint", "sh",
             "certbot",
             "-ec", $CheckScript
@@ -794,6 +796,7 @@ function Assert-CertbotRenewalLineage {
         Invoke-Compose -Arguments @(
             "--profile", "tls-tools",
             "run", "--rm",
+            "--pull", "never",
             "--entrypoint", "sh",
             "certbot",
             "-ec", "test -r '$RenewalPath'"
@@ -898,6 +901,10 @@ try {
             if ($Build) {
                 $Arguments += "--build"
             }
+            else {
+                $Arguments += "--no-build"
+            }
+            $Arguments += @("--pull", "never")
             Invoke-Compose -Arguments $Arguments
             Invoke-Compose -Arguments @("ps", "--all")
         }
@@ -1019,6 +1026,7 @@ try {
                 $Arguments = @(
                     "--profile", "tls-tools",
                     "run", "--rm",
+                    "--pull", "never",
                     "certbot",
                     "certonly",
                     "--webroot",
@@ -1042,6 +1050,8 @@ try {
                     "up",
                     "--detach",
                     "--remove-orphans",
+                    "--no-build",
+                    "--pull", "never",
                     "--wait",
                     "--wait-timeout", "180",
                     "api",
@@ -1050,6 +1060,7 @@ try {
                 Enable-TlsComposeMode
                 Invoke-Compose -Arguments @(
                     "run", "--rm", "--no-deps",
+                    "--pull", "never",
                     "gateway",
                     "nginx", "-t"
                 )
@@ -1087,6 +1098,8 @@ try {
                     "up",
                     "--detach",
                     "--force-recreate",
+                    "--no-build",
+                    "--pull", "never",
                     "--wait",
                     "--wait-timeout", "60",
                     "gateway"
@@ -1118,6 +1131,7 @@ try {
             $Arguments = @(
                 "--profile", "tls-tools",
                 "run", "--rm",
+                "--pull", "never",
                 "certbot",
                 "renew",
                 "--cert-name", $CertName,
@@ -1138,6 +1152,7 @@ try {
             Invoke-Compose -Arguments @(
                 "--profile", "tls-tools",
                 "run", "--rm",
+                "--pull", "never",
                 "certbot",
                 "certificates"
             )

@@ -11,8 +11,14 @@ $OutputEncoding = $Utf8NoBom
 
 $RepoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\..\.."))
 $SubjectPath = Join-Path $RepoRoot "deploy\windows\backup-restore.ps1"
-if (-not (Test-Path -LiteralPath $SubjectPath -PathType Leaf)) {
-    throw "Backup and restore script does not exist: $SubjectPath"
+$ManagePath = Join-Path $RepoRoot "deploy\windows\manage.ps1"
+$IntegrationPath = Join-Path (
+    $RepoRoot
+) "deploy\windows\tests\backup-restore.integration.ps1"
+foreach ($RequiredPath in @($SubjectPath, $ManagePath, $IntegrationPath)) {
+    if (-not (Test-Path -LiteralPath $RequiredPath -PathType Leaf)) {
+        throw "Required Windows deployment script does not exist: $RequiredPath"
+    }
 }
 
 . $SubjectPath
@@ -381,6 +387,222 @@ $script:WrongCertificate = $null
 $null = New-Item -ItemType Directory -Path $TestRoot
 
 try {
+    Invoke-SmokeCase -Name "backup helper resource settings" -Body {
+        $SettingNames = @(
+            "DRIVE_BACKUP_HELPER_CPU_LIMIT",
+            "DRIVE_BACKUP_HELPER_MEMORY_LIMIT",
+            "DRIVE_BACKUP_HELPER_PIDS_LIMIT",
+            "DRIVE_BACKUP_GZIP_LEVEL",
+            "DRIVE_BACKUP_PG_DUMP_COMPRESSION_LEVEL"
+        )
+        $OriginalValues = @{}
+        foreach ($Name in $SettingNames) {
+            $OriginalValues[$Name] = [System.Environment]::GetEnvironmentVariable(
+                $Name,
+                [System.EnvironmentVariableTarget]::Process
+            )
+            [System.Environment]::SetEnvironmentVariable(
+                $Name,
+                $null,
+                [System.EnvironmentVariableTarget]::Process
+            )
+        }
+
+        try {
+            $Defaults = Get-WindowsBackupHelperSettings
+            Assert-SmokeEqual `
+                -Expected "0.50" `
+                -Actual $Defaults.cpu_limit `
+                -Message "The default backup helper CPU limit changed."
+            Assert-SmokeEqual `
+                -Expected "512m" `
+                -Actual $Defaults.memory_limit `
+                -Message "The default backup helper memory limit changed."
+            Assert-SmokeEqual `
+                -Expected "128" `
+                -Actual $Defaults.pids_limit `
+                -Message "The default backup helper PID limit changed."
+            Assert-SmokeEqual `
+                -Expected 1 `
+                -Actual $Defaults.gzip_level `
+                -Message "The default gzip level changed."
+            Assert-SmokeEqual `
+                -Expected 1 `
+                -Actual $Defaults.pg_dump_compression_level `
+                -Message "The default pg_dump compression level changed."
+
+            $Arguments = @(Get-WindowsBackupHelperRunArguments)
+            Assert-SmokeEqual `
+                -Expected (
+                    "--cpus 0.50 --memory 512m --memory-swap 512m " +
+                    "--pids-limit 128"
+                ) `
+                -Actual ($Arguments -join " ") `
+                -Message "Backup helper Docker limits are incomplete."
+
+            [System.Environment]::SetEnvironmentVariable(
+                "DRIVE_BACKUP_HELPER_CPU_LIMIT",
+                "0.25",
+                [System.EnvironmentVariableTarget]::Process
+            )
+            [System.Environment]::SetEnvironmentVariable(
+                "DRIVE_BACKUP_HELPER_MEMORY_LIMIT",
+                "256m",
+                [System.EnvironmentVariableTarget]::Process
+            )
+            [System.Environment]::SetEnvironmentVariable(
+                "DRIVE_BACKUP_HELPER_PIDS_LIMIT",
+                "64",
+                [System.EnvironmentVariableTarget]::Process
+            )
+            [System.Environment]::SetEnvironmentVariable(
+                "DRIVE_BACKUP_GZIP_LEVEL",
+                "3",
+                [System.EnvironmentVariableTarget]::Process
+            )
+            [System.Environment]::SetEnvironmentVariable(
+                "DRIVE_BACKUP_PG_DUMP_COMPRESSION_LEVEL",
+                "2",
+                [System.EnvironmentVariableTarget]::Process
+            )
+            $Overrides = Get-WindowsBackupHelperSettings
+            Assert-SmokeEqual `
+                -Expected "0.25" `
+                -Actual $Overrides.cpu_limit `
+                -Message "The backup helper CPU override was ignored."
+            Assert-SmokeEqual `
+                -Expected "256m" `
+                -Actual $Overrides.memory_limit `
+                -Message "The backup helper memory override was ignored."
+            Assert-SmokeEqual `
+                -Expected "64" `
+                -Actual $Overrides.pids_limit `
+                -Message "The backup helper PID override was ignored."
+            Assert-SmokeEqual `
+                -Expected 3 `
+                -Actual $Overrides.gzip_level `
+                -Message "The gzip override was ignored."
+            Assert-SmokeEqual `
+                -Expected 2 `
+                -Actual $Overrides.pg_dump_compression_level `
+                -Message "The pg_dump compression override was ignored."
+
+            [System.Environment]::SetEnvironmentVariable(
+                "DRIVE_BACKUP_HELPER_CPU_LIMIT",
+                "0",
+                [System.EnvironmentVariableTarget]::Process
+            )
+            Assert-SmokeThrows `
+                -MessagePattern "*CPU_LIMIT must be between*" `
+                -Action { Get-WindowsBackupHelperSettings }
+            [System.Environment]::SetEnvironmentVariable(
+                "DRIVE_BACKUP_HELPER_CPU_LIMIT",
+                "0.25",
+                [System.EnvironmentVariableTarget]::Process
+            )
+            [System.Environment]::SetEnvironmentVariable(
+                "DRIVE_BACKUP_HELPER_MEMORY_LIMIT",
+                "unbounded",
+                [System.EnvironmentVariableTarget]::Process
+            )
+            Assert-SmokeThrows `
+                -MessagePattern "*invalid Docker memory value*" `
+                -Action { Get-WindowsBackupHelperSettings }
+            [System.Environment]::SetEnvironmentVariable(
+                "DRIVE_BACKUP_HELPER_MEMORY_LIMIT",
+                "32m",
+                [System.EnvironmentVariableTarget]::Process
+            )
+            Assert-SmokeThrows `
+                -MessagePattern "*MEMORY_LIMIT must be between*" `
+                -Action { Get-WindowsBackupHelperSettings }
+            [System.Environment]::SetEnvironmentVariable(
+                "DRIVE_BACKUP_HELPER_MEMORY_LIMIT",
+                "8g",
+                [System.EnvironmentVariableTarget]::Process
+            )
+            Assert-SmokeThrows `
+                -MessagePattern "*MEMORY_LIMIT must be between*" `
+                -Action { Get-WindowsBackupHelperSettings }
+            [System.Environment]::SetEnvironmentVariable(
+                "DRIVE_BACKUP_HELPER_MEMORY_LIMIT",
+                "256m",
+                [System.EnvironmentVariableTarget]::Process
+            )
+            [System.Environment]::SetEnvironmentVariable(
+                "DRIVE_BACKUP_HELPER_PIDS_LIMIT",
+                "8",
+                [System.EnvironmentVariableTarget]::Process
+            )
+            Assert-SmokeThrows `
+                -MessagePattern "*PIDS_LIMIT must be between*" `
+                -Action { Get-WindowsBackupHelperSettings }
+            [System.Environment]::SetEnvironmentVariable(
+                "DRIVE_BACKUP_HELPER_PIDS_LIMIT",
+                "64",
+                [System.EnvironmentVariableTarget]::Process
+            )
+            [System.Environment]::SetEnvironmentVariable(
+                "DRIVE_BACKUP_GZIP_LEVEL",
+                "10",
+                [System.EnvironmentVariableTarget]::Process
+            )
+            Assert-SmokeThrows `
+                -MessagePattern "*GZIP_LEVEL must be between*" `
+                -Action { Get-WindowsBackupHelperSettings }
+            [System.Environment]::SetEnvironmentVariable(
+                "DRIVE_BACKUP_GZIP_LEVEL",
+                "1",
+                [System.EnvironmentVariableTarget]::Process
+            )
+            [System.Environment]::SetEnvironmentVariable(
+                "DRIVE_BACKUP_PG_DUMP_COMPRESSION_LEVEL",
+                "-1",
+                [System.EnvironmentVariableTarget]::Process
+            )
+            Assert-SmokeThrows `
+                -MessagePattern "*PG_DUMP_COMPRESSION_LEVEL must be between*" `
+                -Action { Get-WindowsBackupHelperSettings }
+        }
+        finally {
+            foreach ($Name in $SettingNames) {
+                [System.Environment]::SetEnvironmentVariable(
+                    $Name,
+                    $OriginalValues[$Name],
+                    [System.EnvironmentVariableTarget]::Process
+                )
+            }
+        }
+    }
+
+    Invoke-SmokeCase -Name "deployment startup never builds implicitly" -Body {
+        $StrictUtf8 = New-Object System.Text.UTF8Encoding($false, $true)
+        $ManageText = [System.IO.File]::ReadAllText($ManagePath, $StrictUtf8)
+        $IntegrationText = [System.IO.File]::ReadAllText(
+            $IntegrationPath,
+            $StrictUtf8
+        )
+        Assert-SmokeTrue `
+            -Condition $ManageText.Contains('$Arguments += "--no-build"') `
+            -Message "manage.ps1 up does not default to --no-build."
+        Assert-SmokeTrue `
+            -Condition $ManageText.Contains('$Arguments += @("--pull", "never")') `
+            -Message "manage.ps1 up can still pull images implicitly."
+        Assert-SmokeTrue `
+            -Condition (-not $IntegrationText.Contains('[switch]$BuildImages')) `
+            -Message "The backup integration still accepts -BuildImages."
+        Assert-SmokeTrue `
+            -Condition $IntegrationText.Contains(
+                "Assert-IntegrationImagesAvailable"
+            ) `
+            -Message "The backup integration has no local-image preflight."
+        Assert-SmokeTrue `
+            -Condition $IntegrationText.Contains(
+                'COMPOSE_PARALLEL_LIMIT = "1"'
+            ) `
+            -Message "The backup integration does not serialize Compose work."
+    }
+
     Invoke-SmokeCase -Name "path boundary checks" -Body {
         $Parent = Join-Path $TestRoot "parent"
         $Child = Join-Path $Parent "child\file.txt"
@@ -862,6 +1084,62 @@ try {
         }
     }
 
+    Invoke-SmokeCase -Name "volume archive uses capped fast compression" -Body {
+        $script:CapturedHelperCalls = New-Object (
+            "System.Collections.Generic.List[string]"
+        )
+
+        function Invoke-WindowsDocker {
+            param(
+                [Parameter(Mandatory = $true)]
+                [string[]]$Arguments
+            )
+
+            $script:CapturedHelperCalls.Add(($Arguments -join " "))
+            return @()
+        }
+
+        $ArchiveRoot = Join-Path $TestRoot "archive-helper"
+        $null = New-Item -ItemType Directory -Path (
+            Join-Path $ArchiveRoot "volumes"
+        ) -Force
+        Invoke-WindowsVolumeArchive `
+            -ArchiveToolImage "postgres:16-bookworm" `
+            -VolumeName "smoke-volume" `
+            -BackupDirectory $ArchiveRoot `
+            -ArchiveRelativePath "volumes/probe.tar.gz" `
+            -SkipImmediateVerification
+        Assert-SmokeEqual `
+            -Expected 1 `
+            -Actual $script:CapturedHelperCalls.Count `
+            -Message "The archive helper ran an unexpected number of containers."
+        $FastCall = [string]$script:CapturedHelperCalls[0]
+        Assert-SmokeTrue `
+            -Condition $FastCall.StartsWith(
+                "run --rm --pull never --cpus 0.50 --memory 512m " +
+                "--memory-swap 512m --pids-limit 128"
+            ) `
+            -Message "The archive helper did not apply resource limits."
+        Assert-SmokeTrue `
+            -Condition $FastCall.Contains(
+                "--use-compress-program='gzip -1'"
+            ) `
+            -Message "The archive helper did not use the configured gzip level."
+        Assert-SmokeTrue `
+            -Condition (-not $FastCall.Contains("tar -tzf")) `
+            -Message "The normal backup path still re-lists a new archive immediately."
+
+        Invoke-WindowsVolumeArchive `
+            -ArchiveToolImage "postgres:16-bookworm" `
+            -VolumeName "smoke-volume" `
+            -BackupDirectory $ArchiveRoot `
+            -ArchiveRelativePath "volumes/rollback.tar.gz"
+        $VerifiedCall = [string]$script:CapturedHelperCalls[1]
+        Assert-SmokeTrue `
+            -Condition $VerifiedCall.Contains("tar -tzf") `
+            -Message "Rollback archive creation skipped its immediate verification."
+    }
+
     function Reset-SmokeStateMachine {
         param(
             [string]$ProjectName = "smoke-target",
@@ -1094,7 +1372,10 @@ try {
         )
         if (
             $SourceVolumeMatch.Success -and
-            $Call -like "*tar --numeric-owner -C /source -czf*"
+            $Call -like (
+                "*tar --numeric-owner --use-compress-program='gzip -*" +
+                "-C /source -cf*"
+            )
         ) {
             $VolumeName = $SourceVolumeMatch.Groups["name"].Value
             $script:StateRollbackArchives[$Call] = $VolumeName
@@ -1467,19 +1748,20 @@ try {
             ),
             (
                 "compose --project-name backup-source up --detach --no-deps " +
-                "redis minio opensearch"
-            ),
-            (
-                "compose --project-name backup-source up --detach --no-deps api"
+                "--no-build --pull never redis minio opensearch"
             ),
             (
                 "compose --project-name backup-source up --detach --no-deps " +
-                "worker-permission worker-preview worker-search " +
+                "--no-build --pull never api"
+            ),
+            (
+                "compose --project-name backup-source up --detach --no-deps " +
+                "--no-build --pull never worker-permission worker-preview worker-search " +
                 "worker-maintenance beat"
             ),
             (
                 "compose --project-name backup-source up --detach --no-deps " +
-                "gateway"
+                "--no-build --pull never gateway"
             )
         )
         $ComposeCalls = @(
@@ -1919,7 +2201,11 @@ try {
             $Index += 1
         ) {
             $Call = $script:StateDockerCalls[$Index]
-            if ($Call -like "*up --detach --no-deps postgres") {
+            if (
+                $Call -like (
+                    "*up --detach --no-deps --no-build --pull never postgres"
+                )
+            ) {
                 $PostgresUpIndex = $Index
             }
             if ($Call -like "*pg_restore --exit-on-error*") {

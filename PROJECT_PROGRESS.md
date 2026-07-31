@@ -1,5 +1,67 @@
 # PROJECT_PROGRESS.md
 
+## 2026-07-31 BE-028 备份测试资源失控修复
+
+### 当前状态
+
+- 已终止此前误启动的备份恢复 integration 进程并删除其 source Compose project；当前运行中容器和残留容器均为 `0`。
+- 此前集成命令把镜像构建、15 服务启动、备份、成功 `backup-verify`、恢复和全栈验收串成一个黑盒任务，出现 CPU 长时间接近满载、Docker Desktop 内存压力和空数据备份长时间无阶段反馈。
+- 当前第三方 Compose 镜像与 Python build base 已按官方引用准备，本地 `enterprise-drive-backend:windows-local` 和 `enterprise-drive-preview:windows-local` 仍需在独立步骤构建；本轮没有再次启动完整 Compose。
+
+### 已完成
+
+- `deploy/windows/backup-restore.ps1` 新增统一 helper container wrapper，全部 `pg_dump`、tar 归档/扫描、卷清理和 PostgreSQL restore 默认使用 `--pull never --cpus 0.50 --memory 512m --memory-swap 512m --pids-limit 128`。
+- 新增 `DRIVE_BACKUP_HELPER_CPU_LIMIT`、`DRIVE_BACKUP_HELPER_MEMORY_LIMIT`、`DRIVE_BACKUP_HELPER_PIDS_LIMIT`、`DRIVE_BACKUP_GZIP_LEVEL` 和 `DRIVE_BACKUP_PG_DUMP_COMPRESSION_LEVEL`，并对数值范围做快速校验。
+- `pg_dump` 与 gzip 默认压缩等级从高压缩改为 `1`；正式卷归档不再创建后立即重复执行完整 `tar -tzf`，发布前完整工件校验和隔离 tar 安全预扫描仍保留，rollback archive 仍立即校验。
+- 备份与 `backup-verify` 增加 PostgreSQL dump、逐卷归档、发布前校验等阶段输出和累计耗时，避免长时间无反馈。
+- `deploy/windows/manage.ps1 up` 默认固定 `--no-build --pull never`；TLS 和恢复内部 `compose up/run` 也禁止隐式拉取，只有显式 `up -Build` 才进入构建路径。
+- `backup-restore.integration.ps1` 删除 `-BuildImages`，增加 `-PreflightOnly` 和本地镜像快速门禁；preflight 在创建证书、容器或卷之前完成。
+- integration 不再对同一成功备份额外重复执行一次完整 `backup-verify`，因为 `backup` 发布前和 `restore` 开始前已经各执行一次完整校验；损坏 manifest 拒绝用例继续保留。
+- integration 固定 `COMPOSE_PARALLEL_LIMIT=1`、API/全部 Worker concurrency `1`，降低各服务 CPU/内存上限，并给 MinIO probe helper 设置独立 CPU/内存/swap/PID 边界。
+- integration 只调用一次 source `up`，随后轮询容器状态，不再用第二次 `compose up --wait` 重复触发启动流程。默认恢复使用 `-NoStartAfterRestore`，只启动 PostgreSQL、Redis、MinIO、OpenSearch 验证数据恢复；完整 target 全栈验收改为显式 `-FullStackRestore`。
+- 已同步 `.env.windows.example`、`AGENT.md`、根/后端 README、Windows 部署文档、执行计划和完整技术计划书。
+
+### 进行中
+
+- 复核最终 diff、文档和 Git 状态，准备提交并推送本次资源修复。
+
+### 阻塞与风险
+
+- 本轮没有运行 15 服务完整 Compose、真实全量 backup/restore integration 或 runtime/preview 镜像构建，避免在修复尚未完成时再次触发高资源任务。
+- `BE-028` 完整门禁仍需要先独立构建两个项目镜像、通过 `-PreflightOnly`，再在明确测试窗口执行；`-FullStackRestore` 不属于默认测试路径。
+- 低压缩等级会增加一定备份体积，但换取更低 CPU 峰值；正式环境应根据备份窗口、磁盘和恢复目标调整，不能取消 helper 容器资源上限。
+
+### 下一步
+
+1. 复核全部 diff、文档和 `git diff --check`，提交并推送本次资源修复。
+2. 后续单独构建 runtime/preview 镜像，先运行 integration `-PreflightOnly`；只有在用户明确开始完整门禁后才运行受限 integration 和显式 `-FullStackRestore`。
+
+### 验证
+
+- PowerShell 5.1 parser：`backup-restore.ps1`、`manage.ps1`、smoke、integration 全部通过。
+- PowerShell 文件 ASCII 检查：4 个脚本的 non-ASCII byte 均为 `0`。
+- `deploy/windows/tests/backup-restore.smoke.ps1`：`27` 个用例全部通过。
+- `docker compose --env-file .env.windows.example -f compose.windows.yml config --quiet`：通过。
+- integration `-PreflightOnly`：最近一次约 `3.1s` 内准确报告缺少 `enterprise-drive-backend:windows-local` 和 `enterprise-drive-preview:windows-local`，执行前后运行中/全部容器数均为 `0`。
+- 受限真实 Docker helper：容器内 cgroup 为 `cpu.max=50000 100000`、`memory.max=536870912`、`pids.max=128`，与默认 `0.50 CPU / 512m / 128 PIDs` 一致。
+- 真实 64 KiB 临时卷使用新归档路径生成 `449` 字节 gzip 文件并通过隔离 tar 安全校验，归档加校验耗时约 `3.78s`；临时卷、目录和容器已清理。
+- 当前 `docker ps` 和 `docker ps -a`：容器数均为 `0`。
+
+### 涉及文件
+
+- `deploy/windows/backup-restore.ps1`
+- `deploy/windows/manage.ps1`
+- `deploy/windows/tests/backup-restore.smoke.ps1`
+- `deploy/windows/tests/backup-restore.integration.ps1`
+- `.env.windows.example`
+- `AGENT.md`
+- `README.md`
+- `backend/README.md`
+- `docs/deployment-windows-docker.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-07-31 BE-027 暂停与恢复收尾
 
 ### 当前状态

@@ -2,7 +2,9 @@
 param(
     [string]$EnvFile = ".env.windows.example",
 
-    [switch]$BuildImages,
+    [switch]$PreflightOnly,
+
+    [switch]$FullStackRestore,
 
     [switch]$KeepArtifacts
 )
@@ -45,10 +47,27 @@ $SourceApiPort = 28080
 $SourceStoragePort = 29000
 $TargetApiPort = 28081
 $TargetStoragePort = 29001
+$IntegrationRunningServices = @(
+    "gateway",
+    "api",
+    "worker-audit",
+    "worker-permission",
+    "worker-preview",
+    "worker-search",
+    "worker-maintenance",
+    "beat",
+    "postgres",
+    "redis",
+    "minio",
+    "opensearch"
+)
+$IntegrationExitedServices = @("migration", "minio-init", "seed")
+$DataValidationServices = @("postgres", "redis", "minio", "opensearch")
 
 $EnvironmentNames = @(
     "COMPOSE_PROJECT_NAME",
     "COMPOSE_PROGRESS",
+    "COMPOSE_PARALLEL_LIMIT",
     "DRIVE_IMAGE_TAG",
     "NGINX_IMAGE",
     "CERTBOT_IMAGE",
@@ -88,19 +107,49 @@ $EnvironmentNames = @(
     "CERTBOT_EMAIL",
     "DRIVE_TLS_CERT_NAME",
     "DRIVE_API_WORKERS",
+    "AUDIT_WORKER_CONCURRENCY",
+    "PERMISSION_WORKER_CONCURRENCY",
+    "SEARCH_WORKER_CONCURRENCY",
+    "MAINTENANCE_WORKER_CONCURRENCY",
+    "PREVIEW_WORKER_CONCURRENCY",
+    "PREVIEW_TMPFS_SIZE",
     "OPENSEARCH_JAVA_OPTS",
+    "OPENSEARCH_CPU_LIMIT",
     "OPENSEARCH_MEMORY_LIMIT",
+    "API_CPU_LIMIT",
     "API_MEMORY_LIMIT",
+    "MIGRATION_CPU_LIMIT",
     "MIGRATION_MEMORY_LIMIT",
+    "SEED_CPU_LIMIT",
     "SEED_MEMORY_LIMIT",
+    "AUDIT_WORKER_CPU_LIMIT",
     "AUDIT_WORKER_MEMORY_LIMIT",
+    "PERMISSION_WORKER_CPU_LIMIT",
     "PERMISSION_WORKER_MEMORY_LIMIT",
+    "SEARCH_WORKER_CPU_LIMIT",
     "SEARCH_WORKER_MEMORY_LIMIT",
+    "MAINTENANCE_WORKER_CPU_LIMIT",
     "MAINTENANCE_WORKER_MEMORY_LIMIT",
+    "PREVIEW_WORKER_CPU_LIMIT",
     "PREVIEW_WORKER_MEMORY_LIMIT",
+    "BEAT_CPU_LIMIT",
+    "BEAT_MEMORY_LIMIT",
+    "GATEWAY_CPU_LIMIT",
+    "GATEWAY_MEMORY_LIMIT",
+    "CERTBOT_CPU_LIMIT",
+    "CERTBOT_MEMORY_LIMIT",
+    "POSTGRES_CPU_LIMIT",
     "POSTGRES_MEMORY_LIMIT",
+    "REDIS_CPU_LIMIT",
     "REDIS_MEMORY_LIMIT",
+    "MINIO_CPU_LIMIT",
     "MINIO_MEMORY_LIMIT",
+    "MINIO_INIT_CPU_LIMIT",
+    "DRIVE_BACKUP_HELPER_CPU_LIMIT",
+    "DRIVE_BACKUP_HELPER_MEMORY_LIMIT",
+    "DRIVE_BACKUP_HELPER_PIDS_LIMIT",
+    "DRIVE_BACKUP_GZIP_LEVEL",
+    "DRIVE_BACKUP_PG_DUMP_COMPRESSION_LEVEL",
     "MINIO_INIT_MEMORY_LIMIT"
 )
 $OriginalEnvironment = @{}
@@ -142,6 +191,7 @@ function Set-IntegrationEnvironment {
     $Values = @{
         COMPOSE_PROJECT_NAME = $ProjectName
         COMPOSE_PROGRESS = "quiet"
+        COMPOSE_PARALLEL_LIMIT = "1"
         DRIVE_IMAGE_TAG = "windows-local"
         NGINX_IMAGE = "nginx:1.27-alpine"
         CERTBOT_IMAGE = "certbot/certbot:v5.6.0"
@@ -192,20 +242,50 @@ function Set-IntegrationEnvironment {
         CERTBOT_EMAIL = "ops@contoso.org"
         DRIVE_TLS_CERT_NAME = $CertificateName
         DRIVE_API_WORKERS = "1"
+        AUDIT_WORKER_CONCURRENCY = "1"
+        PERMISSION_WORKER_CONCURRENCY = "1"
+        SEARCH_WORKER_CONCURRENCY = "1"
+        MAINTENANCE_WORKER_CONCURRENCY = "1"
+        PREVIEW_WORKER_CONCURRENCY = "1"
+        PREVIEW_TMPFS_SIZE = "268435456"
         OPENSEARCH_JAVA_OPTS = "-Xms512m -Xmx512m"
-        OPENSEARCH_MEMORY_LIMIT = "1536m"
-        API_MEMORY_LIMIT = "1g"
+        OPENSEARCH_CPU_LIMIT = "1.00"
+        OPENSEARCH_MEMORY_LIMIT = "1024m"
+        API_CPU_LIMIT = "0.50"
+        API_MEMORY_LIMIT = "512m"
+        MIGRATION_CPU_LIMIT = "0.50"
         MIGRATION_MEMORY_LIMIT = "512m"
+        SEED_CPU_LIMIT = "0.50"
         SEED_MEMORY_LIMIT = "512m"
-        AUDIT_WORKER_MEMORY_LIMIT = "512m"
-        PERMISSION_WORKER_MEMORY_LIMIT = "512m"
-        SEARCH_WORKER_MEMORY_LIMIT = "768m"
-        MAINTENANCE_WORKER_MEMORY_LIMIT = "768m"
-        PREVIEW_WORKER_MEMORY_LIMIT = "1g"
-        POSTGRES_MEMORY_LIMIT = "1g"
-        REDIS_MEMORY_LIMIT = "512m"
-        MINIO_MEMORY_LIMIT = "1g"
-        MINIO_INIT_MEMORY_LIMIT = "256m"
+        AUDIT_WORKER_CPU_LIMIT = "0.25"
+        AUDIT_WORKER_MEMORY_LIMIT = "256m"
+        PERMISSION_WORKER_CPU_LIMIT = "0.25"
+        PERMISSION_WORKER_MEMORY_LIMIT = "256m"
+        SEARCH_WORKER_CPU_LIMIT = "0.50"
+        SEARCH_WORKER_MEMORY_LIMIT = "384m"
+        MAINTENANCE_WORKER_CPU_LIMIT = "0.25"
+        MAINTENANCE_WORKER_MEMORY_LIMIT = "384m"
+        PREVIEW_WORKER_CPU_LIMIT = "0.50"
+        PREVIEW_WORKER_MEMORY_LIMIT = "768m"
+        BEAT_CPU_LIMIT = "0.25"
+        BEAT_MEMORY_LIMIT = "256m"
+        GATEWAY_CPU_LIMIT = "0.25"
+        GATEWAY_MEMORY_LIMIT = "128m"
+        CERTBOT_CPU_LIMIT = "0.25"
+        CERTBOT_MEMORY_LIMIT = "128m"
+        POSTGRES_CPU_LIMIT = "0.75"
+        POSTGRES_MEMORY_LIMIT = "768m"
+        REDIS_CPU_LIMIT = "0.25"
+        REDIS_MEMORY_LIMIT = "256m"
+        MINIO_CPU_LIMIT = "0.50"
+        MINIO_MEMORY_LIMIT = "512m"
+        MINIO_INIT_CPU_LIMIT = "0.25"
+        MINIO_INIT_MEMORY_LIMIT = "128m"
+        DRIVE_BACKUP_HELPER_CPU_LIMIT = "0.25"
+        DRIVE_BACKUP_HELPER_MEMORY_LIMIT = "256m"
+        DRIVE_BACKUP_HELPER_PIDS_LIMIT = "64"
+        DRIVE_BACKUP_GZIP_LEVEL = "1"
+        DRIVE_BACKUP_PG_DUMP_COMPRESSION_LEVEL = "1"
     }
 
     foreach ($Entry in $Values.GetEnumerator()) {
@@ -269,25 +349,230 @@ function ConvertFrom-DockerJsonOutput {
     }
 }
 
+function Invoke-IntegrationStage {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Label,
+
+        [Parameter(Mandatory = $true)]
+        [scriptblock]$Operation
+    )
+
+    $Stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+    Write-Host "[integration:start] $Label"
+    try {
+        $Result = @(& $Operation)
+        Write-Host (
+            "[integration:done] {0} ({1:N1}s)" -f
+            $Label,
+            $Stopwatch.Elapsed.TotalSeconds
+        )
+        return $Result
+    }
+    catch {
+        Write-Host (
+            "[integration:failed] {0} ({1:N1}s): {2}" -f
+            $Label,
+            $Stopwatch.Elapsed.TotalSeconds,
+            $_.Exception.Message
+        )
+        throw
+    }
+    finally {
+        $Stopwatch.Stop()
+    }
+}
+
+function Assert-IntegrationImagesAvailable {
+    $ModelJson = (
+        Invoke-Compose -Arguments @("config", "--format", "json")
+    ) -join "`n"
+    $Model = $ModelJson | ConvertFrom-Json
+    $ImageReferences = @(
+        $Model.services.PSObject.Properties |
+            ForEach-Object { [string]$_.Value.image } |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Sort-Object -Unique
+    )
+    if ($ImageReferences.Count -eq 0) {
+        throw "The rendered Compose model did not contain service images."
+    }
+
+    $MissingImages = New-Object "System.Collections.Generic.List[string]"
+    foreach ($ImageReference in $ImageReferences) {
+        $PreviousErrorActionPreference = $ErrorActionPreference
+        try {
+            $ErrorActionPreference = "SilentlyContinue"
+            $null = & docker image inspect `
+                --format "{{.Id}}" `
+                $ImageReference 2>&1
+            $ImageInspectExitCode = $LASTEXITCODE
+        }
+        finally {
+            $ErrorActionPreference = $PreviousErrorActionPreference
+        }
+        if ($ImageInspectExitCode -ne 0) {
+            $MissingImages.Add($ImageReference)
+        }
+    }
+    if ($MissingImages.Count -gt 0) {
+        throw (
+            "Integration image preflight failed. Build or pull these images " +
+            "before running the test; this script does not build or pull: " +
+            ($MissingImages -join ", ")
+        )
+    }
+    Write-Host (
+        "[integration] image preflight passed: {0} unique images" -f
+        $ImageReferences.Count
+    )
+}
+
+function Wait-IntegrationServices {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$RunningServices,
+
+        [string[]]$ExitedServices = @(),
+
+        [ValidateRange(10, 900)]
+        [int]$TimeoutSeconds = 360
+    )
+
+    $Deadline = [System.DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+    $LastSummary = "no containers"
+    do {
+        $Rows = @(
+            ConvertFrom-DockerJsonOutput -Output @(
+                Invoke-Compose -Arguments @(
+                    "ps",
+                    "--all",
+                    "--format", "json"
+                )
+            )
+        )
+        $Map = @{}
+        foreach ($Row in $Rows) {
+            $Map[[string]$Row.Service] = $Row
+        }
+
+        $Ready = $true
+        foreach ($ServiceName in $RunningServices) {
+            if (-not $Map.ContainsKey($ServiceName)) {
+                $Ready = $false
+                continue
+            }
+            $Row = $Map[$ServiceName]
+            $HealthProperty = $Row.PSObject.Properties["Health"]
+            $Health = if ($null -eq $HealthProperty) {
+                ""
+            }
+            else {
+                [string]$HealthProperty.Value
+            }
+            if (
+                [string]$Row.State -ne "running" -or
+                (
+                    -not [string]::IsNullOrWhiteSpace($Health) -and
+                    $Health -ne "healthy"
+                )
+            ) {
+                $Ready = $false
+            }
+        }
+        foreach ($ServiceName in $ExitedServices) {
+            if (-not $Map.ContainsKey($ServiceName)) {
+                $Ready = $false
+                continue
+            }
+            $Row = $Map[$ServiceName]
+            $ExitCodeProperty = $Row.PSObject.Properties["ExitCode"]
+            $ExitCode = if ($null -eq $ExitCodeProperty) {
+                -1
+            }
+            else {
+                [int]$ExitCodeProperty.Value
+            }
+            if (
+                [string]$Row.State -ne "exited" -or
+                $ExitCode -ne 0
+            ) {
+                $Ready = $false
+            }
+        }
+        if ($Ready) {
+            return
+        }
+
+        $LastSummary = [string](
+            @(
+                $Rows |
+                    Sort-Object Service |
+                    ForEach-Object {
+                        $HealthProperty = $_.PSObject.Properties["Health"]
+                        $ExitCodeProperty = $_.PSObject.Properties["ExitCode"]
+                        "{0}={1}/{2}/exit:{3}" -f
+                        $_.Service,
+                        $_.State,
+                        $(if ($null -eq $HealthProperty) {
+                            ""
+                        }
+                        else {
+                            $HealthProperty.Value
+                        }),
+                        $(if ($null -eq $ExitCodeProperty) {
+                            ""
+                        }
+                        else {
+                            $ExitCodeProperty.Value
+                        })
+                    }
+            ) -join ", "
+        )
+        Start-Sleep -Seconds 2
+    } while ([System.DateTime]::UtcNow -lt $Deadline)
+
+    throw (
+        "Compose services did not reach the expected state within " +
+        "$TimeoutSeconds seconds. Last state: $LastSummary"
+    )
+}
+
+function Get-IntegrationHelperRunArguments {
+    return @(
+        "run",
+        "--rm",
+        "--pull", "never",
+        "--cpus", "0.25",
+        "--memory", "128m",
+        "--memory-swap", "128m",
+        "--pids-limit", "64"
+    )
+}
+
 function Invoke-Manage {
     param(
         [Parameter(Mandatory = $true)]
         [string[]]$Arguments
     )
 
-    $Output = @(
-        & powershell.exe `
+    $Output = New-Object "System.Collections.Generic.List[string]"
+    & powershell.exe `
             -NoProfile `
             -NonInteractive `
             -ExecutionPolicy Bypass `
             -File $ManageScript `
-            @Arguments
-    )
+            @Arguments 2>&1 |
+        ForEach-Object {
+            $Line = [string]$_
+            $Output.Add($Line)
+            Write-Host $Line
+        }
     $ExitCode = $LASTEXITCODE
     if ($ExitCode -ne 0) {
         throw "manage.ps1 failed with exit code $ExitCode."
     }
-    return $Output
+    return @($Output)
 }
 
 function Assert-Equal {
@@ -376,18 +661,11 @@ function Assert-Throws {
 }
 
 function Start-IntegrationProject {
-    $Arguments = @("up", "-EnvFile", $EnvFile)
-    if ($BuildImages) {
-        $Arguments += "-Build"
-    }
-    $null = Invoke-Manage -Arguments $Arguments
-    $null = Invoke-Compose -Arguments @(
-        "up",
-        "--detach",
-        "--remove-orphans",
-        "--wait",
-        "--wait-timeout", "360"
-    )
+    $null = Invoke-Manage -Arguments @("up", "-EnvFile", $EnvFile)
+    Wait-IntegrationServices `
+        -RunningServices $IntegrationRunningServices `
+        -ExitedServices $IntegrationExitedServices `
+        -TimeoutSeconds 360
 }
 
 function Set-MinioObject {
@@ -406,16 +684,18 @@ function Set-MinioObject {
     $Model = $ModelJson | ConvertFrom-Json
     $BackendNetwork = [string]$Model.networks.backend.name
     $null = Invoke-Docker -Arguments @(
-        "run", "--rm",
-        "--network", $BackendNetwork,
-        "-e", "PROBE_VALUE=$Value",
-        "-e", "PROBE_KEY=$ObjectKey",
-        "-e", "MINIO_ROOT_USER=$env:MINIO_ROOT_USER",
-        "-e", "MINIO_ROOT_PASSWORD=$env:MINIO_ROOT_PASSWORD",
-        "-e", "MINIO_BUCKET=$env:DRIVE_S3_BUCKET",
-        "--entrypoint", "/bin/sh",
-        $env:MINIO_MC_IMAGE,
-        "-ec", $Script
+        (Get-IntegrationHelperRunArguments) +
+        @(
+            "--network", $BackendNetwork,
+            "-e", "PROBE_VALUE=$Value",
+            "-e", "PROBE_KEY=$ObjectKey",
+            "-e", "MINIO_ROOT_USER=$env:MINIO_ROOT_USER",
+            "-e", "MINIO_ROOT_PASSWORD=$env:MINIO_ROOT_PASSWORD",
+            "-e", "MINIO_BUCKET=$env:DRIVE_S3_BUCKET",
+            "--entrypoint", "/bin/sh",
+            $env:MINIO_MC_IMAGE,
+            "-ec", $Script
+        )
     )
 }
 
@@ -430,15 +710,17 @@ function Get-MinioObject {
     $Model = $ModelJson | ConvertFrom-Json
     $BackendNetwork = [string]$Model.networks.backend.name
     $Output = Invoke-Docker -Arguments @(
-        "run", "--rm",
-        "--network", $BackendNetwork,
-        "-e", "PROBE_KEY=$ObjectKey",
-        "-e", "MINIO_ROOT_USER=$env:MINIO_ROOT_USER",
-        "-e", "MINIO_ROOT_PASSWORD=$env:MINIO_ROOT_PASSWORD",
-        "-e", "MINIO_BUCKET=$env:DRIVE_S3_BUCKET",
-        "--entrypoint", "/bin/sh",
-        $env:MINIO_MC_IMAGE,
-        "-ec", $Script
+        (Get-IntegrationHelperRunArguments) +
+        @(
+            "--network", $BackendNetwork,
+            "-e", "PROBE_KEY=$ObjectKey",
+            "-e", "MINIO_ROOT_USER=$env:MINIO_ROOT_USER",
+            "-e", "MINIO_ROOT_PASSWORD=$env:MINIO_ROOT_PASSWORD",
+            "-e", "MINIO_BUCKET=$env:DRIVE_S3_BUCKET",
+            "--entrypoint", "/bin/sh",
+            $env:MINIO_MC_IMAGE,
+            "-ec", $Script
+        )
     )
     return [string](($Output -join "`n").Trim())
 }
@@ -475,6 +757,18 @@ $RestoredEnvironmentPath = $null
 $IntegrationFailure = $null
 $CleanupErrors = New-Object "System.Collections.Generic.List[string]"
 try {
+    Set-IntegrationEnvironment `
+        -ProjectName $SourceProject `
+        -ApiPort $SourceApiPort `
+        -StoragePort $SourceStoragePort
+    $null = Invoke-IntegrationStage -Label "local image preflight" -Operation {
+        Assert-IntegrationImagesAvailable
+    }
+    if ($PreflightOnly) {
+        Write-Output "Backup and restore integration preflight passed."
+        return
+    }
+
     $null = New-Item -ItemType Directory -Path $BackupRoot -Force
     $CmsCertificate = New-SelfSignedCertificate `
         -Subject "CN=Enterprise Drive Backup Integration $Suffix" `
@@ -482,12 +776,10 @@ try {
         -CertStoreLocation "Cert:\CurrentUser\My" `
         -NotAfter ([System.DateTime]::Now.AddDays(2))
 
-    Set-IntegrationEnvironment `
-        -ProjectName $SourceProject `
-        -ApiPort $SourceApiPort `
-        -StoragePort $SourceStoragePort
     $SourceCreated = $true
-    Start-IntegrationProject
+    $null = Invoke-IntegrationStage -Label "source Compose startup" -Operation {
+        Start-IntegrationProject
+    }
 
     $CreateProbeSql = @(
         "CREATE TABLE IF NOT EXISTS backup_restore_probe (",
@@ -553,6 +845,7 @@ try {
     $null = Invoke-Compose -Arguments @(
         "--profile", "tls-tools",
         "run", "--rm", "--no-deps",
+        "--pull", "never",
         "--entrypoint", "sh",
         "certbot",
         "-ec", $TlsScript
@@ -572,14 +865,17 @@ try {
         throw "Source Alembic revision is empty."
     }
 
-    $BackupOutput = Invoke-Manage -Arguments @(
-        "backup",
-        "-EnvFile", $EnvFile,
-        "-BackupDirectory", $BackupRoot,
-        "-ConfigEncryptionCertificateThumbprint", $CmsCertificate.Thumbprint,
-        "-QuiesceTimeoutSeconds", "300"
-    )
-    $BackupOutput | Out-Host
+    $null = Invoke-IntegrationStage `
+        -Label "backup and publish-time verification" `
+        -Operation {
+            Invoke-Manage -Arguments @(
+                "backup",
+                "-EnvFile", $EnvFile,
+                "-BackupDirectory", $BackupRoot,
+                "-ConfigEncryptionCertificateThumbprint", $CmsCertificate.Thumbprint,
+                "-QuiesceTimeoutSeconds", "300"
+            )
+        }
     $BackupPath = Get-ChildItem -LiteralPath $BackupRoot -Directory |
         Where-Object { -not $_.Name.StartsWith(".partial-") } |
         Sort-Object LastWriteTimeUtc -Descending |
@@ -590,10 +886,9 @@ try {
     $BackupPath = $BackupPath.FullName
     Assert-RestrictedAcl -Path $BackupPath -Label "Published backup"
 
-    $null = Invoke-Manage -Arguments @(
-        "backup-verify",
-        "-EnvFile", $EnvFile,
-        "-BackupPath", $BackupPath
+    Write-Host (
+        "[integration] duplicate successful backup-verify skipped; " +
+        "backup already runs the same full verification before publication."
     )
     $EncryptedEnvironmentPath = Join-Path $BackupPath "secrets\environment.cms"
     if (-not (Test-Path -LiteralPath $EncryptedEnvironmentPath -PathType Leaf)) {
@@ -636,7 +931,9 @@ try {
         "-c", $PostBackupSql
     )
     Set-MinioObject -Value $AfterValue
-    $null = Invoke-Compose -Arguments @("stop", "--timeout", "120")
+    $null = Invoke-IntegrationStage -Label "source Compose stop" -Operation {
+        Invoke-Compose -Arguments @("stop", "--timeout", "120")
+    }
 
     Set-IntegrationEnvironment `
         -ProjectName $TargetProject `
@@ -646,16 +943,49 @@ try {
     $RestoredEnvironmentPath = Join-Path `
         ([System.IO.Path]::GetTempPath()) `
         "enterprise-drive-restored-environment-$Suffix.env"
-    $RestoreOutput = Invoke-Manage -Arguments @(
+    $RestoreArguments = @(
         "restore",
         "-EnvFile", $EnvFile,
         "-BackupPath", $BackupPath,
         "-RestoreEnvironmentOutput", $RestoredEnvironmentPath
     )
-    $RestoreOutput | Out-Host
+    if (-not $FullStackRestore) {
+        $RestoreArguments += "-NoStartAfterRestore"
+    }
+    $RestoreLabel = if ($FullStackRestore) {
+        "restore with full-stack startup"
+    }
+    else {
+        "restore without full-stack startup"
+    }
+    $null = Invoke-IntegrationStage `
+        -Label $RestoreLabel `
+        -Operation {
+            Invoke-Manage -Arguments $RestoreArguments
+        }
     Assert-RestrictedAcl `
         -Path $RestoredEnvironmentPath `
         -Label "Restored environment"
+
+    if (-not $FullStackRestore) {
+        $null = Invoke-IntegrationStage `
+            -Label "restored data-service startup" `
+            -Operation {
+                $null = Invoke-Compose -Arguments @(
+                    @(
+                        "up",
+                        "--detach",
+                        "--no-deps",
+                        "--no-build",
+                        "--pull", "never"
+                    ) +
+                    $DataValidationServices
+                )
+                Wait-IntegrationServices `
+                    -RunningServices $DataValidationServices `
+                    -TimeoutSeconds 240
+            }
+    }
 
     $DatabaseProbe = Invoke-Compose -Arguments @(
         "exec", "--no-TTY",
@@ -734,21 +1064,30 @@ try {
     $null = Invoke-Compose -Arguments @(
         "--profile", "tls-tools",
         "run", "--rm", "--no-deps",
+        "--pull", "never",
         "--entrypoint", "sh",
         "certbot",
         "-ec", $TlsVerifyScript
     )
 
-    $Health = Invoke-WebRequest `
-        -UseBasicParsing `
-        -Uri "http://127.0.0.1:$TargetApiPort/healthz" `
-        -TimeoutSec 30
-    $Ready = Invoke-WebRequest `
-        -UseBasicParsing `
-        -Uri "http://127.0.0.1:$TargetApiPort/readyz" `
-        -TimeoutSec 30
-    Assert-Equal -Actual $Health.StatusCode -Expected 200 -Label "healthz status"
-    Assert-Equal -Actual $Ready.StatusCode -Expected 200 -Label "readyz status"
+    if ($FullStackRestore) {
+        $Health = Invoke-WebRequest `
+            -UseBasicParsing `
+            -Uri "http://127.0.0.1:$TargetApiPort/healthz" `
+            -TimeoutSec 30
+        $Ready = Invoke-WebRequest `
+            -UseBasicParsing `
+            -Uri "http://127.0.0.1:$TargetApiPort/readyz" `
+            -TimeoutSec 30
+        Assert-Equal `
+            -Actual $Health.StatusCode `
+            -Expected 200 `
+            -Label "healthz status"
+        Assert-Equal `
+            -Actual $Ready.StatusCode `
+            -Expected 200 `
+            -Label "readyz status"
+    }
 
     $StrictUtf8 = New-Object System.Text.UTF8Encoding($false, $true)
     $OriginalEnvironmentText = [System.IO.File]::ReadAllText(
@@ -793,20 +1132,13 @@ try {
             Where-Object { $_.State -eq "running" } |
             ForEach-Object { $_.Service }
     )
-    foreach ($RequiredService in @(
-        "gateway",
-        "api",
-        "worker-audit",
-        "worker-permission",
-        "worker-preview",
-        "worker-search",
-        "worker-maintenance",
-        "beat",
-        "postgres",
-        "redis",
-        "minio",
-        "opensearch"
-    )) {
+    $ExpectedRunningServices = if ($FullStackRestore) {
+        $IntegrationRunningServices
+    }
+    else {
+        $DataValidationServices
+    }
+    foreach ($RequiredService in $ExpectedRunningServices) {
         if ($RequiredService -notin $RunningServices) {
             throw "Restored service is not running: $RequiredService"
         }

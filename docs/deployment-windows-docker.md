@@ -220,7 +220,7 @@ CERTBOT_EMAIL=ops@example.com
 | 命令 | 目标 |
 | --- | --- |
 | `config [-Quiet]` | 使用示例或实际环境文件校验 Compose 渲染结果 |
-| `up [-Build]` | 启动服务；`-Build` 会先构建镜像，migration、MinIO 初始化和 seed 由 Compose 依赖链执行 |
+| `up [-Build]` | 启动服务；默认 `--no-build --pull never`，只有显式 `-Build` 才构建项目镜像，migration、MinIO 初始化和 seed 由 Compose 依赖链执行 |
 | `config -Tls [-Quiet]` | 校验公网域名格式、HTTPS S3 URL、Secure Cookie、API/MinIO CORS、Trusted Hosts 和 TLS Compose 渲染 |
 | `up -Tls [-Build]` | 使用已有证书启动或更新公网 TLS gateway |
 | `status` | 查看全部容器与健康状态 |
@@ -236,7 +236,7 @@ CERTBOT_EMAIL=ops@example.com
 | `down` | 停止服务并保留 named volumes |
 | `down -Volumes` | 显式销毁全部业务/TLS named volumes，并删除同名续期计划任务；仅限确认备份后的环境清理 |
 
-脚本默认 `down` 不删除 volumes；`-Volumes` 是显式破坏性开关，并会删除 PostgreSQL、MinIO、OpenSearch、Redis、TLS/Certbot volumes 和对应续期计划任务。`.env.windows`、证书私钥或备份内容不得写入 Git。
+脚本默认 `down` 不删除 volumes；`-Volumes` 是显式破坏性开关，并会删除 PostgreSQL、MinIO、OpenSearch、Redis、TLS/Certbot volumes 和对应续期计划任务。`.env.windows`、证书私钥或备份内容不得写入 Git。普通 `up`、TLS 辅助 `run` 和内部恢复启动路径都禁止隐式拉取镜像；第三方镜像拉取、runtime/preview 构建、服务启动和备份恢复测试必须拆成独立步骤，便于看到具体耗时并避免一次命令同时占满 CPU、内存和磁盘。
 
 ### 首次公网证书签发
 
@@ -455,6 +455,8 @@ gateway 必须负责：
 
 `backup` 会在维护窗口按 gateway、API/beat、各类 Worker、MinIO/Redis/OpenSearch 的顺序静默写入面，并逐服务记录 source 容器 ID、原始 `running`/`exited` 状态和 health。PostgreSQL 使用 custom-format `pg_dump`；MinIO、Redis、OpenSearch 和 `tls-certificates` 使用停止状态原始卷 tar。备份完成或中途失败后，脚本都会恢复并对账 source 原运行、退出与健康状态。
 
+所有 `pg_dump`、卷归档、tar 安全扫描、卷清理和 PostgreSQL 恢复辅助容器统一带 `--pull never`、CPU、memory、memory-swap 与 PID 限额。默认值为 `DRIVE_BACKUP_HELPER_CPU_LIMIT=0.50`、`DRIVE_BACKUP_HELPER_MEMORY_LIMIT=512m`、`DRIVE_BACKUP_HELPER_PIDS_LIMIT=128`，memory-swap 与 memory 相同，因此不额外占用 Docker swap；内存配置只接受 `64m` 至 `4g`。`DRIVE_BACKUP_GZIP_LEVEL=1` 和 `DRIVE_BACKUP_PG_DUMP_COMPRESSION_LEVEL=1` 优先降低 CPU 峰值；正式卷归档创建后不再立刻额外执行一次完整 `tar -tzf`，但发布前仍会执行完整工件校验和隔离 tar 预扫描，恢复 rollback archive 仍保留创建后立即校验。
+
 正式备份目录只由校验通过的 `.partial-*` staging 原子发布，主要内容包括：
 
 - `postgres/postgres.dump`
@@ -523,6 +525,20 @@ $backupPath = [string](
 - tar 检查结束后必须删除临时卷；扫描失败或临时卷清理失败都会使校验失败。
 
 因此，复制备份到另一台主机时，应先检出 manifest 记录的精确 Git commit，保持相同 `compose.windows.yml`、项目版本和 bucket/index/TLS lineage 配置，并准备全部 15 个服务对应的固定镜像，再执行 `backup-verify`。
+
+仓库内真实集成脚本不会构建或拉取镜像。先执行只读 preflight：
+
+```powershell
+.\deploy\windows\tests\backup-restore.integration.ps1 -PreflightOnly
+```
+
+preflight 会渲染 Compose 并逐一检查本地镜像；缺少任一镜像时在创建证书、容器或卷之前快速退出。完整执行时固定 `COMPOSE_PARALLEL_LIMIT=1`、API/Worker 并发为 `1`，并降低测试专用 CPU/内存上限；默认恢复使用 `-NoStartAfterRestore`，随后只启动 PostgreSQL、Redis、MinIO、OpenSearch 验证恢复点。只有需要重新验收 gateway、API、全部 Worker 和 beat 时才显式执行：
+
+```powershell
+.\deploy\windows\tests\backup-restore.integration.ps1 -FullStackRestore
+```
+
+集成脚本不再重复调用一次成功的 `backup-verify`：`backup` 在发布前已经执行同一完整校验，`restore` 开始前还会再次完整校验；损坏 manifest 的拒绝用例继续保留。各阶段会分别输出镜像 preflight、source 启动、备份、source 停止、恢复和数据服务启动耗时。
 
 ### 11.4 隔离恢复
 
