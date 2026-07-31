@@ -84,18 +84,19 @@
 - 权限缓存和失效事件。（已完成文件列表批量权限评估、`permission.changed` outbox 事件写入和 Redis 缓存失效 worker）
 - 部门/用户组 ACL 主体。（已完成 `departments`、`department_members`、`user_groups`、`user_group_members` 事实表、repository 和权限判断主体展开）
 - 搜索 ACL 事件、文件索引写入和查询过滤。（已完成 ACL token builder、`search.acl_rebuild_requested` outbox event、上传完成、重命名、移动、删除、恢复和彻底删除后的 `search.index_requested` 事件、OpenSearch 文件索引写入/删除入口、ACL 变更后的保守范围重建，上传完成后的 `search.extract_requested` 文本/PDF/DOCX/PPTX/XLSX 抽取入口，以及 `GET /api/v1/search` 查询层 allow/deny token 过滤、签名 cursor 分页、highlight、搜索限流和应用层二次权限校验）
-- 高危操作二次查库。
+- 高危操作二次查库。（已完成；权限读路径当前直接以 PostgreSQL 空间成员与 ACL 为事实来源，成员/ACL 管理、上传完成、下载、分享、预览和文件写操作均在对应接口重新调用权限服务）
 
 ### Sprint 5：分享、预览、搜索
 
 - 内部分享和外链分享。（已完成基础表、迁移、服务层、创建/详情/撤销 HTTP API、带租户边界的外链访问入口和外链下载入口）
 - 提取码、过期、次数限制、撤销。（已完成提取码哈希、过期/次数字段、撤销服务、外链访问次数原子扣减、外链下载次数原子扣减、IP 总量和 `token + IP` / `token + node + IP` 维度限流）
 - 预览任务和搜索索引任务。（已完成搜索索引/抽取入口、图片 WebP 预览、PDF 首页 WebP 预览和 Office 通过 LibreOffice headless 转 PDF 的基础链路）
-- 权限过滤与二次校验。
+- 权限过滤与二次校验。（已完成；搜索查询同时执行 OpenSearch allow/deny token 过滤和 PostgreSQL `read_meta` 二次校验，分享、预览与下载在签发访问地址前重新检查当前权限）
 
 ### Sprint 6：管理、治理、上线
 
-- 管理 API、审计查询、统计。
+- 管理员审计查询 API。（已完成 `GET /api/v1/admin/audit-logs`，仅系统管理员可访问，按租户隔离，支持用户、资源、动作、结果、风险、请求 ID、时间范围和签名 cursor 筛选，并审计成功与拒绝查询）
+- 用户、部门、用户组、空间、配额、统计、维护和导出等完整管理 API 按 Sprint 9 的 `BE-044`、`BE-045` 继续交付。
 - 生命周期治理、孤儿对象扫描和容量治理增强。
 - 用户/租户维度配额和策略化配额；维护任务定时调度、失败告警、清理指标和运行看板。
 - 高密级下载治理：在预签名直连之外补充后端代理、HTTP Range、增强审计、水印或 DLP 策略能力。
@@ -180,6 +181,8 @@
 - `BILL-001`：多租户计费。
 
 ## 5. 当前下一步
+
+2026-07-31 已完成最早未交付任务 `BE-025` 管理员审计查询：新增独立 `admin` 模块和 `GET /api/v1/admin/audit-logs`，使用系统管理员边界、租户隔离、倒序签名 cursor、用户/文件/时间等组合筛选，并对允许、越权和非法时间范围查询写入审计。Sprint 4 的高危操作二次查库和 Sprint 5 的搜索权限二次校验也已按现有代码与测试证据标记完成；紧接着进入 `BE-026` 生命周期清理任务缺口审计与实现。
 
 2026-07-31 本机 Docker Desktop 已重新安装并恢复 `desktop-linux`：Docker client/server `29.6.2`、Linux `amd64` daemon 和 Docker Compose `v5.3.1` 可用；`compose.windows.yml` 使用 `.env.windows.example` 的静态配置校验通过，解析出当前 15 个默认服务。已从 `registry.k8s.io` 拉取小型 Linux 镜像，完成容器创建、运行状态检查、删除和镜像清理。当前 Codex Git Bash 会话仍继承安装前 PATH，需显式加入 Docker `resources/bin` 或重启终端；Docker Hub 匿名令牌请求在 daemon 内部代理路径连续出现 EOF，而宿主机直接请求返回 HTTP 200，因此完整镜像拉取、Compose 启动、备份恢复和全依赖集成门禁仍待修复该网络路径后补跑。
 

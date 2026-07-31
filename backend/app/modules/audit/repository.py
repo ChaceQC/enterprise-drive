@@ -3,9 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.pagination import PageCursor
 from app.core.security import utc_now
 from app.modules.audit.models import AuditLog, OutboxEvent
 from app.modules.audit.schemas import AuditContext, AuditEvent
@@ -53,6 +54,63 @@ class AuditRepository:
         self.session.add(outbox_event)
         await self.session.flush()
         return outbox_event
+
+    async def list_audit_logs(
+        self,
+        *,
+        tenant_id: UUID,
+        actor_id: UUID | None,
+        actor_type: str | None,
+        action: str | None,
+        resource_type: str | None,
+        resource_id: UUID | None,
+        result: str | None,
+        risk_level: str | None,
+        request_id: str | None,
+        created_from: datetime | None,
+        created_to: datetime | None,
+        cursor: PageCursor | None,
+        limit: int,
+    ) -> list[AuditLog]:
+        conditions = [AuditLog.tenant_id == tenant_id]
+        if actor_id is not None:
+            conditions.append(AuditLog.actor_id == actor_id)
+        if actor_type is not None:
+            conditions.append(AuditLog.actor_type == actor_type)
+        if action is not None:
+            conditions.append(AuditLog.action == action)
+        if resource_type is not None:
+            conditions.append(AuditLog.resource_type == resource_type)
+        if resource_id is not None:
+            conditions.append(AuditLog.resource_id == resource_id)
+        if result is not None:
+            conditions.append(AuditLog.result == result)
+        if risk_level is not None:
+            conditions.append(AuditLog.risk_level == risk_level)
+        if request_id is not None:
+            conditions.append(AuditLog.request_id == request_id)
+        if created_from is not None:
+            conditions.append(AuditLog.created_at >= created_from)
+        if created_to is not None:
+            conditions.append(AuditLog.created_at <= created_to)
+        if cursor is not None:
+            conditions.append(
+                or_(
+                    AuditLog.created_at < cursor.created_at,
+                    and_(
+                        AuditLog.created_at == cursor.created_at,
+                        AuditLog.id < cursor.item_id,
+                    ),
+                )
+            )
+
+        query_result = await self.session.execute(
+            select(AuditLog)
+            .where(*conditions)
+            .order_by(AuditLog.created_at.desc(), AuditLog.id.desc())
+            .limit(limit)
+        )
+        return list(query_result.scalars().all())
 
     async def claim_due_outbox_events(
         self,
@@ -129,3 +187,9 @@ class AuditRepository:
         )
         rowcount = getattr(result, "rowcount", 0)
         return int(rowcount or 0)
+
+    async def commit(self) -> None:
+        await self.session.commit()
+
+    async def rollback(self) -> None:
+        await self.session.rollback()

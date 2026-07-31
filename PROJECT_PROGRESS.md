@@ -1,5 +1,65 @@
 # PROJECT_PROGRESS.md
 
+## 2026-07-31 BE-025 管理员审计查询 API
+
+### 已完成
+
+- 对照 `AGENT.md`、执行计划、完整技术计划和现有代码审计早期未完成项，确认 Sprint 4 的高危动作当前直接查询 PostgreSQL 权限事实，Sprint 5 搜索已有 OpenSearch 过滤与 PostgreSQL 二次权限校验；最早真正缺少的工程任务为 `BE-025`。
+- 新增 `backend/app/modules/admin/` 管理模块和 `GET /api/v1/admin/audit-logs`。
+- 查询仅允许当前租户的 `is_super_admin` 用户访问，普通用户返回 `ADMIN_REQUIRED`；服务层再次执行管理员检查，不依赖页面或路由隐藏。
+- 支持按 `actor_id`、`actor_type`、`action`、`resource_type`、`resource_id`、`result`、`risk_level`、`request_id`、`created_from` 和 `created_to` 组合筛选。
+- 使用 `created_at DESC, id DESC` 和签名 cursor 分页；查询始终包含 `tenant_id` 条件，测试覆盖其他租户审计记录不可见。
+- 管理员成功查询、普通用户越权查询和非法时间范围都会写入 `admin.audit_logs.queried` 审计与对应 outbox event，记录筛选条件、返回数量和拒绝原因。
+- 已同步 `README.md`、`backend/README.md`、`PROJECT_PLAN.md` 和《企业网盘开发者技术计划书.md》。
+
+### 版本影响
+
+- 新增向后兼容的管理查询 API，无数据库 migration、对象存储 key 或现有 API 破坏性变更；作为 Sprint 6 / `v0.4.0` 原计划任务完成，当前版本保持 `0.4.0`。
+
+### 进行中
+
+- 按任务顺序继续审计 `BE-026` 生命周期清理：现有过期上传、无引用 blob、孤儿对象和容量校准已落地，仍需核对回收站、过期分享和预览产物的持续治理缺口。
+
+### 阻塞与风险
+
+- 当前查询直接读取单表并利用租户、actor/time、resource/time 索引；千万级日志的月分区、保留归档和外部投递属于 `BE-049`，本任务不提前混入后续分区迁移。
+- 审计 metadata、IP 和 User-Agent 仅向系统管理员返回；后续导出仍需独立权限、异步任务、签名和数据脱敏策略。
+- Docker Hub 经 Docker Desktop 内部代理访问仍有 EOF，完整容器门禁继续按下方 Docker 状态记录处理。
+
+### 下一步
+
+1. 提交并推送 `BE-025` 的代码、测试和文档。
+2. 完成 `BE-026` 生命周期清理缺口审计并优先交付过期分享和预览产物清理。
+3. 修复 Docker Hub 拉取路径后补跑完整 Compose、健康检查、备份恢复和真实依赖门禁。
+
+### 验证
+
+- `uv run pytest tests/test_admin_audit.py -q`：3 个测试通过。
+- `uv run ruff format --check app tests/test_admin_audit.py`：通过。
+- `uv run ruff check app tests/test_admin_audit.py`：通过。
+- `uv run mypy app`：通过，144 个源文件无类型问题。
+- `uv run ruff format --check .`：191 个文件格式通过。
+- `uv run ruff check .`：通过。
+- `uv lock --check`：通过，解析 97 个包。
+- `uv run pytest`：151 passed，3 skipped。
+- `uv run alembic heads`：`20260701_0012 (head)`。
+- OpenAPI：版本 `0.4.0`、30 条 path，包含 `/api/v1/admin/audit-logs`。
+
+### 涉及文件
+
+- `backend/app/api/v1/router.py`
+- `backend/app/modules/admin/__init__.py`
+- `backend/app/modules/admin/audit.py`
+- `backend/app/modules/admin/router.py`
+- `backend/app/modules/admin/schemas.py`
+- `backend/app/modules/audit/repository.py`
+- `backend/tests/test_admin_audit.py`
+- `README.md`
+- `backend/README.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-07-31 Docker Desktop 重新安装与基础验证
 
 ### 已完成

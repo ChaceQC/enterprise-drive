@@ -145,6 +145,7 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - 旧 session 复用检测与 session family 吊销。
 - `audit_logs`、`outbox_events` 基础表和迁移。
 - 登录、会话轮换、登出和 session 复用检测的认证审计事件。
+- 系统管理员审计查询 API，按租户隔离并支持用户、资源、动作、结果、风险、请求 ID、时间范围和签名 cursor 筛选；成功与拒绝查询均写入审计。
 - Celery app 基础配置和 `audit.dispatch_outbox`、`permission.invalidate_cache`、`search.dispatch_outbox` 任务。
 - outbox dispatcher，支持按事件类型 claim、成功发送、失败重试和 dead 状态。
 - `spaces`、`nodes`、`file_blobs`、`file_versions` 基础表和迁移。
@@ -191,6 +192,12 @@ uv run pytest tests/test_storage_minio_integration.py -q
 登录成功后，后端写入 `drive_session` HttpOnly Cookie 和可由前端读取的 `drive_csrf` Cookie；所有 `POST`、`PUT`、`PATCH`、`DELETE` 请求都需要把 `drive_csrf` 的值通过 `X-CSRF-Token` 请求头回传。接口不返回 JWT，也不支持 `Authorization: Bearer` 或旧 `/auth/refresh` 兼容路径。
 
 默认管理员由 `.env` 中的 `DRIVE_ADMIN_*` 配置控制。首次本地启动后运行 `uv run python -m scripts.seed_admin` 创建管理员，并在首次登录后尽快修改默认密码。
+
+## 管理员接口
+
+- `GET /api/v1/admin/audit-logs`
+
+审计查询仅允许当前租户的系统管理员访问。可使用 `actor_id`、`actor_type`、`action`、`resource_type`、`resource_id`、`result`、`risk_level`、`request_id`、`created_from`、`created_to`、`cursor` 和 `page_size` 组合筛选；结果按 `created_at DESC, id DESC` 返回。普通用户访问、非法时间范围和成功查询都会写入 `admin.audit_logs.queried` 审计事件。
 
 ## 空间和文件树接口
 
