@@ -7,7 +7,7 @@
 - `BE-028` 已完成真实 Windows 11 Docker Desktop 闭环：runtime/preview 镜像独立构建、本地镜像 preflight、15 服务 source 启动、备份、默认数据服务恢复、显式完整 target 全栈恢复、gateway/API/Worker/beat/数据服务校验和彻底清理均已通过。
 - `BE-029` 第一版 Locust 工具链和真实 Docker smoke 已完成：170 次请求、0 失败，已定义的文件列表、上传初始化、搜索和审计 P95 门槛全部通过，报告为 `passed=true`。
 - 当前 Docker client/server 为 `29.6.2`，Compose 为 `v5.3.1`，context 为 `desktop-linux`；运行中容器和全部残留容器均为 `0`。
-- `dev` 与 `origin/dev` 当前共同指向 `1963f76bd7b3936ca1d5eb7d531cd15672a1af27`；该提交对应 GitHub Actions run `30648296028`，全部 5 个 job 成功。
+- `BE-029` 实现已提交为 `f0302e2 feat: 完成首版性能基准与真实 Docker 验证` 并推送到 `origin/dev`；GitHub Actions run `30652675576` 的全部 5 个 job 成功。
 
 ### 已完成
 
@@ -41,10 +41,11 @@
 - 根 `compose.windows.yml` 已传递 `DRIVE_RATE_LIMIT_ENABLED`，`.env.windows.example` 默认保持 `true`，隔离容量基准可显式关闭限流且在报告中记录模式。
 - 首次真实 smoke 暴露清理外键冲突和错误的登录临时阈值；修复后使用现有本地镜像、`--no-build --pull never` 和隔离 project 重跑成功。
 - 最终 smoke 工件位于 `backend/tmp/performance/20260731-be029-smoke-9c42e8/`，包含 7 个非空文件；数据库 fixture 节点、测试容器、网络、named volumes 和临时端口全部为 0。
+- `f0302e2 feat: 完成首版性能基准与真实 Docker 验证` 已推送；run `30652675576` 的 backend、windows-deployment、minio-image-policy 和两组 minio-supply-chain job 全部成功。
 
 ### 进行中
 
-- 对 `BE-029` 实现、报告和文档执行最终提交前检查，随后提交推送并等待新的 GitHub Actions。
+- `BE-029` 首版已闭环，正在按工程顺序切换到 `BE-030` 安全测试修复审计。
 
 ### 阻塞与风险
 
@@ -57,9 +58,9 @@
 
 ### 下一步
 
-1. 完成最终 `git diff`、完整后端、Compose 和 Docker 清理检查，提交并推送 `BE-029`，等待新 GitHub Actions 全部通过。
-2. 按工程编号进入 `BE-030` 安全测试修复审计，先从当前默认配置和攻击者可达路径建立缺口矩阵。
-3. 为后续 target 验收补充 100 万 OpenSearch 文档、1,000 万审计日志和真实 multipart complete 数据生成设计；DTP/1 并发提示与 HTTP/2/HTTP/3 回退由 `DC-006` 按基准结果推进。
+1. 按工程编号进入 `BE-030` 安全测试修复审计，先从当前默认配置和攻击者可达路径建立缺口矩阵。
+2. 为后续 target 验收补充 100 万 OpenSearch 文档、1,000 万审计日志和真实 multipart complete 数据生成设计。
+3. 根据首份基准继续由 `DC-006` 设计 DTP/1 服务端并发提示，并验证 HTTP/2/HTTP/3 透明承载与回退边界。
 
 ### 验证
 
@@ -87,6 +88,7 @@
 - 最终真实 Docker smoke：170 次请求、0 失败；文件列表/上传初始化/搜索/审计 P95 为 `32/92/71/25 ms`，报告 `passed=true`。
 - smoke 资源采样峰值：6 个容器、`162%` aggregate Docker CPU、`1506.1 MiB` 容器内存、`4471.9 MiB` Docker 相关宿主进程 working set。
 - `backend/tmp/performance/20260731-be029-smoke-9c42e8/report.json`、HTML 和 4 个 Locust CSV 均为非空；fixture 节点为 `0`，最终 `docker ps`、`docker ps -a` 和两个隔离 project 的容器/网络/卷均为 `0`。
+- GitHub Actions run `30652675576`：5 个 job 全部成功；backend job 完成依赖安装、PostgreSQL/MinIO、Ruff、Mypy、pytest、Compose/TLS/Nginx 校验、runtime/preview 构建和 observability Docker smoke。
 
 ### 涉及文件
 

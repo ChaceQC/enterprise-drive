@@ -183,7 +183,7 @@
 
 ## 5. 当前下一步
 
-2026-07-31 已完成 `BE-027` metrics/tracing：API 新增完整路由模板维度的请求计数与延迟、上传会话/失败、下载、权限判断、Outbox 状态和搜索索引延迟指标；正式 2-worker Uvicorn 配置通过 `PROMETHEUS_MULTIPROC_DIR` 聚合，运行入口只在容器启动时清理旧 metric 文件。5 个 Celery Worker 分别在 Compose 内部 `9100` 暴露 task 数量、状态和耗时，避免把独立容器指标误算到 API registry。JSON 日志自动关联 service/env/request_id/task_id/trace_id/span_id，FastAPI 与 Celery 已接入 OpenTelemetry，支持 `none`、Console 和 OTLP/HTTP exporter。真实 Docker smoke 已使用 PostgreSQL、Redis、2 个 API worker 和 maintenance Worker 验证 24 次请求聚合、Outbox/Search gauge、真实 Celery task 和 API/Worker trace 日志；随后已按顺序完成 `BE-028`，当前进入 `BE-029 性能压测脚本` 的现状审计和基准矩阵设计。
+2026-07-31 已完成 `BE-027` metrics/tracing、`BE-028` Windows Docker Compose 正式部署门禁和 `BE-029` 首版性能基准。`BE-029` 的真实隔离 Docker smoke 已生成 CSV/HTML/JSON 工件并通过既定小规模门槛，提交 `f0302e2` 对应 GitHub Actions run `30652675576` 全部成功；当前按工程顺序进入 `BE-030 安全测试修复` 的默认配置与攻击者可达路径审计，目标规模性能数据生成仍作为后续 `BE-029` target 验收子任务保留。
 
 2026-07-31 已完成 `BE-026` lifecycle cleanup jobs：现有 `upload.expire_sessions` 和 `file.cleanup_unreferenced_blobs` 加上新增 `file.cleanup_expired_trash` 已覆盖原验收中的过期上传、blob 清理和回收站清理。新增任务按删除批次根节点扫描并锁定子树，删除版本和节点、释放容量、扣减 blob 引用、写入搜索删除事件与系统审计；迁移 head 更新为 `20260731_0013`，Celery beat、Windows Compose 环境、Prometheus 指标、SQLite 回归测试和真实 PostgreSQL Docker 集成测试均已同步。随后已按编号完成 `BE-027` metrics/tracing 和 `BE-028` Windows Docker Compose 正式部署门禁。
 
