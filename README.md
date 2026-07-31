@@ -1,6 +1,6 @@
 # 企业网盘
 
-企业网盘后端工程，当前项目版本为 `0.4.0`，目标是实现一个可试点上线的企业级文件管理服务。项目以《企业网盘开发者技术计划书.md》为技术基线，优先保障文件元数据、对象存储、权限、审计、搜索和异步任务之间的一致性。
+企业网盘工程，当前已实现的代码为版本 `0.4.0` 后端，目标是形成可试点上线的企业级文件管理服务；后续已规划 Rust 桌面客户端、Web 用户端与管理后台、企业身份和规模化治理。项目以《企业网盘开发者技术计划书.md》为技术基线，优先保障文件元数据、对象存储、权限、审计、搜索和异步任务之间的一致性。
 
 ## 技术基线
 
@@ -17,6 +17,8 @@
 - Docker Desktop（WSL2 / Linux containers）
 - Docker Compose v2
 - Compose 内 Nginx gateway
+- Rust stable、Cargo workspace、Tauri 2（二期桌面客户端）
+- TypeScript、React、Vite、OpenAPI 生成 client、Playwright（Web 用户端与管理后台）
 
 ## 一期范围
 
@@ -27,6 +29,28 @@
 - 内部分享、外链分享、提取码、过期、次数限制、撤销。
 - 预览 Worker、搜索索引 Worker、审计 outbox dispatcher。
 - Docker Compose 本地开发环境、Windows 11 Docker 正式部署、自动化备份/校验/隔离恢复、Alembic migration、CI 质量门禁。
+
+## 二期 Rust 桌面客户端
+
+当前仓库尚无桌面客户端代码。桌面端已正式纳入 Sprint 7 和 Sprint 8，目标版本为 `0.5.0`，采用 Rust stable、Cargo workspace 和 Tauri 2，Windows 11 优先交付。
+
+- Rust 负责 API client、设备会话、同步状态机、本地 SQLite 索引、文件系统监听、上传下载队列、系统凭据存储和更新签名校验。
+- 首个 Alpha 提供登录、空间与目录浏览、上传下载队列、同步目录选择、暂停/继续/取消、离线元数据和任务栏托盘。
+- 双向同步依赖后端先补齐设备会话、增量变更游标、删除 tombstone、版本前置条件和幂等客户端操作 ID。
+- 冲突保留双方内容并生成冲突副本，下载采用临时文件、hash 校验和原子替换，默认不跟随符号链接或 Windows junction。
+- 首发平台为 Windows 11；签名安装包和更新验签稳定后，再推进 macOS 和 Linux。
+
+## 后续产品路线
+
+当前仓库尚无 `frontend/` Web 工程，以下能力已从概念升级为正式 Sprint 和工程任务：
+
+- Sprint 9 / `0.6.0`：文件版本、回收站列表、批量文件操作、内部分享接收端和完整管理 API。
+- Sprint 10 / `0.7.0`：TypeScript + React + Vite Web 用户端与管理后台，覆盖批量操作、分享通知，使用生成的 OpenAPI client 和 Playwright E2E。
+- Sprint 11 / `0.8.0`：登录失败防护、账号锁定、密码与会话管理、OIDC/OAuth 2.1 + PKCE、LDAP 同步及对应用户端/管理端身份页面。
+- Sprint 12 / `0.9.0`：大目录后台化、完整生命周期、OCR、审计分区、Outbox dead-letter、治理页面、备份签名与离线恢复治理。
+- Sprint 13 / `1.0.0`：后端、Web、桌面端统一 UAT、性能、安全、升级回滚和正式发布。
+
+虚拟盘、macOS/Linux 文件提供器、WebDAV、SMB、移动端、在线协同、复杂 DLP、跨地域双活和计费已进入带编号与入口条件的远期 Backlog。
 
 ## 当前状态
 

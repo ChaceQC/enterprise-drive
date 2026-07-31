@@ -1,5 +1,158 @@
 # PROJECT_PROGRESS.md
 
+## 2026-07-31 Docker Desktop 重新安装与基础验证
+
+### 已完成
+
+- 用户已重新安装 Docker Desktop；确认 CLI 位于 `C:/Program Files/Docker/Docker/resources/bin/`。
+- 已确认当前 context 为 `desktop-linux`，Docker client/server 均为 `29.6.2`，daemon 为 Linux `amd64`，Docker Compose 为 `v5.3.1`。
+- 已使用 `.env.windows.example` 执行根目录 `compose.windows.yml` 静态配置校验，配置有效并解析出 15 个默认服务。
+- 已从 `registry.k8s.io` 拉取 `pause:3.10`，创建 Linux 容器并确认状态为 `true running`，随后删除测试容器和镜像，未保留验证资源。
+- 已确认宿主机直接访问 Docker Hub token 接口返回 HTTP 200。
+
+### 版本影响
+
+- 本轮只恢复本机容器运行时并同步验证记录，项目代码版本保持 `0.4.0`，未修改 Compose、镜像、数据库或业务代码。
+
+### 进行中
+
+- 完整项目镜像拉取、Compose 启动、健康检查、备份恢复和全依赖集成门禁尚未执行。
+
+### 阻塞与风险
+
+- 当前 Codex Git Bash 进程继承了 Docker Desktop 安装前的 PATH，直接运行 `docker` 会提示命令不存在；显式加入 Docker `resources/bin` 后 CLI、daemon 和 Compose 均可使用，重启 Codex 终端或应用后应重新确认 PATH。
+- Docker Hub 的 `hello-world` 拉取在 daemon 使用的 `http.docker.internal:3128` 内部代理路径连续出现 `auth.docker.io` EOF；`registry.k8s.io` 拉取和容器运行正常，说明 daemon 与 Linux containers 已恢复，但项目依赖的 Docker Hub 镜像拉取路径仍需处理。
+
+### 下一步
+
+1. 重启或刷新 Codex Git Bash 环境，确认 Docker 安装目录已进入 PATH。
+2. 检查 Docker Desktop 代理、DNS 和 Docker Hub 访问，直到 `docker pull nginx:1.27-alpine` 等项目依赖镜像成功。
+3. 执行完整 Compose 镜像拉取、构建、启动、`/readyz`、Worker/beat、gateway 端口和停止验证。
+4. 补跑真实备份恢复、全依赖集成和 Sprint 6 发布门禁，再正式发布 `v0.4.0`。
+
+### 验证
+
+- `docker context show`：`desktop-linux`。
+- `docker version`：client/server `29.6.2`，server OS `linux`，architecture `amd64`。
+- `docker info`：Operating System `Docker Desktop`。
+- `docker compose version`：`v5.3.1`。
+- `docker compose --env-file .env.windows.example -f compose.windows.yml config --quiet`：通过。
+- `docker compose ... config --services`：15 个默认服务。
+- `registry.k8s.io/pause:3.10`：拉取、运行、检查和清理通过。
+- Docker Hub `hello-world`：daemon 内部代理请求 `auth.docker.io` 返回 EOF，尚待修复。
+
+### 涉及文件
+
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+
+## 2026-07-31 概念缺口补全为正式计划
+
+### 已完成
+
+- 根据“优先补入计划”清单复核 Web 用户端与管理后台、文件版本、批量文件操作、内部分享接收端、登录安全、OIDC/LDAP/SSO 和密码管理，确认这些能力此前仅存在于交互契约、接口示例、模块描述或“后续接入”文字中。
+- 新增 Sprint 9 至 Sprint 13：
+  - Sprint 9 / `0.6.0`：核心产品能力闭环。
+  - Sprint 10 / `0.7.0`：Web 用户端与管理后台。
+  - Sprint 11 / `0.8.0`：身份与账号安全。
+  - Sprint 12 / `0.9.0`：规模化治理与内容能力。
+  - Sprint 13 / `1.0.0`：稳定版发布。
+- 新增 37 个可执行工程任务：`BE-036` 至 `BE-050`、`FE-001` 至 `FE-012`、`OPS-001` 至 `OPS-003`、`QA-001` 至 `QA-002`、`REL-001` 至 `REL-005`，每项均包含依赖、估时和验收。
+- 补齐文件版本列表/下载/回滚、回收站列表、批量删除/移动/恢复/彻底删除、分享给我的、接收人访问和站内通知的后端接口计划。
+- 补齐登录失败限流、阶梯延迟、账号锁定/解锁、用户改密、管理员重置、首次登录强制改密、全会话吊销、OIDC/OAuth 2.1 + PKCE 和 LDAP 同步计划。
+- 补齐 `frontend/` TypeScript + React + Vite 路线，明确 OpenAPI 生成 client、BFF Cookie、CSRF、用户端页面、管理后台页面、Compose 内部 Web 服务和 Playwright E2E。
+- 补齐 Web 批量操作、内部分享通知、账号安全、OIDC/LDAP 身份源管理和生命周期/Outbox 治理页面任务，避免后端能力进入 Sprint 后仍没有对应操作入口。
+- 将大目录后台操作、完整生命周期、OCR、审计分区与外部投递、Outbox dead-letter、备份来源签名/完整包加密、离线副本和跨版本数据迁移纳入 Sprint 12。
+- 将虚拟盘、macOS/Linux 文件提供器、WebDAV、SMB、Kubernetes/systemd、移动端、在线协同、复杂 DLP、跨地域双活和计费升级为带编号、入口条件和验收标准的远期 Backlog。
+- 已同步 `AGENT.md`、`PROJECT_PLAN.md`、`README.md` 和《企业网盘开发者技术计划书.md》。
+
+### 版本影响
+
+- 本轮只补全规划和开发约束，当前代码版本保持 `0.4.0`，不新增数据库 migration、业务 API、前端或客户端代码。
+- `0.5.0` 至 `1.0.0` 为目标路线，不代表对应能力已经实现；实际版本只在代码、测试、文档和发布门禁完成后提升。
+
+### 进行中
+
+- 当前仍处于 Sprint 6 收尾；Sprint 7 之后的桌面、Web、产品闭环、身份和治理任务均为待执行计划。
+
+### 阻塞与风险
+
+- 新路线依赖较多，必须按任务依赖推进，不能让 Web 页面或桌面端先行固化尚未稳定的版本、批量、身份或分享契约。
+- OIDC 和 LDAP 需要真实身份提供商测试环境；正式接入前必须完成 issuer/subject、目录外部 ID、账号冲突和离职禁用策略评审。
+- Web 技术栈只固定主干工具，具体依赖版本和插件必须在 `frontend/` 初始化时重新执行许可证、安全和维护状态检查并锁入项目。
+- `v1.0.0` 仍受 MinIO Critical 基线、真实公网证书、生产告警、周期恢复和完整 UAT 等现有风险约束。
+- 规划补全阶段本机 Docker Desktop 曾被卸载；同日已重新安装并完成 daemon、Linux container 与 Compose 静态配置基础验证，最新状态见上方记录。
+
+### 下一步
+
+1. 先处理 Docker Hub 经 Docker Desktop 内部代理访问时的 EOF，再补跑 Sprint 6 完整容器门禁并正式发布 `v0.4.0`；基础 daemon、Linux container 和 Compose 配置验证已恢复。
+2. 按现有计划推进 Sprint 7/8 Rust 桌面客户端和配套后端同步契约。
+3. 从 `BE-036` 开始补齐 Sprint 9 产品 API，再建立 `frontend/` 并执行 Sprint 10。
+4. 身份、安全和规模治理完成后，执行 Sprint 13 稳定版门禁并发布 `v1.0.0`。
+
+### 验证
+
+- 已检查新增 Sprint、任务编号、依赖关系、验收物、风险和远期 Backlog 均已写入执行计划与完整技术计划。
+- 本轮是文档规划变更，后端运行时、OpenAPI、数据库、Compose 和现有测试行为未发生变化。
+- 规划补全当时因 Docker Desktop 已卸载，未执行容器验证；同日重装后已补做 daemon、Linux container 和 Compose 静态配置检查，完整项目栈、备份恢复与 Testcontainers 仍待后续门禁。
+
+### 涉及文件
+
+- `AGENT.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `README.md`
+- `企业网盘开发者技术计划书.md`
+
+## 2026-07-31 Rust 桌面客户端纳入二期计划
+
+### 已完成
+
+- 检查当前仓库和规划，确认仓库中没有 `desktop/`、桌面应用或同步客户端代码；原完整技术计划只把“完整桌面同步客户端”排除在一期，并笼统列为 P3 二期增强项。
+- 将桌面客户端提升为正式 Sprint 7 和 Sprint 8 路线，目标版本为 `0.5.0`，采用 Rust stable、Cargo workspace 和 Tauri 2，Windows 11 优先，Windows 稳定后再评估 macOS 和 Linux。
+- 明确 Rust 负责 API client、设备会话、同步引擎、本地 SQLite 索引、传输队列、文件系统监听、系统凭据和更新验签；界面层不保存同步事实状态。
+- 明确桌面端开工前的后端依赖：opaque device session、设备列表与吊销、增量变更 cursor、删除 tombstone、版本前置条件、幂等客户端操作 ID 和 cursor 失效错误码。
+- 明确首个 Alpha 范围：登录、空间/目录浏览、上传下载队列、暂停/继续/取消、同步目录选择、离线元数据、任务栏托盘和脱敏诊断导出。
+- 明确双向同步规则：临时文件下载、SHA-256 校验后原子替换、离线操作日志、异常退出恢复、冲突副本、Windows 路径规范、默认不跟随符号链接或 junction、签名安装和更新回退。
+- 已同步 `AGENT.md`、`PROJECT_PLAN.md`、`README.md` 和《企业网盘开发者技术计划书.md》。
+
+### 版本影响
+
+- 本轮只调整规划和开发约束，不新增数据库 migration、业务 API、客户端代码或发布工件，当前项目版本保持 `0.4.0`。
+- Rust 桌面客户端属于向后兼容的新产品能力，首个 Alpha 目标版本为 `0.5.0`；实际版本提升在桌面端和配套后端契约开始交付时执行。
+
+### 进行中
+
+- 桌面客户端尚未开始编码；`desktop/` Cargo workspace、Tauri 应用、设备会话和增量同步 API 均仍待实现。
+
+### 阻塞与风险
+
+- 当前浏览器认证使用 BFF + HttpOnly Cookie Session，Rust 后台同步进程需要独立的 opaque device session，不能直接复制浏览器 Cookie 方案。
+- 当前文件 API 适合交互式浏览与传输，但缺少增量变更日志、删除 tombstone 和版本前置条件，直接开始双向同步会产生全量轮询、漏删除或静默覆盖风险。
+- Windows 大小写折叠、保留设备名、尾随点/空格、长路径、文件锁和 reparse point 必须在统一 Rust 平台适配层处理。
+- 桌面安装包、自动更新和系统凭据都涉及平台安全能力，必须在 Alpha 阶段就接入签名、验签、吊销和日志脱敏，不能留到正式版前补做。
+
+### 下一步
+
+1. 先完成当前 Sprint 6 收尾和 `v0.4.0` 正式发布。
+2. 创建桌面架构 ADR，固定 Tauri/Rust 模块边界、本地数据模型、同步状态机、冲突策略和 Windows 路径规则。
+3. 先实现后端设备会话与增量变更契约及测试，再建立 `desktop/` Cargo workspace。
+4. 按“Rust API client -> SQLite 本地索引 -> 单向上传下载 -> 本地监听 -> 双向同步 -> 签名发布”顺序推进。
+
+### 验证
+
+- 已检查当前仓库不存在桌面客户端目录或 Rust workspace。
+- 已检查执行计划和完整技术计划中的一期边界、优先级、里程碑、任务拆分、验收物、风险和结论均已同步桌面端路线。
+- 本轮为文档规划变更，不涉及后端运行时、OpenAPI、Compose 或数据库行为。
+
+### 涉及文件
+
+- `AGENT.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `README.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-07-16 Windows 备份恢复自动化完成
 
 ### 已完成

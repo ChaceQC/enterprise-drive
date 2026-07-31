@@ -1,6 +1,6 @@
 # PROJECT_PLAN.md
 
-本文件是《企业网盘开发者技术计划书.md》的执行版摘要。完整架构、数据模型、接口契约、安全策略和里程碑以技术计划书为准。
+本文件是《企业网盘开发者技术计划书.md》的执行版摘要。完整架构、数据模型、接口契约、安全策略和里程碑以技术计划书为准。当前一期以可试点上线的后端为交付目标，后续路线已纳入 Rust 桌面客户端、Web 用户端与管理后台、核心产品闭环、企业身份、安全治理和稳定版发布。
 
 ## 1. 项目目标
 
@@ -22,6 +22,8 @@
 - 搜索：OpenSearch。
 - 异步任务：Celery。
 - 部署：正式目标为 Windows 11 + Docker Desktop（WSL2/Linux containers），使用仓库根 `compose.windows.yml` 编排；Nginx gateway 位于 Compose 内并且是唯一宿主端口入口。
+- 二期桌面客户端：Rust stable、Cargo workspace、Tauri 2，Windows 11 优先；同步、传输、本地索引、文件系统监听、凭据和更新校验使用 Rust 实现。
+- Web 用户端与管理后台：TypeScript、React、Vite、OpenAPI 生成客户端和 Playwright；默认目录为 `frontend/`，使用 BFF Cookie Session 和 CSRF，不在浏览器存储 bearer token。
 
 ## 3. 架构原则
 
@@ -30,6 +32,8 @@
 - 模块之间通过 service 接口协作，禁止跨模块直接访问 repository。
 - 领域事件统一通过 outbox 或任务队列投递。
 - Redis、OpenSearch、对象存储都不是核心事实来源，核心事实以 PostgreSQL 为准。
+- 桌面客户端以服务端变更日志和版本号为远端事实来源，以本地 SQLite 索引和操作日志支持离线恢复；不得以本地目录扫描结果直接覆盖远端状态。
+- Web 与桌面端都只消费服务端权限、错误码、枚举和 OpenAPI 契约；客户端隐藏按钮、缓存状态或本地索引不构成权限和业务事实。
 
 ## 4. 里程碑
 
@@ -101,7 +105,87 @@
 - named volumes、真实 `/readyz` PostgreSQL 探针、Preview Worker 资源限制、定时维护任务和数据库连接池边界。（已完成）`v0.4.0` 已交付 PostgreSQL custom dump、MinIO/Redis/OpenSearch/TLS 停止状态卷归档、CMS 环境文件保护、15 个默认服务实际容器 image ID 与精确 Compose/Git/版本/configuration lineage 门禁、project/逐物理卷 mutex、restricted ACL、隔离 tar 预扫描、`-ForceRestore` rollback archive、失败恢复和不同 Compose project 真实端到端演练；后续继续建设周期恢复演练、备份介质轮换、告警和治理看板。
 - Kubernetes、systemd 降为未来可选迁移方案，不作为当前交付目标。
 
+### Sprint 7：Rust 桌面客户端基础（目标版本 `0.5.0`）
+
+- 在 `desktop/` 建立 Cargo workspace 和 Tauri 2 桌面应用，Windows 11 作为首发平台。
+- Rust crate 按职责拆分为 API client、设备会话、同步引擎、本地 SQLite 索引、传输队列、文件系统适配和系统凭据适配；界面层只消费状态和发送命令。
+- 后端新增桌面设备会话、设备列表与吊销、短期会话轮换；凭据只保存于 Windows Credential Manager 等系统凭据库，不写入普通配置文件或日志。
+- 后端新增按租户和用户隔离的增量变更游标、删除 tombstone、节点/版本前置条件和幂等客户端操作 ID，桌面端不通过高频全量目录轮询实现同步。
+- 桌面 Alpha 首批功能包括登录、空间和目录浏览、上传/下载队列、暂停/继续/取消、任务栏托盘、同步目录选择、离线元数据浏览和错误诊断导出。
+- CI 增加 `cargo fmt --check`、Clippy、Rust 单元/集成测试、依赖许可证与漏洞门禁，以及 Windows 安装包构建。
+
+### Sprint 8：Rust 双向同步与桌面发布
+
+- 实现远端变更拉取、本地文件系统监听、离线操作队列、进程重启恢复和网络恢复后续传。
+- 下载先写同目录临时文件，完成 hash 校验后原子替换；上传复用现有 multipart、秒传和服务端 hash 校验，不绕过权限、审计、容量与限流。
+- 冲突默认保留双方内容并生成带设备名和 UTC 时间的冲突副本，禁止静默覆盖；删除与修改、重命名与移动冲突必须形成可审计结果。
+- Windows 路径层统一处理大小写折叠、保留设备名、尾随点/空格、Unicode normalization、长路径、符号链接和 reparse point；默认不跟随符号链接或 junction。
+- 支持选择性同步、带宽与并发限制、文件忽略规则、失败重试和按文件查看同步状态；虚拟盘占位文件与 Windows Cloud Files API 作为后续增强，不进入首个双向同步版本。
+- 发布经过签名的 Windows 安装包和更新清单，更新包必须验签并支持失败回退；Windows 稳定后再推进 macOS 和 Linux 适配。
+- 验收至少覆盖 10,000 文件初始索引、1 GB 文件中断续传、离线编辑恢复、同文件双端并发修改、目录重命名冲突、异常退出恢复和凭据吊销。
+
+### Sprint 9：核心产品能力闭环（目标版本 `0.6.0`）
+
+- 文件版本：版本列表、指定版本下载、回滚为新版本、版本审计和容量流水。
+- 回收站与批量操作：回收站分页列表、批量删除、移动、恢复和彻底删除；批量结果逐项返回，所有写操作支持 `Idempotency-Key`。
+- 内部分享接收端：“分享给我的”、创建者分享列表、接收人详情与下载、部门/用户组成员变化后的授权重算、撤销和站内通知。
+- 管理 API：用户、部门、用户组、空间、配额、审计、统计、维护任务和导出，所有管理操作写审计并支持 cursor 分页。
+- 完成上述接口的 OpenAPI、迁移、权限、审计、并发、容量和端到端测试，为 Web 与桌面客户端提供稳定契约。
+
+### Sprint 10：Web 用户端与管理后台（目标版本 `0.7.0`）
+
+- 在 `frontend/` 建立 TypeScript + React + Vite 工程，生成并锁定 OpenAPI client，统一 API 错误、Cookie Session、CSRF、request_id 和权限枚举处理。
+- 用户端覆盖登录、空间/目录、批量操作、上传队列、下载、搜索、预览、回收站、文件版本、分享创建、分享给我的、通知中心和账号基础页面。
+- 管理后台覆盖用户、部门、用户组、空间、配额、审计、统计、维护任务状态和导出；管理员路由与后端管理权限同时校验。
+- 构建产物通过 Compose 内部 Web 服务交给 gateway，同一 API 域名下使用 `/api/v1`，Web 服务不直接发布宿主端口。
+- CI 增加 lint、类型检查、单元测试、构建、OpenAPI breaking-change 检查和 Playwright E2E；验收覆盖 Chromium、Firefox、WebKit 和 Windows 常用缩放比例。
+
+### Sprint 11：身份与账号安全（目标版本 `0.8.0`）
+
+- 登录失败按用户与 IP 限流，支持阶梯延迟、临时锁定、管理员解锁和可插拔验证码，并写成功、失败、锁定和解锁审计。
+- 密码管理支持用户改密、管理员重置、首次登录强制改密、全会话吊销、密码策略和受保护的恢复流程。
+- OIDC/OAuth 2.1 + PKCE 支持提供商配置、账号绑定、回调状态校验、单点登录和单点登出；浏览器继续签发服务端 Cookie Session。
+- LDAP 支持只读目录同步、稳定外部 ID 映射、用户/部门/组增量同步、禁用与离职处理、冲突报告和 dry-run。
+- Web 用户端补齐验证码与锁定反馈、用户改密、首次登录强制改密、会话列表/吊销和 OIDC 登录回调；管理后台补齐账号解锁、密码重置、OIDC 提供商、LDAP 目录源、连接测试和同步运行记录。
+- 完成身份提供商故障、重放、账号冲突、会话撤销、CSRF、开放重定向和权限边界安全测试。
+
+### Sprint 12：规模化治理与内容能力（目标版本 `0.9.0`）
+
+- 大目录删除、恢复、彻底删除和权限重算迁移到后台批处理；引入 `deleted_root_id` 或等价冗余状态，并为 closure table 设置规模触发条件。
+- 生命周期覆盖过期分享、预览产物、回收站保留期、临时上传、无引用 blob 和孤儿对象，具备 dry-run、审计、指标、告警和失败重试。
+- 搜索增加图片 OCR、扫描 PDF 和复杂格式抽取适配，限制页数、像素、CPU、内存、临时磁盘和正文体量。
+- 审计增加月分区自动创建、保留与归档、外部日志投递、导出签名；Outbox 增加错误分类、jitter、dead-letter 查询与重放。
+- 备份增加来源签名、可选完整包加密、离线副本轮换、周期隔离恢复记录，以及 Redis/OpenSearch 跨版本快照或迁移流程。
+- 管理后台补齐大目录任务进度、生命周期策略/运行记录、审计归档与外部投递状态、Outbox dead-letter 查询/重放和治理告警页面。
+- 完成真实 PostgreSQL、Redis、MinIO、OpenSearch 的集成矩阵、性能基准、故障注入和治理看板验收。
+
+### Sprint 13：稳定版发布（目标版本 `1.0.0`）
+
+- 后端、Web、Rust 桌面端完成统一版本、契约、安装升级、回滚和发布说明。
+- 执行完整 UAT、性能压测、安全测试、依赖与镜像扫描、备份恢复、桌面升级和浏览器兼容验收。
+- 修复所有阻断试点和正式发布的问题，明确已接受风险、运维责任、告警阈值、RPO/RTO 和支持边界。
+- `dev` 合并 `main`，生成 `v1.0.0` tag、Release、OpenAPI 快照、SBOM、安装包、镜像和验收报告。
+
+### 远期正式 Backlog
+
+- `PLAT-001`：Windows Cloud Files API 虚拟盘占位文件。
+- `PLAT-002`：macOS File Provider 与 Linux 虚拟文件系统适配。
+- `PLAT-003`：WebDAV 网关。
+- `PLAT-004`：SMB 网关。
+- `PLAT-005`：Kubernetes 与 Linux systemd 迁移。
+- `CLIENT-001`：Android、iOS 和移动 Web 产品调研与路线决策。
+- `COLLAB-001`：在线 Office 协同与审批流。
+- `GOV-001`：复杂 DLP、内容分类和 legal hold。
+- `DR-001`：跨地域双活。
+- `BILL-001`：多租户计费。
+
 ## 5. 当前下一步
+
+2026-07-31 本机 Docker Desktop 已重新安装并恢复 `desktop-linux`：Docker client/server `29.6.2`、Linux `amd64` daemon 和 Docker Compose `v5.3.1` 可用；`compose.windows.yml` 使用 `.env.windows.example` 的静态配置校验通过，解析出当前 15 个默认服务。已从 `registry.k8s.io` 拉取小型 Linux 镜像，完成容器创建、运行状态检查、删除和镜像清理。当前 Codex Git Bash 会话仍继承安装前 PATH，需显式加入 Docker `resources/bin` 或重启终端；Docker Hub 匿名令牌请求在 daemon 内部代理路径连续出现 EOF，而宿主机直接请求返回 HTTP 200，因此完整镜像拉取、Compose 启动、备份恢复和全依赖集成门禁仍待修复该网络路径后补跑。
+
+2026-07-31 已把此前仅停留在接口示例、技术建议或“后续接入”的能力补成 Sprint 9 至 Sprint 13、工程任务和远期 Backlog。当前执行顺序保持：先完成 Sprint 6 和 `v0.4.0` 正式发布，再推进 Sprint 7/8 Rust 桌面端；随后按核心产品闭环、Web 用户端与管理后台、身份安全、规模治理、`v1.0.0` 稳定发布推进。桌面端所依赖的版本前置条件和增量变更契约继续优先交付，Web 页面不得反向定义后端业务规则。
+
+2026-07-31 已把 Rust 桌面客户端从笼统的二期增强项提升为 Sprint 7 和 Sprint 8 正式路线。当前仓库仍没有桌面客户端代码；先完成 Sprint 6、发布 `v0.4.0`，随后以 `0.5.0` 为桌面 Alpha 目标建立 `desktop/` Cargo workspace。开工顺序固定为：先提交桌面架构 ADR 和后端设备会话/增量同步契约，再实现 Rust API client、本地索引和单向传输，最后进入双向同步、冲突处理和签名发布。
 
 2026-07-16 的 `v0.4.0` 上线治理阶段已固定 MinIO Server/Client release 与 digest，接入 SBOM、Grype 和新增 Critical 阻断，并交付 `backup`、`backup-verify`、`restore` 自动化。manifest 从 15 个无 profile 默认服务的实际 Compose 容器记录 image ID，并把当前 `compose.windows.yml` SHA-256、Git commit、项目版本、S3 bucket、OpenSearch index 和 `DRIVE_TLS_CERT_NAME` lineage 名称作为精确恢复门禁；备份和恢复同时持有 project 与逐 physical volume mutex。备份根目录还会拒绝卷根、仓库目录/祖先及未预先使用 restricted ACL 的既有非空目录。真实随机 source/target Compose project 演练已验证 PostgreSQL、MinIO、Redis、OpenSearch、TLS、CMS 环境文件、API、Worker、beat、gateway 和宿主端口边界；备份失败会恢复 source 原运行、退出与健康状态，恢复失败会停止 target、删除新卷、清空原空卷，并从受限 ACL rollback archive 还原 `-ForceRestore` 前的原非空卷。
 

@@ -8,18 +8,23 @@
 - 开发和正式部署宿主机统一以 Windows 11 为基线。
 - 正式部署使用 Docker Desktop 的 WSL2 后端和 Linux containers，仓库根目录 `compose.windows.yml` 是唯一正式编排入口；`backend/docker-compose.yml` 仅保留为本地依赖开发清单。
 - 正式部署的 Nginx gateway 运行在 `compose.windows.yml` 中，并且是唯一允许发布宿主端口的服务；默认本机入口由 gateway 发布 API `18080` 和 S3 外部端点 `19000`。公网模式使用 `manage.ps1 -Tls`、ACME HTTP-01 bootstrap、Certbot 证书卷和 TLS Nginx 模板映射 `80/443`；启用前必须配置真实 DNS、受信证书邮箱、HTTPS 外部端点、CORS、Trusted Hosts 和 Secure Cookie，并完成双域名实测。API、Worker、PostgreSQL、Redis、OpenSearch、MinIO API/Console 等内部服务只加入 Compose 网络。
-- 技术基线：Python 3.12+、uv、FastAPI、SQLAlchemy 2.x、PostgreSQL 16+、Redis、S3 兼容对象存储、OpenSearch、Celery。
+- 后端技术基线：Python 3.12+、uv、FastAPI、SQLAlchemy 2.x、PostgreSQL 16+、Redis、S3 兼容对象存储、OpenSearch、Celery。
+- 二期桌面客户端技术基线：Rust stable、Cargo workspace、Tauri 2；Windows 11 优先交付，再评估 macOS 和 Linux。同步引擎、传输队列、本地索引、文件系统监听、凭据存储和更新签名校验必须由 Rust 实现，界面层不得成为同步状态的事实来源。
+- Web 用户端与管理后台技术基线：TypeScript、React、Vite、npm 锁文件、OpenAPI 生成 client 和 Playwright；默认目录为 `frontend/`。浏览器认证继续使用 BFF Cookie Session 和 CSRF，禁止把 session、JWT、refresh token 或等价 bearer 凭据写入 Web Storage。
 - 面向用户的界面文案、说明文字、代码注释、README 和项目文档默认使用中文；确需保留英文时，仅限命令、变量名、协议名、第三方产品名、API 字段和行业通用术语。
 - 文件路径、目录名、对象存储 key、代码导入路径和真实存储文件名统一使用英文、数字、短横线或下划线；中文文件名只作为展示名、标题、备注等单独字段保存和显示。
 - 本项目一期采用模块化单体，不要提前拆成微服务。
 - 代码实现必须服务于《企业网盘开发者技术计划书.md》的架构设计、数据模型、接口契约、安全策略和开发里程碑。
 - 一期目标是可试点上线的企业网盘后端，不要为了演示效果牺牲权限、审计、上传下载一致性和部署安全。
+- Rust 桌面客户端在一期后端与 Sprint 6 上线治理闭环后进入实现，默认目录为 `desktop/`。桌面端开工前必须先固定设备会话、增量变更游标、删除 tombstone、版本前置条件和冲突处理等后端契约，不得通过高频全量扫描模拟同步协议。
+- Web 页面必须使用生成的 TypeScript API client、服务端权限枚举和统一错误码；前端路由守卫、按钮隐藏、浏览器缓存和本地状态只用于体验，不得复制权限、容量、分享、版本或生命周期业务规则。
 - 本地开发服务避免使用常见端口；如无项目内配置，API 默认避免使用 `3000`、`5173`、`8000` 等常见开发端口，端口应放入环境变量或配置文件。
 - 后端依赖和命令必须通过 uv 管理，禁止直接使用系统 Python 或全局 Python 启动项目。
+- Web 依赖通过项目内 npm 与 `package-lock.json` 管理，桌面端依赖通过 Cargo 与 `Cargo.lock` 管理；禁止依赖未记录的全局前端或 Rust 包。
 - 开发、验证或部署过程中发现缺少必要工具或依赖时，应自行安装或补齐，例如 uv、Python 3.12、Docker Desktop、WSL2、Docker Compose v2、GitHub CLI、后端 Python 包和前端包；确因权限、网络或平台限制无法安装时，必须写入 `PROJECT_PROGRESS.md` 并在最终说明中说明原因。
 - 功能实现优先复用成熟库、标准工具、开放协议、框架能力或可信开源实现；只有在现有方案不能满足本项目的安全、审计、一致性、性能、授权协议或运维要求时，才允许自研实现。
 - 不要默认引入或直接依赖云厂商专有 SDK；对象存储、搜索、消息、身份认证等外部能力应优先使用开放协议、兼容接口、标准客户端或可替换的开源适配器。确需临时使用某个 SDK 时，必须封装在 infrastructure 适配层，并在文档中写明替换计划。
-- 引入第三方库或开源代码前必须评估许可证、维护活跃度、安全记录、依赖体量、Python 3.12 和异步生态兼容性，以及与 FastAPI、SQLAlchemy、Celery、Redis、S3/OpenSearch 等现有技术栈的契合度。
+- 引入第三方库或开源代码前必须评估许可证、维护活跃度、安全记录、依赖体量，以及与 Python 3.12/FastAPI 异步生态、Node/React/Vite 工具链或 Rust stable/Tauri/Cargo 生态的兼容性。
 - 不要为了“少装依赖”而手写复杂通用能力，例如权限表达式引擎、限流算法、任务调度、文件类型识别、文档解析、预览转码、搜索查询 DSL、加密签名、审计投递、分页协议或对象存储客户端；能用稳定库和开源实现时优先使用。
 - 对实验性功能，应在保证鲁棒性、可扩展性和可维护性的前提下保持最小可行实现：接口边界清晰、状态可追踪、失败可回滚或可重试、测试覆盖关键分支，不提前堆砌复杂抽象。
 - 如果暂时采用轻量自研实现，必须在 `PROJECT_PROGRESS.md` 或相关 README 中标明原因、适用范围、已知限制和替换为成熟库或开源方案的触发条件。
@@ -53,7 +58,7 @@
 - 提交前必须检查 `git status`，避免混入无关改动。
 - 提交前必须先检查本次改动是否影响 `README.md`、`PROJECT_PLAN.md`、`PROJECT_PROGRESS.md`、`AGENT.md`、《企业网盘开发者技术计划书.md》或子目录 README；受影响文档未同步时，不得先提交代码。
 - 必须维护 `.gitignore`，禁止提交 `.env`、密钥、证书私钥、依赖目录、构建产物、上传文件、对象存储数据目录、数据库数据目录、OpenSearch 数据目录、日志和备份文件。
-- 应提交依赖锁文件，例如后端 `uv.lock`、前端 `package-lock.json` 或其他锁文件。
+- 应提交依赖锁文件，例如后端 `uv.lock`、前端 `package-lock.json`、桌面端 `Cargo.lock` 或其他锁文件。
 - commit message 后续统一使用中文说明。
 - 可以保留 `docs:`、`feat:`、`fix:`、`refactor:`、`test:`、`chore:` 等英文类型前缀，但冒号后的说明必须为中文。
 - 若无法创建 GitHub 仓库、commit 或 push，必须写入 `PROJECT_PROGRESS.md`，并在最终说明中说明原因。
@@ -139,18 +144,19 @@ router -> service -> domain/policy -> repository -> db/infrastructure
 
 每个模块必须交付代码、迁移、测试和文档，不允许只交付接口空壳。
 
-- `auth`：用户登录、密码哈希、服务端 opaque session、HttpOnly Cookie、CSRF、管理员 seed。
+- `auth`：用户登录、密码哈希、服务端 opaque session、HttpOnly Cookie、CSRF、管理员 seed、登录失败防护、密码与会话管理、OIDC。
 - `org`：用户、部门、用户组、成员关系。
 - `space`：空间、空间成员、空间角色、空间配额。
-- `file`：node、file_blob、file_version、文件夹、移动、重命名、回收站、版本。
+- `file`：node、file_blob、file_version、文件夹、移动、重命名、回收站、版本列表/下载/回滚、批量操作。
 - `upload`：upload_session、upload_part、秒传、分片上传、断点续传、幂等 complete、abort。
 - `permission`：ACL、空间角色、继承、拒绝优先、权限缓存、批量权限评估。
-- `share`：内部分享、外链分享、提取码、过期、次数限制、撤销。
+- `share`：内部分享、外链分享、分享给我的、接收人访问、通知、提取码、过期、次数限制、撤销。
 - `preview`：预览任务、转码适配、派生物写入。
 - `search`：索引构建、权限过滤、索引重建、删除同步。
 - `audit`：audit_log、outbox、dispatcher、失败重试。
 - `quota`：quota_account、quota_ledger、并发扣减、回滚、校准任务。
-- `admin`：管理接口、审计查询、统计、分页、筛选、导出。
+- `admin`：用户、组织、空间、配额、身份源、审计、统计、维护、分页、筛选、导出。
+- `frontend`：登录、文件、批量操作、上传、搜索、预览、回收站、版本、分享、通知、账号安全、身份源、生命周期治理和管理后台页面，OpenAPI client、E2E、构建与 gateway 发布。
 
 ## 7. 命名与代码风格
 
