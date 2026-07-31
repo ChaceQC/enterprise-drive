@@ -4,7 +4,7 @@
 
 ### 当前状态
 
-- 已完成 production 配置的应用内 fail-fast 实现、单元回归、完整后端门禁和真实 Docker API/Worker 正负例；当前待提交推送并确认 GitHub Actions。
+- production 配置的应用内 fail-fast 已通过提交 `a52b4ce` 和 GitHub Actions run `30661668693` 闭环。
 
 ### 已完成
 
@@ -22,9 +22,8 @@
 
 ### 下一步
 
-1. 提交并推送 production `Settings` 自校验，等待 GitHub Actions。
-2. 建立 34 个 API route 的身份/租户矩阵。
-3. 增加恶意图片/文档、Range、预签名 URL 和外链穷举动态安全测试。
+1. 建立 34 个 API route 的身份/租户矩阵。
+2. 增加恶意图片/文档、Range、预签名 URL 和外链穷举动态安全测试。
 
 ### 验证
 
@@ -37,6 +36,7 @@
 - 真实 Docker 正例：PostgreSQL、带密码 Redis、2-worker API 和 maintenance Worker 启动成功，24 次 ping、3 个多进程 gauge 文件、真实 `upload.expire_sessions` 任务、API/Worker trace 均通过。
 - Docker smoke 采样峰值为 4 个容器、`53.3%` aggregate Docker CPU、`473.4 MiB` 容器内存和 `3371.8 MiB` Docker/WSL 私有工作集；结束后容器和网络均为 0。
 - 根 `compose.windows.yml` 使用 `--no-build --pull never` 和强 production 配置启动成功；migration、seed、minio-init 均退出 0，API 为 healthy，容器内读取到 `environment=production`、`rate_limit=True`。峰值为 5 个运行容器、`123.3%` aggregate Docker CPU 和 `1462.8 MiB` 容器内存；结束后隔离 project 的容器、网络和卷均为 0。
+- 提交 `a52b4ce fix: 增加生产配置启动自校验` 已推送到 `origin/dev`；GitHub Actions run `30661668693` 的 backend、windows-deployment、minio-image-policy 和两个 MinIO supply-chain job 全部成功，backend job 实际通过新增配置测试、observability Docker smoke 和 runtime/preview 构建。
 
 ### 涉及文件
 

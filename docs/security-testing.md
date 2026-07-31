@@ -78,6 +78,8 @@ DRIVE_LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
 
 真实 Docker 负例确认弱 production 配置在联网前以退出码 1 阻断且不回显传入 secret；正例分别通过独立 PostgreSQL/认证 Redis/API/Worker 可观测性 smoke，以及根 Compose migration、seed、minio-init 和 API healthy 依赖链。两次隔离验证结束后相关容器、网络和卷均为 0。
 
+提交 `a52b4ce` 对应 GitHub Actions run `30661668693`，backend、Windows 部署、镜像策略和两个 MinIO supply-chain job 全部成功；CI 实际执行 188 个后端测试、新增安全扫描、observability Docker smoke 以及 runtime/preview 镜像构建。
+
 ### 首轮验证闭环
 
 - 完整锁文件、同步、Ruff、格式、Bandit、pip-audit、Mypy 和 pytest 门禁全部通过；完整测试结果为 `172 passed, 4 skipped`。
