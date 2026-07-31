@@ -6,7 +6,7 @@
 
 - 已终止此前误启动的备份恢复 integration 进程并删除其 source Compose project；当前运行中容器和残留容器均为 `0`。
 - 此前集成命令把镜像构建、15 服务启动、备份、成功 `backup-verify`、恢复和全栈验收串成一个黑盒任务，出现 CPU 长时间接近满载、Docker Desktop 内存压力和空数据备份长时间无阶段反馈。
-- 当前第三方 Compose 镜像与 Python build base 已按官方引用准备，本地 `enterprise-drive-backend:windows-local` 和 `enterprise-drive-preview:windows-local` 仍需在独立步骤构建；本轮没有再次启动完整 Compose。
+- 当前第三方 Compose 镜像与 Python build base 已按官方引用准备；`enterprise-drive-backend:windows-local` 已使用受限 BuildKit 独立构建完成，`enterprise-drive-preview:windows-local` 待下一独立步骤构建。本轮尚未启动完整 Compose。
 
 ### 已完成
 
@@ -20,21 +20,25 @@
 - integration 固定 `COMPOSE_PARALLEL_LIMIT=1`、API/全部 Worker concurrency `1`，降低各服务 CPU/内存上限，并给 MinIO probe helper 设置独立 CPU/内存/swap/PID 边界。
 - integration 只调用一次 source `up`，随后轮询容器状态，不再用第二次 `compose up --wait` 重复触发启动流程。默认恢复使用 `-NoStartAfterRestore`，只启动 PostgreSQL、Redis、MinIO、OpenSearch 验证数据恢复；完整 target 全栈验收改为显式 `-FullStackRestore`。
 - 已同步 `.env.windows.example`、`AGENT.md`、根/后端 README、Windows 部署文档、执行计划和完整技术计划书。
+- 资源修复已提交为 `b1113d1 fix: 限制备份测试资源并禁止隐式构建` 并推送到 `origin/dev`。
+- GitHub Actions run `30644453844` 的 backend、MinIO image policy 和两个 supply-chain job 全部成功；失败仅在 `windows-deployment / Validate Windows TLS fake Docker guards`。原因是 CI fake `docker.cmd` 仍只匹配旧 bootstrap 命令，新增 `--pull never` 后没有返回 `fake-bootstrap` 容器 ID。
+- `.github/workflows/backend-ci.yml` 已把 fake bootstrap 匹配更新为 `run --detach --no-deps --pull never --service-ports gateway`，并在本机从 workflow 原文提取、执行同一 PowerShell step，全部 TLS fake Docker guard 通过。
 
 ### 进行中
 
-- 复核最终 diff、文档和 Git 状态，准备提交并推送本次资源修复。
+- 提交并推送 CI fixture 修复，随后独立构建 preview 镜像。
 
 ### 阻塞与风险
 
-- 本轮没有运行 15 服务完整 Compose、真实全量 backup/restore integration 或 runtime/preview 镜像构建，避免在修复尚未完成时再次触发高资源任务。
-- `BE-028` 完整门禁仍需要先独立构建两个项目镜像、通过 `-PreflightOnly`，再在明确测试窗口执行；`-FullStackRestore` 不属于默认测试路径。
+- 本轮没有运行 15 服务完整 Compose 或真实全量 backup/restore integration；runtime 镜像已独立构建，preview 镜像仍待构建。
+- `BE-028` 完整门禁仍需要完成 preview 镜像、通过 `-PreflightOnly`，再按低资源 integration 执行；`-FullStackRestore` 不属于默认测试路径。
 - 低压缩等级会增加一定备份体积，但换取更低 CPU 峰值；正式环境应根据备份窗口、磁盘和恢复目标调整，不能取消 helper 容器资源上限。
 
 ### 下一步
 
-1. 复核全部 diff、文档和 `git diff --check`，提交并推送本次资源修复。
-2. 后续单独构建 runtime/preview 镜像，先运行 integration `-PreflightOnly`；只有在用户明确开始完整门禁后才运行受限 integration 和显式 `-FullStackRestore`。
+1. 提交并推送 CI fake Docker fixture 修复，确认新 run 不再在 TLS bootstrap 匹配处失败。
+2. 使用 BuildKit 资源上限独立构建 preview 镜像，然后运行 integration `-PreflightOnly`。
+3. preflight 通过后运行默认低资源 integration；完整 target 全栈验收继续使用显式 `-FullStackRestore`。
 
 ### 验证
 
@@ -45,6 +49,8 @@
 - integration `-PreflightOnly`：最近一次约 `3.1s` 内准确报告缺少 `enterprise-drive-backend:windows-local` 和 `enterprise-drive-preview:windows-local`，执行前后运行中/全部容器数均为 `0`。
 - 受限真实 Docker helper：容器内 cgroup 为 `cpu.max=50000 100000`、`memory.max=536870912`、`pids.max=128`，与默认 `0.50 CPU / 512m / 128 PIDs` 一致。
 - 真实 64 KiB 临时卷使用新归档路径生成 `449` 字节 gzip 文件并通过隔离 tar 安全校验，归档加校验耗时约 `3.78s`；临时卷、目录和容器已清理。
+- runtime 镜像使用 BuildKit `--resource memory=2g --resource cpu-quota=100000` 独立构建成功，用时约 `50.7s`；镜像 ID 为 `sha256:782beca9aa4708b8912a1b4487b4a9c1350220549a1898a824287f6fc8b75677`，大小 `108031695` 字节。
+- 已从 `.github/workflows/backend-ci.yml` 原文提取并本地执行 `Validate Windows TLS fake Docker guards` step，结果通过。
 - 当前 `docker ps` 和 `docker ps -a`：容器数均为 `0`。
 
 ### 涉及文件
@@ -61,6 +67,7 @@
 - `PROJECT_PLAN.md`
 - `PROJECT_PROGRESS.md`
 - `企业网盘开发者技术计划书.md`
+- `.github/workflows/backend-ci.yml`
 
 ## 2026-07-31 BE-027 暂停与恢复收尾
 
