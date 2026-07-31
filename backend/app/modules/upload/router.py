@@ -14,7 +14,9 @@ from app.api.deps import (
     get_rate_limiter,
     get_storage_adapter,
 )
+from app.api.errors import ApiError
 from app.core.config import Settings, get_settings
+from app.core.metrics import record_upload_failure, record_upload_session
 from app.db.session import get_db_session
 from app.infrastructure.rate_limit.base import RateLimiter
 from app.infrastructure.storage.base import StorageAdapter
@@ -103,23 +105,32 @@ async def init_upload(
     rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
     service: Annotated[UploadService, Depends(get_upload_service)],
 ) -> InitUploadResponse:
-    await enforce_rate_limit(
-        settings=settings,
-        rate_limiter=rate_limiter,
-        current_user=current_user,
-        action="upload.init",
-    )
-    return await service.init_upload(
-        current_user=current_user,
-        space_id=request.space_id,
-        parent_id=request.parent_id,
-        file_name=request.file_name,
-        size_bytes=request.size_bytes,
-        content_hash=request.content_hash,
-        hash_algo=request.hash_algo,
-        mime_type=request.mime_type,
-        audit_context=build_audit_context(http_request),
-    )
+    try:
+        await enforce_rate_limit(
+            settings=settings,
+            rate_limiter=rate_limiter,
+            current_user=current_user,
+            action="upload.init",
+        )
+        response = await service.init_upload(
+            current_user=current_user,
+            space_id=request.space_id,
+            parent_id=request.parent_id,
+            file_name=request.file_name,
+            size_bytes=request.size_bytes,
+            content_hash=request.content_hash,
+            hash_algo=request.hash_algo,
+            mime_type=request.mime_type,
+            audit_context=build_audit_context(http_request),
+        )
+    except ApiError as exc:
+        record_upload_failure(stage="init", reason=exc.code)
+        raise
+    except Exception:
+        record_upload_failure(stage="init", reason="internal_error")
+        raise
+    record_upload_session(mode=response.mode, outcome="created")
+    return response
 
 
 @router.get("/{session_id}", response_model=UploadSessionStatusResponse)
@@ -143,18 +154,25 @@ async def presign_upload_part(
     rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
     service: Annotated[UploadService, Depends(get_upload_service)],
 ) -> UploadPartUrlResponse:
-    await enforce_rate_limit(
-        settings=settings,
-        rate_limiter=rate_limiter,
-        current_user=current_user,
-        action="upload.part_presign",
-        resource_key=f"session:{session_id}",
-    )
-    return await service.presign_upload_part(
-        current_user=current_user,
-        session_id=session_id,
-        part_no=part_no,
-    )
+    try:
+        await enforce_rate_limit(
+            settings=settings,
+            rate_limiter=rate_limiter,
+            current_user=current_user,
+            action="upload.part_presign",
+            resource_key=f"session:{session_id}",
+        )
+        return await service.presign_upload_part(
+            current_user=current_user,
+            session_id=session_id,
+            part_no=part_no,
+        )
+    except ApiError as exc:
+        record_upload_failure(stage="part_presign", reason=exc.code)
+        raise
+    except Exception:
+        record_upload_failure(stage="part_presign", reason="internal_error")
+        raise
 
 
 @router.post("/{session_id}/complete", response_model=CompleteUploadResponse)
@@ -165,12 +183,21 @@ async def complete_upload(
     current_user: Annotated[User, Depends(get_current_user)],
     service: Annotated[UploadLifecycleService, Depends(get_upload_lifecycle_service)],
 ) -> CompleteUploadResponse:
-    return await service.complete_upload(
-        current_user=current_user,
-        session_id=session_id,
-        parts=request.parts,
-        audit_context=build_audit_context(http_request),
-    )
+    try:
+        response = await service.complete_upload(
+            current_user=current_user,
+            session_id=session_id,
+            parts=request.parts,
+            audit_context=build_audit_context(http_request),
+        )
+    except ApiError as exc:
+        record_upload_failure(stage="complete", reason=exc.code)
+        raise
+    except Exception:
+        record_upload_failure(stage="complete", reason="internal_error")
+        raise
+    record_upload_session(mode="multipart", outcome="completed")
+    return response
 
 
 @router.post("/{session_id}/abort", response_model=AbortUploadResponse)
@@ -180,8 +207,17 @@ async def abort_upload(
     current_user: Annotated[User, Depends(get_current_user)],
     service: Annotated[UploadLifecycleService, Depends(get_upload_lifecycle_service)],
 ) -> AbortUploadResponse:
-    return await service.abort_upload(
-        current_user=current_user,
-        session_id=session_id,
-        audit_context=build_audit_context(http_request),
-    )
+    try:
+        response = await service.abort_upload(
+            current_user=current_user,
+            session_id=session_id,
+            audit_context=build_audit_context(http_request),
+        )
+    except ApiError as exc:
+        record_upload_failure(stage="abort", reason=exc.code)
+        raise
+    except Exception:
+        record_upload_failure(stage="abort", reason="internal_error")
+        raise
+    record_upload_session(mode="multipart", outcome="aborted")
+    return response

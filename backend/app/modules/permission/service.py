@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
+from app.core.metrics import instrument_permission_decision
 from app.modules.org.service import OrgService
 from app.modules.permission.actions import (
     ACTION_DELETE,
@@ -65,6 +66,7 @@ class PermissionService:
         self.repository = repository
         self.org_service = org_service
 
+    @instrument_permission_decision(scope="space")
     async def can_access_space(
         self,
         *,
@@ -84,6 +86,7 @@ class PermissionService:
             return False
         return action in SPACE_ROLE_ACTIONS.get(member.role, frozenset())
 
+    @instrument_permission_decision(scope="node")
     async def can_access_node(
         self,
         *,
@@ -133,6 +136,7 @@ class PermissionService:
             user_id=user_id,
         )
 
+    @instrument_permission_decision(scope="node_batch")
     async def batch_check_nodes(
         self,
         *,

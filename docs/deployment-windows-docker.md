@@ -74,6 +74,8 @@ docker info --format '{{.OSType}}'
 
 两个入口都由同一个 `gateway` 容器发布。MinIO、API 等内部服务本身不配置宿主端口。
 
+5 个 Celery Worker 会在各自容器内监听 `9100` 指标端口，但该端口只通过 Compose `expose` 提供给内部监控网络，不发布到 Windows 宿主。API `/metrics` 聚合 API Uvicorn worker；Worker task/preview/维护指标必须按 `worker-audit`、`worker-permission`、`worker-search`、`worker-maintenance` 和 `worker-preview` 分别抓取。
+
 默认 `.env.windows.example` 把两个入口绑定到 `127.0.0.1`。需要局域网访问时，才把 `DRIVE_GATEWAY_BIND` 和 `DRIVE_STORAGE_GATEWAY_BIND` 改为 `0.0.0.0`，同时把 S3 外部端点改成客户端可解析的 Windows 主机名或 IP、收紧 CORS/Trusted Hosts，并只为 gateway 的两个端口配置 Windows 防火墙规则。
 
 公网域名目标：
@@ -148,6 +150,15 @@ DRIVE_DATABASE_POOL_TIMEOUT_SECONDS=10
 DRIVE_REDIS_URL=redis://:PASSWORD@redis:6379/0
 DRIVE_CELERY_BROKER_URL=redis://:PASSWORD@redis:6379/1
 DRIVE_CELERY_RESULT_BACKEND=redis://:PASSWORD@redis:6379/2
+DRIVE_SERVICE_NAME=enterprise-drive-api
+DRIVE_TRACING_ENABLED=true
+DRIVE_TRACING_SAMPLE_RATIO=0.1
+DRIVE_TRACING_EXPORTER=none
+DRIVE_TRACING_OTLP_ENDPOINT=
+DRIVE_TRACING_OTLP_HEADERS={}
+DRIVE_TRACING_EXPORT_TIMEOUT_SECONDS=10.0
+DRIVE_METRICS_DATABASE_REFRESH_ENABLED=true
+DRIVE_METRICS_DATABASE_REFRESH_TIMEOUT_SECONDS=1.0
 DRIVE_OPENSEARCH_URL=http://opensearch:9200
 DRIVE_S3_ENDPOINT_URL=http://minio:9000
 DRIVE_S3_PUBLIC_ENDPOINT_URL=http://localhost:19000
@@ -186,6 +197,15 @@ CERTBOT_EMAIL=ops@example.com
 - 外部端点不使用 `/s3` 等 base path。MinIO client 和 SigV4 会把 Host、路径、查询参数纳入签名，路径前缀重写会导致签名不匹配。
 - gateway 转发存储请求时必须保留原始 Host、查询字符串、HTTP 方法和请求体。
 - MinIO Console 不对宿主机发布；运维应通过容器内 CLI 或受控管理流程进行。
+
+### 指标、日志与 tracing
+
+- API `/metrics` 只暴露 API 进程内的 HTTP 请求数/延迟、上传、下载、权限判断、Outbox 状态和搜索索引延迟指标。HTTP 标签使用完整路由模板，避免原始 URL、路径参数、用户/租户 ID、request_id 或 token 形成高基数。
+- API 默认 `DRIVE_API_WORKERS=2`，通过 `PROMETHEUS_MULTIPROC_DIR=/tmp/enterprise-drive/prometheus` 聚合。后端 runtime entrypoint 在容器每次启动前清理旧 metric `.db` 文件，然后 `exec` 原 API/migration/seed/Worker/beat 命令；在线 worker 不执行目录清理。
+- Worker 是独立容器，各自内部 `9100` 端口只提供本容器的 `worker_tasks_total`、`worker_task_duration_seconds`、预览失败和维护任务指标。后续 Prometheus Server 必须把 5 个 Worker 配成 5 个 scrape target，不能假设 API `/metrics` 会跨容器聚合。
+- JSON 日志自动带 `service`、`env`、`request_id`、`task_id`、`trace_id`、`span_id`；HTTP 请求结束日志包含 route/method/status/latency，Celery task 结束日志包含 task/queue/status/latency。
+- OpenTelemetry exporter 默认 `none`，不会向外部发送 span。生产接入 collector 时使用 `DRIVE_TRACING_EXPORTER=otlp_http`，把 `DRIVE_TRACING_OTLP_ENDPOINT` 设为完整 traces endpoint，例如 `http://otel-collector:4318/v1/traces`。`DRIVE_TRACING_OTLP_HEADERS` 必须是 JSON 对象，认证信息只放在未提交的 `.env.windows` 或受控 secret 管理中。
+- `outbox_pending_total` 和 `search_index_lag_seconds` 在 API scrape 时以短超时刷新。PostgreSQL 不可用时 `/metrics` 仍返回已有进程指标，但数据库 gauge 可能短暂保留上次成功值。
 
 ## 5. PowerShell 管理入口
 
@@ -625,7 +645,27 @@ docker compose -f compose.windows.yml --env-file .env.windows logs --no-color --
 ```powershell
 Invoke-WebRequest http://localhost:18080/healthz
 Invoke-WebRequest http://localhost:18080/readyz
+Invoke-WebRequest http://localhost:18080/metrics
 ```
+
+Worker 指标从 Compose 网络内检查，不临时发布宿主端口：
+
+```powershell
+docker compose -f compose.windows.yml --env-file .env.windows `
+    exec worker-maintenance `
+    python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:9100/metrics', timeout=3).read().decode())"
+```
+
+隔离的真实 Docker 可观测性 smoke：
+
+```powershell
+Set-Location backend
+uv run python scripts/smoke_observability_docker.py `
+    --image enterprise-drive-backend:windows-local
+Set-Location ..
+```
+
+该脚本使用真实 PostgreSQL、Redis、2-worker API 和 maintenance Worker，验证多进程聚合、Outbox/Search gauge、真实 Celery task 和 request/task/trace 日志，并自动清理临时容器和网络。
 
 对象存储应通过真实预签名 PUT/GET 集成测试验证 `http://localhost:19000`，不能只访问 MinIO 根路径判断成功。
 

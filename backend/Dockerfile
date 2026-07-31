@@ -47,11 +47,11 @@ COPY --chown=app:app scripts ./scripts
 
 USER app
 
-EXPOSE 18080
+EXPOSE 18080 9100
 
 STOPSIGNAL SIGTERM
 
-ENTRYPOINT ["/usr/bin/tini", "--"]
+ENTRYPOINT ["/usr/bin/tini", "--", "python", "-m", "scripts.runtime_entrypoint"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "18080"]
 
 FROM runtime-base AS runtime

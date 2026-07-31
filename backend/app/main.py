@@ -12,6 +12,7 @@ from app.api.v1.router import router as api_v1_router
 from app.core.config import Settings, get_settings
 from app.core.logging import configure_logging
 from app.core.metrics import register_metrics_route
+from app.core.tracing import instrument_fastapi_app
 from app.health import register_health_routes
 
 logger = logging.getLogger("enterprise_drive")
@@ -28,7 +29,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = app_settings
 
-    app.add_middleware(RequestIdMiddleware, header_name=app_settings.request_id_header)
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=app_settings.trusted_hosts)
     app.add_middleware(
         CORSMiddleware,
@@ -37,11 +37,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+    app.add_middleware(RequestIdMiddleware, header_name=app_settings.request_id_header)
 
     register_exception_handlers(app)
     register_health_routes(app, app_settings)
-    register_metrics_route(app)
+    register_metrics_route(app, app_settings)
     app.include_router(api_v1_router, prefix=app_settings.api_v1_prefix)
+    instrument_fastapi_app(app, app_settings)
     return app
 
 

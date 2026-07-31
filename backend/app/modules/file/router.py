@@ -14,7 +14,9 @@ from app.api.deps import (
     get_rate_limiter,
     get_storage_adapter,
 )
+from app.api.errors import ApiError
 from app.core.config import Settings, get_settings
+from app.core.metrics import record_download_request
 from app.db.session import get_db_session
 from app.infrastructure.rate_limit.base import RateLimiter
 from app.infrastructure.storage.base import StorageAdapter
@@ -219,19 +221,31 @@ async def create_download_url(
     rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
     service: Annotated[FileDownloadService, Depends(get_file_download_service)],
 ) -> FileDownloadUrlResponse:
-    await enforce_rate_limit(
-        settings=settings,
-        rate_limiter=rate_limiter,
-        current_user=current_user,
-        action="file.download_presign",
-        resource_key=f"node:{node_id}",
-        request=http_request,
-    )
-    return await service.create_download_url(
-        current_user=current_user,
-        node_id=node_id,
-        audit_context=build_audit_context(http_request),
-    )
+    try:
+        await enforce_rate_limit(
+            settings=settings,
+            rate_limiter=rate_limiter,
+            current_user=current_user,
+            action="file.download_presign",
+            resource_key=f"node:{node_id}",
+            request=http_request,
+        )
+        response = await service.create_download_url(
+            current_user=current_user,
+            node_id=node_id,
+            audit_context=build_audit_context(http_request),
+        )
+    except ApiError as exc:
+        record_download_request(
+            channel="internal",
+            outcome="denied" if exc.status_code < 500 else "error",
+        )
+        raise
+    except Exception:
+        record_download_request(channel="internal", outcome="error")
+        raise
+    record_download_request(channel="internal", outcome="allowed")
+    return response
 
 
 @router.get("/{node_id}/preview", response_model=FilePreviewResponse)

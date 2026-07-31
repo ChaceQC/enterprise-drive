@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from uuid import UUID
 
-from app.core.metrics import record_orphan_object_cleanup
+from app.core.worker_metrics import record_orphan_object_cleanup
 from app.infrastructure.storage.base import StorageAdapter, StorageObject
 from app.modules.audit.schemas import AuditContext, AuditEvent
 from app.modules.audit.service import AuditService

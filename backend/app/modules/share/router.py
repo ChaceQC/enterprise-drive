@@ -16,6 +16,7 @@ from app.api.deps import (
 )
 from app.api.errors import ApiError
 from app.core.config import Settings, get_settings
+from app.core.metrics import record_download_request
 from app.core.security import hash_token
 from app.db.session import get_db_session
 from app.infrastructure.rate_limit.base import RateLimiter
@@ -197,27 +198,39 @@ async def create_external_download_url(
         Depends(get_share_external_download_service),
     ],
 ) -> ExternalShareDownloadResponse:
-    await enforce_public_rate_limit(
-        settings=settings,
-        rate_limiter=rate_limiter,
-        action="share.external_download",
-        request=http_request,
-        resource_key="share-download",
-    )
-    await enforce_public_rate_limit(
-        settings=settings,
-        rate_limiter=rate_limiter,
-        action="share.external_download",
-        request=http_request,
-        resource_key=f"share-download-token:{hash_token(request.raw_token)}:node:{request.node_id}",
-    )
-    tenant_id = await auth_service.get_tenant_id_by_slug(request.tenant_slug)
-    if tenant_id is None:
-        raise ApiError("SHARE_NOT_FOUND", "分享不存在", status_code=404)
-    return await service.create_external_download_url(
-        tenant_id=tenant_id,
-        raw_token=request.raw_token,
-        node_id=request.node_id,
-        passcode=request.passcode,
-        audit_context=build_audit_context(http_request),
-    )
+    try:
+        await enforce_public_rate_limit(
+            settings=settings,
+            rate_limiter=rate_limiter,
+            action="share.external_download",
+            request=http_request,
+            resource_key="share-download",
+        )
+        await enforce_public_rate_limit(
+            settings=settings,
+            rate_limiter=rate_limiter,
+            action="share.external_download",
+            request=http_request,
+            resource_key=f"share-download-token:{hash_token(request.raw_token)}:node:{request.node_id}",
+        )
+        tenant_id = await auth_service.get_tenant_id_by_slug(request.tenant_slug)
+        if tenant_id is None:
+            raise ApiError("SHARE_NOT_FOUND", "分享不存在", status_code=404)
+        response = await service.create_external_download_url(
+            tenant_id=tenant_id,
+            raw_token=request.raw_token,
+            node_id=request.node_id,
+            passcode=request.passcode,
+            audit_context=build_audit_context(http_request),
+        )
+    except ApiError as exc:
+        record_download_request(
+            channel="external",
+            outcome="denied" if exc.status_code < 500 else "error",
+        )
+        raise
+    except Exception:
+        record_download_request(channel="external", outcome="error")
+        raise
+    record_download_request(channel="external", outcome="allowed")
+    return response

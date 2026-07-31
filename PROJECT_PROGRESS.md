@@ -1,5 +1,141 @@
 # PROJECT_PROGRESS.md
 
+## 2026-07-31 BE-027 暂停与恢复收尾
+
+### 当前状态
+
+- 此前已按用户要求暂停并保留工作树原状；收到“继续”后恢复 `BE-027` 收尾，暂停期间未执行提交、推送、暂存、重置或清理。
+- 当前分支为 `dev`，HEAD 为 `7caa8cc04c877135aa61c151239dd8f16c66d931`（`feat: 启用 Drive Transfer Protocol v1`）。
+- `dev` 与 `origin/dev` 的 ahead/behind 均为 0；`BE-027` 尚未形成新提交。
+- 恢复时工作树包含 27 个已修改文件和 5 个新增文件，均未暂存。
+- 最终审阅补齐 API/Worker registry 隔离后，当前工作树包含 31 个已修改文件和 6 个新增文件，仍均未暂存。
+
+### 已完成
+
+- `BE-027` 的 HTTP/业务/Worker Prometheus 指标、Uvicorn multiprocess 聚合、JSON 日志关联、FastAPI/Celery OpenTelemetry、运行入口和真实 Docker observability smoke 已实现。
+- 最终 diff 审阅发现 Worker Counter 与 API Counter 虽由不同容器写入，但仍在同一 Python 模块初始化；已拆分 `app.core.metrics` 和 `app.core.worker_metrics`，避免无标签 metric 在 multiprocess mmap 初始化时跨进程角色泄漏，并把 API/Worker 双向隔离加入真实 Docker smoke。
+- 正式 runtime image `enterprise-drive-backend:windows-local` 已构建成功。
+- 最近一次真实 Docker prefork smoke 已验证 2-worker API、PostgreSQL、Redis 和 maintenance Worker；24 次 API ping 全部进入聚合指标，检测到 3 个 API multiprocess gauge 进程文件，API/Worker registry 双向隔离通过，真实 Celery task 状态为 `success`，API 与 Worker 均产生有效 trace ID，临时容器和网络已经清理。
+- README、`AGENT.md`、执行计划、Windows/Preview 部署文档、CI 和技术计划书已随实现同步。
+
+### 最近验证
+
+- 恢复后重新执行完整后端测试：`160 passed, 4 skipped`。
+- `uv lock --check`：通过，解析 102 个包。
+- `uv run ruff check .`：通过。
+- `uv run ruff format --check .`：202 个文件格式通过。
+- `uv run mypy app`：通过，149 个源文件无类型问题。
+- `docker compose --env-file .env.windows.example -f compose.windows.yml config --quiet`：通过。
+- 恢复后执行 `git diff --check`：通过；仅显示 `backend/uv.lock` 的 Git 行尾转换提示，没有空白错误。
+- 最新 Docker smoke：`api_ping_count=24`、`api_metric_process_files=3`、`metric_registry_isolation=passed`、`worker_task_status=success`；API trace ID 为 `7ce22eb62ff2741c276dac1fee1763c9`，Worker trace ID 为 `13079cbfa0098f50df1367a46050c75b`。
+
+### 未完成与风险
+
+- `BE-027` 尚未 commit、push，也尚未取得本提交对应的 `backend-ci` run ID。
+- `BE-028` 的 15 服务真实 Compose 构建、启动、readiness、gateway、Worker/beat、备份与恢复门禁尚未开始。
+
+### 下一步
+
+1. 完整审阅 diff，确认没有混入无关改动后执行：
+
+   ```bash
+   git add .
+   git commit -m "feat: 完成可观测性指标与 tracing"
+   git push origin dev
+   ```
+
+2. 等待并记录本提交对应的 `backend-ci` run ID 和结果；CI 全部通过后，再开始 `BE-028`。
+
+## 2026-07-31 BE-027 metrics/tracing
+
+### 已完成
+
+- 对照技术计划书 21.1 至 21.3 和正式 Compose 进程模型完成真实缺口审计：原实现只有 4 组预览/清理指标，没有 HTTP 指标、OpenTelemetry 初始化、trace 日志关联、上传/下载/权限指标、Worker task 指标、Outbox pending 和搜索索引延迟。
+- 新增 `http_requests_total` 与 `http_request_duration_seconds`；标签使用 HTTP method、完整 FastAPI 路由模板和状态码，未知路由统一为 `unmatched`，不记录原始 URL、路径参数或 `/metrics` 自身。
+- 新增 `upload_sessions_total`、`upload_failures_total`、`download_requests_total` 和 `permission_decision_duration_seconds`，覆盖上传初始化/complete/abort/分片签名、内部/外链下载以及空间、节点和批量权限判断。
+- 新增 `outbox_pending_total{status}` 和 `search_index_lag_seconds`；API 抓取时以短超时查询 PostgreSQL，数据库重启或超时时仍返回已有进程指标。
+- 正式 API 的 2 个 Uvicorn worker 使用 Prometheus multiprocess 目录聚合；新增 runtime entrypoint，只在容器启动前删除该目录中的旧 `.db` metric 文件，避免任一在线 worker 清空其他进程数据。
+- 新增 `worker_tasks_total` 与 `worker_task_duration_seconds`；5 个 Celery Worker 各自在 Compose 内部 `9100` 暴露指标，并记录 task、queue、status 和 duration。API 与 Worker 的独立容器指标不再通过同进程测试伪装成统一 registry。
+- API 指标定义与 Worker/预览/维护指标定义已拆分为独立模块和本地 registry；真实 multiprocess smoke 会双向拒绝跨角色 metric 名称，避免无标签 metric 初始化产生错误抓取面。
+- JSON 日志自动补齐 `service`、`env`、`request_id`、`task_id`、`trace_id`、`span_id`、tenant/user/resource 上下文；HTTP 请求结束日志记录 route、method、status 和 `latency_ms`，Celery task 结束日志记录 task ID、queue、status 和耗时。
+- FastAPI 与 Celery 已接入 OpenTelemetry SDK；采样率可配置，exporter 支持 `none`、Console 和 OTLP/HTTP。默认 `none` 不向外部发送 span，但保留 W3C trace/span 关联；OTLP endpoint、headers 和超时均来自环境变量。
+- 新增隔离的真实 Docker smoke 脚本：自动启动 PostgreSQL 16、Redis、空库 migration、2-worker API 和 maintenance Worker，验证后自动删除容器与网络。
+- `backend-ci` 在 runtime image 构建后执行同一 observability smoke，使 API 多进程和真实 Celery task 指标成为持续门禁。
+- 已同步 `AGENT.md`、根/后端 README、Windows Docker 部署说明、Preview Worker 部署说明、项目计划和技术计划书。
+
+### 版本影响
+
+- 新增向后兼容的指标、日志字段、环境变量和内部 Worker metrics 端口，无数据库 migration、对象存储 key、DTP/1 或现有 HTTP API 破坏性变更。
+- 新增 `opentelemetry-exporter-otlp-proto-http` 与 `opentelemetry-instrumentation-celery`，`uv.lock` 解析包数量从 97 增至 102；项目版本保持 `0.4.0`。
+- `backend/Dockerfile` runtime entrypoint 由直接启动命令调整为先准备 Prometheus multiprocess 目录再 `exec` 原命令；migration、seed、API、Worker 和 beat 仍复用同一镜像和原命令语义。
+
+### 进行中
+
+- 按工程编号进入 `BE-028`，使用根 `compose.windows.yml` 对全部 15 个默认服务执行构建、启动、readiness、gateway、Worker/beat、备份与回滚门禁。
+
+### 阻塞与风险
+
+- 当前仓库没有内置 Prometheus Server、Alertmanager 或治理看板；API 和各 Worker 已提供抓取面，告警规则、连续失败阈值、目标发现和看板属于 `BE-035`。
+- Worker 指标只在 Compose 内部 `9100` 暴露，不发布宿主端口；监控系统必须分别抓取 `worker-audit`、`worker-permission`、`worker-search`、`worker-maintenance` 和 `worker-preview`，不能只抓 API `/metrics`。
+- 默认 tracing exporter 为 `none`；生产需要先部署受控 OTLP collector，再配置 endpoint、认证 header、采样率、保留期和敏感属性策略。
+- Outbox/Search gauge 是抓取时的最佳努力数据库快照；数据库不可用时不会阻塞全部 `/metrics`，但 gauge 可能短暂保留上次成功值。
+
+### 下一步
+
+1. 提交并推送 `BE-027`，确认 GitHub Actions 完整通过。
+2. 执行 `BE-028` 全 15 服务真实 Compose 构建、启动、gateway、readiness、Worker/beat 和备份恢复验证。
+3. 在 `BE-035` 增加 Prometheus scrape 配置、告警规则、失败阈值和治理看板；在 `BE-029` 输出正式性能基准。
+
+### 验证
+
+- `uv run pytest`：160 passed，4 skipped。
+- `uv run ruff check .`：通过。
+- `uv run ruff format --check .`：202 个文件格式通过。
+- `uv run mypy app`：通过，149 个源文件无类型问题。
+- `uv lock --check`：通过，解析 102 个包。
+- `docker compose --env-file .env.windows.example -f compose.windows.yml config --quiet`：通过；5 个 Worker 均解析出内部 `DRIVE_WORKER_METRICS_PORT=9100`，API/Worker 均解析出 tracing 与 multiprocess 配置。
+- 真实 Docker 正式 runtime image：`enterprise-drive-backend:windows-local` 构建成功，包含 OTLP/HTTP 与 Celery instrumentation 依赖。
+- `uv run python scripts/smoke_observability_docker.py --image enterprise-drive-backend:windows-local`：通过；真实 PostgreSQL、Redis、Alembic、2-worker API 和 maintenance Worker 均正常。
+- Docker smoke 结果：24 次 `/api/v1/ping` 聚合为 24，API 指标目录在注入测试样本前检测到 3 个 `gauge_livemostrecent` multiprocess 文件；API 抓取面不含 Worker/预览/维护指标，Worker 抓取面不含 API/上传下载/权限/Outbox/Search 指标。使用生产同款 Celery prefork、`worker_ready` 后启动 9100 指标端点，真实 `upload.expire_sessions` task 为 success；API 与 Worker JSON 日志均包含有效 trace ID/span ID，临时容器和网络已清理。
+
+### 涉及文件
+
+- `backend/app/api/middleware.py`
+- `backend/app/core/config.py`
+- `backend/app/core/logging.py`
+- `backend/app/core/metrics.py`
+- `backend/app/core/tracing.py`
+- `backend/app/core/worker_metrics.py`
+- `backend/app/core/worker_observability.py`
+- `backend/app/infrastructure/queue/celery_app.py`
+- `backend/app/modules/file/blob_cleanup.py`
+- `backend/app/modules/upload/router.py`
+- `backend/app/modules/file/router.py`
+- `backend/app/modules/file/trash_cleanup.py`
+- `backend/app/modules/share/router.py`
+- `backend/app/modules/permission/service.py`
+- `backend/app/workers/preview_tasks.py`
+- `backend/scripts/runtime_entrypoint.py`
+- `backend/scripts/smoke_observability_docker.py`
+- `backend/tests/test_app.py`
+- `backend/tests/test_observability.py`
+- `backend/tests/test_preview_worker.py`
+- `backend/Dockerfile`
+- `backend/pyproject.toml`
+- `backend/uv.lock`
+- `.github/workflows/backend-ci.yml`
+- `.env.windows.example`
+- `backend/.env.example`
+- `compose.windows.yml`
+- `AGENT.md`
+- `README.md`
+- `backend/README.md`
+- `docs/deployment-windows-docker.md`
+- `docs/deployment-preview-worker.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-07-31 Drive Transfer Protocol v1
 
 ### 已完成

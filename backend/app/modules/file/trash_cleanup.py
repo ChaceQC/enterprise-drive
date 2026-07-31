@@ -5,8 +5,8 @@ from datetime import datetime, timedelta
 from uuid import UUID
 
 from app.api.errors import ApiError
-from app.core.metrics import record_trash_cleanup, record_trash_cleanup_released_bytes
 from app.core.security import utc_now
+from app.core.worker_metrics import record_trash_cleanup, record_trash_cleanup_released_bytes
 from app.modules.audit.schemas import AuditContext, AuditEvent
 from app.modules.audit.service import AuditService
 from app.modules.file.models import FileVersion, Node

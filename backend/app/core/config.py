@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
     app_name: str = "企业网盘"
     app_version: str = "0.4.0"
+    service_name: str = "enterprise-drive-api"
     environment: Literal["local", "test", "staging", "production"] = "local"
     debug: bool = False
     app_port: int = 18080
@@ -25,6 +26,16 @@ class Settings(BaseSettings):
 
     request_id_header: str = "X-Request-ID"
     log_level: str = "INFO"
+    metrics_database_refresh_enabled: bool = True
+    metrics_database_refresh_timeout_seconds: float = Field(default=1.0, gt=0)
+    worker_metrics_port: int = Field(default=0, ge=0, le=65535)
+    tracing_enabled: bool = True
+    tracing_sample_ratio: float = Field(default=0.1, ge=0, le=1)
+    tracing_exporter: Literal["none", "console", "otlp_http"] = "none"
+    tracing_otlp_endpoint: str | None = None
+    tracing_otlp_headers: dict[str, str] = Field(default_factory=dict)
+    tracing_export_timeout_seconds: float = Field(default=10.0, gt=0)
+    tracing_excluded_urls: str = "/healthz,/readyz,/metrics"
 
     trusted_hosts: list[str] = Field(
         default_factory=lambda: ["localhost", "127.0.0.1", "testserver"]

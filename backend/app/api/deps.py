@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.errors import ApiError
 from app.core.config import Settings, get_settings
+from app.core.logging import update_log_context
 from app.core.transfer_protocol import (
     DRIVE_TRANSFER_PROTOCOL_HEADER,
     DRIVE_TRANSFER_PROTOCOL_V1,
@@ -39,7 +40,7 @@ async def get_current_user(
     if session_token is None:
         raise ApiError("AUTH_REQUIRED", "请先登录", status_code=401)
 
-    return await AuthService(
+    current_user = await AuthService(
         repository=AuthRepository(session),
         settings=settings,
     ).authenticate_session(
@@ -47,6 +48,11 @@ async def get_current_user(
         csrf_token=_csrf_token_from_header(request=request, settings=settings),
         require_csrf=request.method.upper() in _CSRF_METHODS,
     )
+    update_log_context(
+        tenant_id=str(current_user.tenant_id),
+        user_id=str(current_user.id),
+    )
+    return current_user
 
 
 _CSRF_METHODS = {"POST", "PUT", "PATCH", "DELETE"}

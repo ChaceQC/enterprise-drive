@@ -183,7 +183,9 @@
 
 ## 5. 当前下一步
 
-2026-07-31 已完成 `BE-026` lifecycle cleanup jobs：现有 `upload.expire_sessions` 和 `file.cleanup_unreferenced_blobs` 加上新增 `file.cleanup_expired_trash` 已覆盖原验收中的过期上传、blob 清理和回收站清理。新增任务按删除批次根节点扫描并锁定子树，删除版本和节点、释放容量、扣减 blob 引用、写入搜索删除事件与系统审计；迁移 head 更新为 `20260731_0013`，Celery beat、Windows Compose 环境、Prometheus 指标、SQLite 回归测试和真实 PostgreSQL Docker 集成测试均已同步。紧接着按编号审计并完成 `BE-027` metrics/tracing 接入缺口。
+2026-07-31 已完成 `BE-027` metrics/tracing：API 新增完整路由模板维度的请求计数与延迟、上传会话/失败、下载、权限判断、Outbox 状态和搜索索引延迟指标；正式 2-worker Uvicorn 配置通过 `PROMETHEUS_MULTIPROC_DIR` 聚合，运行入口只在容器启动时清理旧 metric 文件。5 个 Celery Worker 分别在 Compose 内部 `9100` 暴露 task 数量、状态和耗时，避免把独立容器指标误算到 API registry。JSON 日志自动关联 service/env/request_id/task_id/trace_id/span_id，FastAPI 与 Celery 已接入 OpenTelemetry，支持 `none`、Console 和 OTLP/HTTP exporter。真实 Docker smoke 已使用 PostgreSQL、Redis、2 个 API worker 和 maintenance Worker 验证 24 次请求聚合、Outbox/Search gauge、真实 Celery task 和 API/Worker trace 日志；紧接着按编号进入 `BE-028` 正式 15 服务 Compose 全栈门禁。
+
+2026-07-31 已完成 `BE-026` lifecycle cleanup jobs：现有 `upload.expire_sessions` 和 `file.cleanup_unreferenced_blobs` 加上新增 `file.cleanup_expired_trash` 已覆盖原验收中的过期上传、blob 清理和回收站清理。新增任务按删除批次根节点扫描并锁定子树，删除版本和节点、释放容量、扣减 blob 引用、写入搜索删除事件与系统审计；迁移 head 更新为 `20260731_0013`，Celery beat、Windows Compose 环境、Prometheus 指标、SQLite 回归测试和真实 PostgreSQL Docker 集成测试均已同步。随后已按编号完成 `BE-027` metrics/tracing，当前进入 `BE-028` 正式 15 服务 Compose 全栈门禁。
 
 2026-07-31 本机 Docker Desktop 已重新安装并恢复 `desktop-linux`：Docker client/server `29.6.2`、Linux `amd64` daemon 和 Docker Compose `v5.3.1` 可用；`compose.windows.yml` 使用 `.env.windows.example` 静态校验通过并解析出 15 个默认服务。已成功取得 `postgres:16-bookworm` 对应镜像，真实启动 PostgreSQL 容器、通过 `pg_isready`、从空库执行完整 Alembic 链到 `20260731_0013`，并运行回收站清理 PostgreSQL 集成测试；临时容器已删除。Docker Hub 其他项目镜像、完整 Compose 启动、健康检查和备份恢复仍需按 `BE-028` 门禁整体补跑。
 

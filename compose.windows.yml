@@ -11,8 +11,19 @@ x-app-environment: &app-environment
   DRIVE_ENVIRONMENT: "${DRIVE_ENVIRONMENT:-production}"
   DRIVE_DEBUG: "${DRIVE_DEBUG:-false}"
   DRIVE_APP_PORT: "18080"
+  DRIVE_SERVICE_NAME: "${DRIVE_SERVICE_NAME:-enterprise-drive-api}"
   DRIVE_SECRET_KEY: "${DRIVE_SECRET_KEY:?Set DRIVE_SECRET_KEY in .env.windows}"
   DRIVE_LOG_LEVEL: "${DRIVE_LOG_LEVEL:-INFO}"
+  DRIVE_METRICS_DATABASE_REFRESH_ENABLED: "${DRIVE_METRICS_DATABASE_REFRESH_ENABLED:-true}"
+  DRIVE_METRICS_DATABASE_REFRESH_TIMEOUT_SECONDS: "${DRIVE_METRICS_DATABASE_REFRESH_TIMEOUT_SECONDS:-1.0}"
+  DRIVE_TRACING_ENABLED: "${DRIVE_TRACING_ENABLED:-true}"
+  DRIVE_TRACING_SAMPLE_RATIO: "${DRIVE_TRACING_SAMPLE_RATIO:-0.1}"
+  DRIVE_TRACING_EXPORTER: "${DRIVE_TRACING_EXPORTER:-none}"
+  DRIVE_TRACING_OTLP_ENDPOINT: "${DRIVE_TRACING_OTLP_ENDPOINT:-}"
+  DRIVE_TRACING_OTLP_HEADERS: "${DRIVE_TRACING_OTLP_HEADERS:-{}}"
+  DRIVE_TRACING_EXPORT_TIMEOUT_SECONDS: "${DRIVE_TRACING_EXPORT_TIMEOUT_SECONDS:-10.0}"
+  PROMETHEUS_MULTIPROC_DIR: /tmp/enterprise-drive/prometheus
+  DRIVE_WORKER_METRICS_PORT: "0"
   DRIVE_DATABASE_URL: "${DRIVE_DATABASE_URL:?Set DRIVE_DATABASE_URL in .env.windows}"
   DRIVE_DATABASE_POOL_MODE: "${DRIVE_DATABASE_POOL_MODE:-queue}"
   DRIVE_DATABASE_POOL_SIZE: "${DRIVE_DATABASE_POOL_SIZE:-3}"
@@ -248,7 +259,9 @@ services:
     <<: *app-common
     environment:
       <<: *app-environment
+      DRIVE_SERVICE_NAME: "enterprise-drive-worker-audit"
       DRIVE_DATABASE_POOL_MODE: "null"
+      DRIVE_WORKER_METRICS_PORT: "9100"
     restart: unless-stopped
     depends_on: *app-dependencies
     command:
@@ -261,6 +274,8 @@ services:
       - --loglevel=INFO
       - "--concurrency=${AUDIT_WORKER_CONCURRENCY:-2}"
       - "--max-tasks-per-child=${AUDIT_WORKER_MAX_TASKS_PER_CHILD:-500}"
+    expose:
+      - "9100"
     healthcheck:
       test:
         - CMD
@@ -282,7 +297,9 @@ services:
     <<: *app-common
     environment:
       <<: *app-environment
+      DRIVE_SERVICE_NAME: "enterprise-drive-worker-permission"
       DRIVE_DATABASE_POOL_MODE: "null"
+      DRIVE_WORKER_METRICS_PORT: "9100"
     restart: unless-stopped
     depends_on: *app-dependencies
     command:
@@ -295,6 +312,8 @@ services:
       - --loglevel=INFO
       - "--concurrency=${PERMISSION_WORKER_CONCURRENCY:-2}"
       - "--max-tasks-per-child=${PERMISSION_WORKER_MAX_TASKS_PER_CHILD:-500}"
+    expose:
+      - "9100"
     healthcheck:
       test:
         - CMD
@@ -316,7 +335,9 @@ services:
     <<: *app-common
     environment:
       <<: *app-environment
+      DRIVE_SERVICE_NAME: "enterprise-drive-worker-search"
       DRIVE_DATABASE_POOL_MODE: "null"
+      DRIVE_WORKER_METRICS_PORT: "9100"
     restart: unless-stopped
     depends_on: *app-dependencies
     command:
@@ -329,6 +350,8 @@ services:
       - --loglevel=INFO
       - "--concurrency=${SEARCH_WORKER_CONCURRENCY:-2}"
       - "--max-tasks-per-child=${SEARCH_WORKER_MAX_TASKS_PER_CHILD:-100}"
+    expose:
+      - "9100"
     healthcheck:
       test:
         - CMD
@@ -350,7 +373,9 @@ services:
     <<: *app-common
     environment:
       <<: *app-environment
+      DRIVE_SERVICE_NAME: "enterprise-drive-worker-maintenance"
       DRIVE_DATABASE_POOL_MODE: "null"
+      DRIVE_WORKER_METRICS_PORT: "9100"
     restart: unless-stopped
     depends_on: *app-dependencies
     command:
@@ -363,6 +388,8 @@ services:
       - --loglevel=INFO
       - "--concurrency=${MAINTENANCE_WORKER_CONCURRENCY:-1}"
       - "--max-tasks-per-child=${MAINTENANCE_WORKER_MAX_TASKS_PER_CHILD:-50}"
+    expose:
+      - "9100"
     healthcheck:
       test:
         - CMD
@@ -386,7 +413,9 @@ services:
     build: *preview-build
     environment:
       <<: *app-environment
+      DRIVE_SERVICE_NAME: "enterprise-drive-worker-preview"
       DRIVE_DATABASE_POOL_MODE: "null"
+      DRIVE_WORKER_METRICS_PORT: "9100"
     restart: unless-stopped
     depends_on: *app-dependencies
     tmpfs:
@@ -401,6 +430,8 @@ services:
       - --loglevel=INFO
       - "--concurrency=${PREVIEW_WORKER_CONCURRENCY:-1}"
       - "--max-tasks-per-child=${PREVIEW_WORKER_MAX_TASKS_PER_CHILD:-20}"
+    expose:
+      - "9100"
     healthcheck:
       test:
         - CMD
@@ -420,6 +451,9 @@ services:
 
   beat:
     <<: *app-common
+    environment:
+      <<: *app-environment
+      DRIVE_SERVICE_NAME: "enterprise-drive-beat"
     restart: unless-stopped
     depends_on:
       migration:

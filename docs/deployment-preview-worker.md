@@ -96,11 +96,21 @@ Kubernetes Deployment、Linux systemd 服务可在后续迁移到其他宿主平
 
 ## 监控与告警
 
-`/metrics` 暴露 Prometheus 文本格式指标，当前包括：
+`worker-preview` 在 Compose 内部 `9100` 暴露 Prometheus 文本格式指标，不发布宿主端口。API `/metrics` 不跨容器聚合 Preview Worker；监控系统必须把 `worker-preview:9100` 作为独立 scrape target。当前包括：
 
 ```text
+worker_tasks_total{task="preview.dispatch_outbox",queue="preview",status="..."}
+worker_task_duration_seconds{task="preview.dispatch_outbox",queue="preview"}
 preview_failures_total{status="failed|unsupported",reason="..."}
 orphan_object_cleanup_total{status="scanned|skipped|planned|cleaned|failed"}
+```
+
+容器内检查：
+
+```powershell
+docker compose --env-file .env.windows -f compose.windows.yml `
+    exec worker-preview `
+    python -c "import urllib.request; print(urllib.request.urlopen('http://127.0.0.1:9100/metrics', timeout=3).read().decode())"
 ```
 
 建议至少配置以下告警：

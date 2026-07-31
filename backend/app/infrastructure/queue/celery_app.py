@@ -3,9 +3,13 @@ from __future__ import annotations
 from celery import Celery  # type: ignore[import-untyped]
 
 from app.core.config import Settings, get_settings
+from app.core.logging import configure_logging
+from app.core.worker_observability import configure_worker_observability
 from app.infrastructure.queue.schedule import build_beat_schedule
 
 settings = get_settings()
+configure_logging(settings)
+configure_worker_observability(settings)
 
 
 def _task_annotations(settings: Settings) -> dict[str, dict[str, int | str]]:
@@ -55,4 +59,6 @@ celery_app.conf.update(
     enable_utc=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    worker_hijack_root_logger=False,
+    task_track_started=True,
 )

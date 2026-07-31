@@ -47,6 +47,15 @@ Copy-Item .env.windows.example .env.windows
 
 正式 Compose 中 API 使用受控 SQLAlchemy QueuePool；各 Celery Worker 会覆盖 `DRIVE_DATABASE_POOL_MODE=null`。这是因为当前同步 Celery task 使用 `asyncio.run()` 执行异步服务，不能跨任务事件循环复用 asyncpg 连接池。
 
+### 可观测性
+
+- API `/metrics` 只暴露 API 进程内的 `http_requests_total`、`http_request_duration_seconds`、上传/下载、权限判断、Outbox 和搜索延迟指标。HTTP 标签使用完整路由模板，不使用原始 URL、路径参数、用户/租户 ID 或 token；抓取 `/metrics` 自身不进入 HTTP 请求指标。
+- 正式 Compose 的 API 默认运行 2 个 Uvicorn worker，使用 `PROMETHEUS_MULTIPROC_DIR=/tmp/enterprise-drive/prometheus` 聚合。Docker runtime entrypoint 只在容器启动前清理旧 `.db` metric 文件；运行中的 worker 不清理共享目录。
+- API 与 Celery Worker 是不同容器。`worker-audit`、`worker-permission`、`worker-search`、`worker-maintenance` 和 `worker-preview` 各自在 Compose 内部 `9100` 暴露 `worker_tasks_total`、`worker_task_duration_seconds` 及本进程业务指标，不发布宿主端口。监控系统应按服务分别抓取，不能只抓 API `/metrics`。
+- JSON 日志自动包含 `service`、`env`、`request_id`、`task_id`、`trace_id`、`span_id`、tenant/user/resource 上下文；HTTP 请求结束日志包含 route、method、status、`latency_ms`，Worker 结束日志包含 task、queue、status 和耗时。
+- FastAPI 与 Celery 使用 OpenTelemetry。`DRIVE_TRACING_EXPORTER=none` 是默认值，只生成关联上下文；可改为 `console` 或 `otlp_http`。OTLP/HTTP 使用完整 traces endpoint，例如 `http://otel-collector:4318/v1/traces`；认证 header 通过 JSON 格式的 `DRIVE_TRACING_OTLP_HEADERS` 注入，不写入仓库。
+- 常用配置包括 `DRIVE_SERVICE_NAME`、`DRIVE_TRACING_ENABLED`、`DRIVE_TRACING_SAMPLE_RATIO`、`DRIVE_TRACING_EXPORTER`、`DRIVE_TRACING_OTLP_ENDPOINT`、`DRIVE_TRACING_OTLP_HEADERS`、`DRIVE_TRACING_EXPORT_TIMEOUT_SECONDS`、`DRIVE_METRICS_DATABASE_REFRESH_ENABLED` 和 `DRIVE_METRICS_DATABASE_REFRESH_TIMEOUT_SECONDS`。
+
 ### 备份、校验与隔离恢复
 
 `v0.4.0` 已通过根目录 `deploy/windows/manage.ps1` 提供 `backup`、`backup-verify` 和 `restore`。备份目录必须是仓库外的绝对专用目录，不得是卷根、仓库目录或仓库祖先；若既有目录非空，则必须已经使用本项目 restricted ACL，脚本不会直接重写任意宽范围目录 ACL。正式备份默认使用当前 Windows 用户证书存储中的 CMS 文档加密证书保护 `.env.windows`。建议创建可导出私钥的专用证书，并把 PFX 单独保存在加密离线介质中：
@@ -116,6 +125,17 @@ uv run mypy app
 uv run pytest
 ```
 
+真实 Docker 可观测性 smoke：
+
+```powershell
+uv run python scripts/smoke_observability_docker.py `
+  --image enterprise-drive-backend:windows-local
+```
+
+脚本会创建隔离网络，启动真实 PostgreSQL 16、Redis、空库 migration、2-worker API 和 maintenance Worker；它会验证多进程 HTTP 指标、Outbox/Search gauge、真实 `upload.expire_sessions` Celery task 以及 API/Worker request/task/trace 日志，最后自动删除临时容器和网络。
+
+`backend-ci` 会在 runtime image 构建后运行同一脚本，避免只在同进程单测中验证 API/Worker 指标。
+
 真实 MinIO 集成测试默认跳过，避免普通单元测试依赖外部服务。需要验证对象存储真实行为时，先启动本地 MinIO，再显式设置环境变量：
 
 ```powershell
@@ -133,11 +153,13 @@ uv run pytest tests/test_storage_minio_integration.py -q
 
 - FastAPI 应用入口。
 - 配置加载，统一使用 `DRIVE_` 环境变量前缀。
-- JSON 结构化日志。
-- `X-Request-ID` 中间件。
+- 自动关联 service/env/request_id/task_id/trace_id/span_id 的 JSON 结构化日志。
+- `X-Request-ID`、HTTP route/status/latency 中间件。
 - 统一错误响应。
 - `/healthz` 和 `/readyz` 健康检查。
-- `/metrics` Prometheus 文本指标入口，当前暴露 `preview_failures_total`。
+- API `/metrics` Prometheus 文本指标入口，支持 Uvicorn multiprocess 聚合、HTTP/上传下载/权限/Outbox/Search/预览/清理指标。
+- 5 个 Celery Worker 的内部 `9100` 指标端点，暴露真实 task 数量、状态、耗时及本进程业务指标。
+- OpenTelemetry FastAPI/Celery tracing，支持采样、Console 和 OTLP/HTTP exporter。
 - `/api/v1/ping` 基础 API 连通性检查。
 - `tenants`、`users`、`auth_sessions` 基础表和 Alembic 初始迁移。
 - `departments`、`department_members`、`user_groups`、`user_group_members` 组织基础表和迁移。

@@ -245,6 +245,9 @@ jobs:
       - name: Build API and core Worker image
         run: docker build --target runtime --tag enterprise-drive-backend:ci .
 
+      - name: Run observability Docker smoke
+        run: uv run python scripts/smoke_observability_docker.py --image enterprise-drive-backend:ci
+
       - name: Build Preview Worker image
         run: docker build --target preview --tag enterprise-drive-preview:ci .
 

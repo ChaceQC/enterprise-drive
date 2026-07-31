@@ -268,6 +268,11 @@ uv run mypy app
 - 任务必须幂等，重复执行不会产生重复副作用。
 - 失败使用指数退避，超过最大重试进入 dead-letter 状态。
 - 任务日志必须包含 task_id、tenant_id、resource_id、request_id。
+- API 与 Worker 的 JSON 日志必须自动补齐 `service`、`env`、`request_id`、`task_id`、`trace_id` 和 `span_id`；业务日志按上下文继续补 `tenant_id`、`user_id`、`action`、`resource_type`、`resource_id`、`status` 和 `latency_ms`，不得记录 Cookie、Token、预签名 URL、连接串或密钥。
+- Prometheus HTTP 标签必须使用路由模板，不得使用原始 URL、文件名、对象 key、用户 ID、租户 ID、request_id、task_id、token 或其他无界值；业务 `reason`、`action`、`status` 标签只能来自固定枚举。
+- 正式 API 使用多 Uvicorn worker 时，必须启用 Prometheus multiprocess 目录，并且只允许容器启动入口清理该目录；不得由任一 worker 在运行中清空其他进程指标。
+- API 与 Celery Worker 属于不同容器和进程边界：API `/metrics` 负责 API、上传下载、权限、Outbox 和搜索延迟指标，各 Worker 在 Compose 内部 `9100` 暴露自己的 task/preview/维护指标；不得用同进程单测或把 Worker Counter 注册到 API registry 来伪装跨容器聚合。
+- OpenTelemetry tracing 默认生成可关联的 W3C trace context；外部导出通过配置选择 `none`、`console` 或 OTLP/HTTP，endpoint、header 和认证信息只能来自环境配置。新增可观测性能力必须至少验证 request_id/trace 日志关联、API 多进程指标和真实 Celery task 指标。
 
 ## 14. 搜索与预览
 

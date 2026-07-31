@@ -5,7 +5,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.core.config import Settings
-from app.core.metrics import METRICS_REGISTRY
+from app.core.worker_metrics import WORKER_METRICS_REGISTRY
 from app.infrastructure.queue import celery_app as celery_module
 from app.modules.audit.dispatcher import OutboxPublisher
 from app.modules.audit.models import OutboxEvent
@@ -118,7 +118,7 @@ class _NoopPublisher(OutboxPublisher):
 
 
 def _preview_failure_sample_value(*, status: str, reason: str) -> float:
-    for metric in METRICS_REGISTRY.collect():
+    for metric in WORKER_METRICS_REGISTRY.collect():
         if metric.name != "preview_failures":
             continue
         for sample in metric.samples:
