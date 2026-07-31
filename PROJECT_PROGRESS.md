@@ -5,10 +5,10 @@
 ### 当前状态
 
 - 此前已按用户要求暂停并保留工作树原状；收到“继续”后恢复 `BE-027` 收尾，暂停期间未执行提交、推送、暂存、重置或清理。
-- 当前分支为 `dev`，HEAD 为 `7caa8cc04c877135aa61c151239dd8f16c66d931`（`feat: 启用 Drive Transfer Protocol v1`）。
-- `dev` 与 `origin/dev` 的 ahead/behind 均为 0；`BE-027` 尚未形成新提交。
+- 当前分支为 `dev`；`BE-027` 实现提交为 `81709039d20454e97933b5bb061d852807676a8e`（`feat: 完成可观测性指标与 tracing`），已推送到 `origin/dev`。
+- 实现提交推送后 `dev` 与 `origin/dev` 的 ahead/behind 均为 0，工作树恢复干净。
 - 恢复时工作树包含 27 个已修改文件和 5 个新增文件，均未暂存。
-- 最终审阅补齐 API/Worker registry 隔离后，当前工作树包含 31 个已修改文件和 6 个新增文件，仍均未暂存。
+- 最终审阅补齐 API/Worker registry 隔离后，提交范围为 31 个已修改文件和 6 个新增文件。
 
 ### 已完成
 
@@ -17,6 +17,7 @@
 - 正式 runtime image `enterprise-drive-backend:windows-local` 已构建成功。
 - 最近一次真实 Docker prefork smoke 已验证 2-worker API、PostgreSQL、Redis 和 maintenance Worker；24 次 API ping 全部进入聚合指标，检测到 3 个 API multiprocess gauge 进程文件，API/Worker registry 双向隔离通过，真实 Celery task 状态为 `success`，API 与 Worker 均产生有效 trace ID，临时容器和网络已经清理。
 - README、`AGENT.md`、执行计划、Windows/Preview 部署文档、CI 和技术计划书已随实现同步。
+- GitHub Actions `backend-ci` run `30634347985` 全部成功；backend job 已实际执行 runtime image 构建、observability Docker smoke 和 Preview Worker image 构建，Windows 部署、MinIO image policy 与供应链 jobs 也全部成功。
 
 ### 最近验证
 
@@ -28,23 +29,17 @@
 - `docker compose --env-file .env.windows.example -f compose.windows.yml config --quiet`：通过。
 - 恢复后执行 `git diff --check`：通过；仅显示 `backend/uv.lock` 的 Git 行尾转换提示，没有空白错误。
 - 最新 Docker smoke：`api_ping_count=24`、`api_metric_process_files=3`、`metric_registry_isolation=passed`、`worker_task_status=success`；API trace ID 为 `7ce22eb62ff2741c276dac1fee1763c9`，Worker trace ID 为 `13079cbfa0098f50df1367a46050c75b`。
+- GitHub Actions：`backend-ci` run `30634347985` 成功，backend job 用时 3 分 24 秒。
 
 ### 未完成与风险
 
-- `BE-027` 尚未 commit、push，也尚未取得本提交对应的 `backend-ci` run ID。
 - `BE-028` 的 15 服务真实 Compose 构建、启动、readiness、gateway、Worker/beat、备份与恢复门禁尚未开始。
 
 ### 下一步
 
-1. 完整审阅 diff，确认没有混入无关改动后执行：
-
-   ```bash
-   git add .
-   git commit -m "feat: 完成可观测性指标与 tracing"
-   git push origin dev
-   ```
-
-2. 等待并记录本提交对应的 `backend-ci` run ID 和结果；CI 全部通过后，再开始 `BE-028`。
+1. 按 `BE-028` 使用根 `compose.windows.yml` 启动全部 15 个默认服务。
+2. 验证 gateway、API `/readyz`、MinIO 外部端点、5 个 Worker、beat、内部指标端点和唯一宿主端口边界。
+3. 执行真实备份、`backup-verify`、隔离恢复和失败回滚门禁，并记录精确 Compose project、镜像和备份工件证据。
 
 ## 2026-07-31 BE-027 metrics/tracing
 
@@ -82,9 +77,8 @@
 
 ### 下一步
 
-1. 提交并推送 `BE-027`，确认 GitHub Actions 完整通过。
-2. 执行 `BE-028` 全 15 服务真实 Compose 构建、启动、gateway、readiness、Worker/beat 和备份恢复验证。
-3. 在 `BE-035` 增加 Prometheus scrape 配置、告警规则、失败阈值和治理看板；在 `BE-029` 输出正式性能基准。
+1. 执行 `BE-028` 全 15 服务真实 Compose 构建、启动、gateway、readiness、Worker/beat 和备份恢复验证。
+2. 在 `BE-035` 增加 Prometheus scrape 配置、告警规则、失败阈值和治理看板；在 `BE-029` 输出正式性能基准。
 
 ### 验证
 
@@ -97,6 +91,7 @@
 - 真实 Docker 正式 runtime image：`enterprise-drive-backend:windows-local` 构建成功，包含 OTLP/HTTP 与 Celery instrumentation 依赖。
 - `uv run python scripts/smoke_observability_docker.py --image enterprise-drive-backend:windows-local`：通过；真实 PostgreSQL、Redis、Alembic、2-worker API 和 maintenance Worker 均正常。
 - Docker smoke 结果：24 次 `/api/v1/ping` 聚合为 24，API 指标目录在注入测试样本前检测到 3 个 `gauge_livemostrecent` multiprocess 文件；API 抓取面不含 Worker/预览/维护指标，Worker 抓取面不含 API/上传下载/权限/Outbox/Search 指标。使用生产同款 Celery prefork、`worker_ready` 后启动 9100 指标端点，真实 `upload.expire_sessions` task 为 success；API 与 Worker JSON 日志均包含有效 trace ID/span ID，临时容器和网络已清理。
+- GitHub Actions `backend-ci` run `30634347985`：全部成功；包含完整后端测试、Windows Compose/TLS/备份模型、Nginx 模板、runtime/Preview 镜像、真实 observability Docker smoke、Windows 部署脚本和 MinIO 供应链门禁。
 
 ### 涉及文件
 
