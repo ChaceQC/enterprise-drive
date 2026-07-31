@@ -1,12 +1,13 @@
 # PROJECT_PROGRESS.md
 
-## 2026-07-31 BE-028 Windows Docker Compose 正式部署闭环
+## 2026-07-31 BE-029 性能基准首份真实 Docker smoke
 
 ### 当前状态
 
 - `BE-028` 已完成真实 Windows 11 Docker Desktop 闭环：runtime/preview 镜像独立构建、本地镜像 preflight、15 服务 source 启动、备份、默认数据服务恢复、显式完整 target 全栈恢复、gateway/API/Worker/beat/数据服务校验和彻底清理均已通过。
+- `BE-029` 第一版 Locust 工具链和真实 Docker smoke 已完成：170 次请求、0 失败，已定义的文件列表、上传初始化、搜索和审计 P95 门槛全部通过，报告为 `passed=true`。
 - 当前 Docker client/server 为 `29.6.2`，Compose 为 `v5.3.1`，context 为 `desktop-linux`；运行中容器和全部残留容器均为 `0`。
-- `dev` 与 `origin/dev` 当前共同指向 `252fff61740286f8bdcf790d02228e2e325de01a`；该提交对应 GitHub Actions run `30645014214`，全部 5 个 job 成功。本节新增的 OpenSearch 测试预算与失败诊断增强尚待最终提交推送。
+- `dev` 与 `origin/dev` 当前共同指向 `1963f76bd7b3936ca1d5eb7d531cd15672a1af27`；该提交对应 GitHub Actions run `30648296028`，全部 5 个 job 成功。
 
 ### 已完成
 
@@ -31,10 +32,19 @@
 - GitHub Actions run `30644453844` 的 backend、MinIO image policy 和两个 supply-chain job 全部成功；失败仅在 `windows-deployment / Validate Windows TLS fake Docker guards`。原因是 CI fake `docker.cmd` 仍只匹配旧 bootstrap 命令，新增 `--pull never` 后没有返回 `fake-bootstrap` 容器 ID。
 - `.github/workflows/backend-ci.yml` 已把 fake bootstrap 匹配更新为 `run --detach --no-deps --pull never --service-ports gateway`，并在本机从 workflow 原文提取、执行同一 PowerShell step，全部 TLS fake Docker guard 通过。
 - CI fixture 修复已提交为 `252fff6 fix: 同步 Windows TLS CI 假 Docker 命令` 并推送；后续 run `30645014214` 的 backend、windows-deployment、minio-image-policy 和两组 minio-supply-chain job 全部成功。
+- `1963f76 fix: 收紧 Windows 备份集成资源并补充诊断` 已提交并推送；run `30648296028` 的 backend、windows-deployment、minio-image-policy 和两组 minio-supply-chain job 全部成功。
+- 新增 `backend/performance/`，使用 dev-only Locust `2.46.2`，提供 `smoke`、`baseline` 和显式 `target` 三档，并覆盖登录、`/auth/me`、100 项文件列表批量权限、DTP/1 上传初始化与 abort、搜索和管理员审计。
+- runner 使用 `-X utf8` 与 `PYTHONUTF8=1`，捕获 Locust stdout/stderr 后统一写 stdout，避免 PowerShell 把正常 stderr 日志转成 `NativeCommandError`；同时按 Locust 真实规则读取 `stats_stats.csv` 和 `stats_stats_history.csv`。
+- fixture 使用一个随机根目录承载全部子目录，清理时先普通 DELETE 整棵子树再一次 purge；上传初始化使用稳定父目录，避免 aborted upload session 外键阻塞 fixture 根目录清理。
+- fixture HTTP/清理逻辑与 CLI 参数解析已拆为 `fixture.py` 和 `fixture_cli.py`，原 `python -m performance.fixture` 入口保持不变，普通源码文件均控制在 300 行以内。
+- `OpenSearchIndexAdapter.search_files` 仅把 `index_not_found_exception` 转为空搜索结果，其他 `NotFoundError` 继续抛出，空环境的首次搜索不再返回 500。
+- 根 `compose.windows.yml` 已传递 `DRIVE_RATE_LIMIT_ENABLED`，`.env.windows.example` 默认保持 `true`，隔离容量基准可显式关闭限流且在报告中记录模式。
+- 首次真实 smoke 暴露清理外键冲突和错误的登录临时阈值；修复后使用现有本地镜像、`--no-build --pull never` 和隔离 project 重跑成功。
+- 最终 smoke 工件位于 `backend/tmp/performance/20260731-be029-smoke-9c42e8/`，包含 7 个非空文件；数据库 fixture 节点、测试容器、网络、named volumes 和临时端口全部为 0。
 
 ### 进行中
 
-- 对 OpenSearch 测试预算与失败诊断增强执行最终 parser、编码、smoke、Compose 和 Git 检查，随后提交推送。
+- 对 `BE-029` 实现、报告和文档执行最终提交前检查，随后提交推送并等待新的 GitHub Actions。
 
 ### 阻塞与风险
 
@@ -42,12 +52,14 @@
 - `1280m` 是真实 integration 的测试专用 OpenSearch 上限；正式 `.env.windows.example` 仍使用 `3g` 容器内存和 `1g` JVM heap，不能把低资源测试预算直接当作生产容量规划。
 - 本轮验证覆盖本机 HTTP Compose 和自签名测试证书，不替代真实生产 DNS、受信证书链、外部网络、BitLocker/外部介质和周期恢复演练。
 - MinIO Server/Client 既有 Critical 漏洞基线仍属于上线风险；当前 CI 只阻断相对基线新增的 Critical。
+- 当前 smoke 只有 100 个目录和 2 个用户，不代表 100 万 OpenSearch 文档、1,000 万审计日志、真实 multipart complete 或完整 target 容量验收。
+- 受限单 API CPU 环境下两次登录的 P95 为 `2500 ms`；技术计划书没有登录验收阈值，因此当前只记录错误率和延迟，不把临时编造的 `500 ms` 当作门禁。登录 SLO 需结合 Argon2id 参数和生产 CPU 预算单独确定。
 
 ### 下一步
 
-1. 完成最终 parser、ASCII/无 BOM、smoke、Compose config、`git diff --check`，提交并推送 OpenSearch 测试预算与失败诊断增强，确认新 GitHub Actions run。
-2. 按工程编号审计 `BE-029 性能压测脚本`：先盘点现有 benchmark/load-test 代码、可复用真实 Docker 场景、指标采集点和性能目标，输出缺口矩阵。
-3. 在独立提交中实现 `BE-029` 的可重复基准入口，至少覆盖登录/列表、DTP/1 上传下载、搜索和权限热点，并固定并发、数据规模、资源上限、结果格式与清理流程。
+1. 完成最终 `git diff`、完整后端、Compose 和 Docker 清理检查，提交并推送 `BE-029`，等待新 GitHub Actions 全部通过。
+2. 按工程编号进入 `BE-030` 安全测试修复审计，先从当前默认配置和攻击者可达路径建立缺口矩阵。
+3. 为后续 target 验收补充 100 万 OpenSearch 文档、1,000 万审计日志和真实 multipart complete 数据生成设计；DTP/1 并发提示与 HTTP/2/HTTP/3 回退由 `DC-006` 按基准结果推进。
 
 ### 验证
 
@@ -64,7 +76,17 @@
 - `-FullStackRestore`：`357.3s` 通过，12 个同时运行容器，采样峰值为 `123.5%` aggregate Docker CPU、`2226 MiB` 容器内存和 `4528 MiB` Docker 相关宿主进程 working set；测试结束后 source/target 容器均为 `0`。
 - 已从 `.github/workflows/backend-ci.yml` 原文提取并本地执行 `Validate Windows TLS fake Docker guards` step，结果通过。
 - GitHub Actions run `30645014214`：5 个 job 全部成功。
+- GitHub Actions run `30648296028`：5 个 job 全部成功；既有 MinIO Critical 基线仅作为 supply-chain annotation，不是本次失败。
 - 当前 `docker ps` 和 `docker ps -a`：容器数均为 `0`。
+- `uv lock --check`、`uv run ruff check .`、`uv run ruff format --check .` 和 `uv run mypy app performance tests/test_performance_benchmark.py tests/test_search_opensearch.py`：全部通过。
+- 完整 `uv run pytest`：`168 passed, 4 skipped`。
+- 定向性能/OpenSearch 测试：`8 passed`；性能测试单独为 `6 passed`，包含部分 fixture 创建失败后的自动根目录清理。
+- `uv run python -X utf8 -m locust --help`：通过；直接使用 Windows 默认 GBK 的 `uv run locust --help` 曾复现 TOML 解码错误，runner 已固定 `-X utf8` 和 `PYTHONUTF8=1`。
+- `BE-029` 审计：仓库原先没有 benchmark/load-test 文件、Locust/k6/pytest-benchmark 依赖或 CI 性能门禁；复用资产为 `httpx`、Prometheus/OTel 指标、真实 Docker smoke 和技术计划书目标。
+- runtime 镜像使用 BuildKit `1 CPU / 2 GiB` 上限、`--pull=false` 单独重建，耗时 `37.8s`，镜像 ID 为 `sha256:4401248ea4b60644a0aa74fe31ba00c5c641720b74c7dda958d45fb57ddd66ee`。
+- 最终真实 Docker smoke：170 次请求、0 失败；文件列表/上传初始化/搜索/审计 P95 为 `32/92/71/25 ms`，报告 `passed=true`。
+- smoke 资源采样峰值：6 个容器、`162%` aggregate Docker CPU、`1506.1 MiB` 容器内存、`4471.9 MiB` Docker 相关宿主进程 working set。
+- `backend/tmp/performance/20260731-be029-smoke-9c42e8/report.json`、HTML 和 4 个 Locust CSV 均为非空；fixture 节点为 `0`，最终 `docker ps`、`docker ps -a` 和两个隔离 project 的容器/网络/卷均为 `0`。
 
 ### 涉及文件
 
@@ -81,6 +103,14 @@
 - `PROJECT_PROGRESS.md`
 - `企业网盘开发者技术计划书.md`
 - `.github/workflows/backend-ci.yml`
+- `backend/pyproject.toml`
+- `backend/uv.lock`
+- `backend/performance/`
+- `backend/app/infrastructure/search/opensearch.py`
+- `backend/tests/test_performance_benchmark.py`
+- `backend/tests/test_search_opensearch.py`
+- `compose.windows.yml`
+- `docs/performance-benchmark.md`
 
 ## 2026-07-31 BE-027 暂停与恢复收尾
 

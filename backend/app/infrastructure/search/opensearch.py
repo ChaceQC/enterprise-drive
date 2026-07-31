@@ -4,6 +4,7 @@ import asyncio
 from datetime import datetime
 
 from opensearchpy import OpenSearch
+from opensearchpy.exceptions import NotFoundError
 
 from app.core.config import Settings
 from app.infrastructure.search.base import FileSearchDocument, SearchHit, SearchQuery, SearchResult
@@ -33,11 +34,16 @@ class OpenSearchIndexAdapter:
         )
 
     async def search_files(self, query: SearchQuery) -> SearchResult:
-        response = await asyncio.to_thread(
-            self.client.search,
-            index=self.index_name,
-            body=_search_body(query),
-        )
+        try:
+            response = await asyncio.to_thread(
+                self.client.search,
+                index=self.index_name,
+                body=_search_body(query),
+            )
+        except NotFoundError as exc:
+            if _is_index_not_found(exc):
+                return SearchResult(total=0, hits=[])
+            raise
         hits = response.get("hits", {})
         total = hits.get("total", 0)
         total_value = int(total.get("value", 0)) if isinstance(total, dict) else int(total)
@@ -45,6 +51,15 @@ class OpenSearchIndexAdapter:
             total=total_value,
             hits=[_parse_hit(hit) for hit in hits.get("hits", [])],
         )
+
+
+def _is_index_not_found(exc: NotFoundError) -> bool:
+    if exc.error == "index_not_found_exception":
+        return True
+    if not isinstance(exc.info, dict):
+        return False
+    error = exc.info.get("error")
+    return isinstance(error, dict) and error.get("type") == "index_not_found_exception"
 
 
 def _document_id(*, tenant_id: str, node_id: str) -> str:

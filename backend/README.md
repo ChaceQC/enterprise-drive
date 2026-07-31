@@ -153,6 +153,10 @@ uv run pytest tests/test_storage_minio_integration.py -q
 
 `backend-ci` 会在 GitHub Actions 中启动临时 MinIO 并运行该集成测试文件，覆盖 MinIO SDK multipart 私有方法封装、预签名 PUT/GET、copy、delete、list、服务端 hash 校验和孤儿最终对象扫描。后续仍需继续扩展异常恢复、SDK 升级兼容和并发竞争场景。
 
+### BE-029 性能基准
+
+性能基准工具位于 `backend/performance/`，使用 dev group 中的 Locust；不会构建、拉取或启动服务。先按 `docs/performance-benchmark.md` 启动已经构建的真实 Compose 环境，再用 `uv run python -X utf8 -m performance.runner` 运行 `smoke`、`baseline` 或显式 `target` profile。报告包含 Locust CSV/HTML 和项目 `report.json`，fixture 默认在运行结束后清理。
+
 ## 当前能力
 
 - FastAPI 应用入口。

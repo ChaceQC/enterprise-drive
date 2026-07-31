@@ -159,6 +159,7 @@ DRIVE_TRACING_OTLP_HEADERS={}
 DRIVE_TRACING_EXPORT_TIMEOUT_SECONDS=10.0
 DRIVE_METRICS_DATABASE_REFRESH_ENABLED=true
 DRIVE_METRICS_DATABASE_REFRESH_TIMEOUT_SECONDS=1.0
+DRIVE_RATE_LIMIT_ENABLED=true
 DRIVE_OPENSEARCH_URL=http://opensearch:9200
 DRIVE_S3_ENDPOINT_URL=http://minio:9000
 DRIVE_S3_PUBLIC_ENDPOINT_URL=http://localhost:19000
@@ -206,6 +207,7 @@ CERTBOT_EMAIL=ops@example.com
 - JSON 日志自动带 `service`、`env`、`request_id`、`task_id`、`trace_id`、`span_id`；HTTP 请求结束日志包含 route/method/status/latency，Celery task 结束日志包含 task/queue/status/latency。
 - OpenTelemetry exporter 默认 `none`，不会向外部发送 span。生产接入 collector 时使用 `DRIVE_TRACING_EXPORTER=otlp_http`，把 `DRIVE_TRACING_OTLP_ENDPOINT` 设为完整 traces endpoint，例如 `http://otel-collector:4318/v1/traces`。`DRIVE_TRACING_OTLP_HEADERS` 必须是 JSON 对象，认证信息只放在未提交的 `.env.windows` 或受控 secret 管理中。
 - `outbox_pending_total` 和 `search_index_lag_seconds` 在 API scrape 时以短超时刷新。PostgreSQL 不可用时 `/metrics` 仍返回已有进程指标，但数据库 gauge 可能短暂保留上次成功值。
+- `DRIVE_RATE_LIMIT_ENABLED` 默认必须保持 `true`；根 Compose 会把该值传入 API 和 Worker。只有隔离容量基准可以临时设为 `false`，并应通过 `PERF_RATE_LIMIT_MODE` 写入性能报告，不能把关闭限流的测试配置直接用于生产。
 
 ## 5. PowerShell 管理入口
 
