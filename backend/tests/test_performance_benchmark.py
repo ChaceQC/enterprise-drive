@@ -10,6 +10,16 @@ from typing import Any
 import httpx
 import pytest
 
+from performance.complete_queue import (
+    COMPLETE_QUEUE_SCHEMA,
+    PreparedCompleteItem,
+    PreparedCompleteQueue,
+    load_complete_queue_runtime,
+    mark_prepared_complete_item_finished,
+    read_complete_queue,
+    take_prepared_complete_item,
+    write_complete_queue,
+)
 from performance.fixture import (
     BenchmarkFixture,
     _delete_and_purge_node,
@@ -19,7 +29,12 @@ from performance.fixture import (
 )
 from performance.multipart import parse_server_timing
 from performance.profiles import get_profile
-from performance.runner import _run_locust, _write_report
+from performance.runner import (
+    _prepare_benchmark_session,
+    _resolve_complete_ready_count,
+    _run_locust,
+    _write_report,
+)
 
 
 def _fixture() -> BenchmarkFixture:
@@ -142,6 +157,10 @@ def test_report_marks_each_request_against_p95_target(tmp_path: Path) -> None:
     assert report["summary"]["failure_rate"] == 0.0
     assert report["environment"]["locust_version"]
     assert report["environment"]["fixture_created_space"] is False
+    assert report["workload"]["upload_init_cleanup_mode"] == "abort"
+    assert report["workload"]["storage_warmup_mode"] is None
+    assert report["workload"]["complete_mode"] is None
+    assert report["workload"]["complete_ready_count"] is None
     by_name = {item["name"]: item for item in report["results"]}
     assert by_name["file_list_permission_batch"]["p50_ms"] == 50.0
     assert by_name["file_list_permission_batch"]["passed"] is True
@@ -163,6 +182,191 @@ def test_locust_stderr_is_forwarded_to_stdout(capsys: pytest.CaptureFixture[str]
     assert "locust-stdout" in captured.out
     assert "locust-stderr" in captured.out
     assert captured.err == ""
+
+
+def test_runner_prepares_shared_cookie_session(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_client = httpx.Client
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/auth/login"
+        return httpx.Response(
+            200,
+            headers=[
+                ("Set-Cookie", "drive_session=session-token; Path=/; HttpOnly"),
+                ("Set-Cookie", "drive_csrf=csrf-token; Path=/"),
+            ],
+        )
+
+    def client_factory(*args: Any, **kwargs: Any) -> httpx.Client:
+        return real_client(
+            *args,
+            **kwargs,
+            transport=httpx.MockTransport(handler),
+        )
+
+    monkeypatch.setattr("performance.runner.httpx.Client", client_factory)
+
+    session = _prepare_benchmark_session(
+        base_url="http://benchmark.test",
+        tenant_slug="default",
+        username="admin",
+        password="password",
+    )
+
+    assert session.session_token == "session-token"
+    assert session.csrf_token == "csrf-token"
+
+
+def test_complete_queue_round_trip_and_atomic_consumption(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "complete_queue.json"
+    queue = PreparedCompleteQueue(
+        schema_version=COMPLETE_QUEUE_SCHEMA,
+        base_url="http://benchmark.test",
+        tenant_slug="default",
+        space_id="space-id",
+        parent_id="parent-id",
+        size_bytes=1024,
+        items=[
+            PreparedCompleteItem(
+                session_id="session-1",
+                etag="etag-1",
+                size_bytes=1024,
+            ),
+            PreparedCompleteItem(
+                session_id="session-2",
+                etag="etag-2",
+                size_bytes=1024,
+            ),
+        ],
+        created_at="2026-08-01T00:00:00+00:00",
+    )
+    write_complete_queue(queue, path)
+    assert read_complete_queue(path) == queue
+
+    load_complete_queue_runtime.cache_clear()
+    assert take_prepared_complete_item(str(path)) == queue.items[0]
+    assert take_prepared_complete_item(str(path)) == queue.items[1]
+    assert take_prepared_complete_item(str(path)) is None
+    assert mark_prepared_complete_item_finished(str(path)) is False
+    assert mark_prepared_complete_item_finished(str(path)) is True
+    assert mark_prepared_complete_item_finished(str(path)) is False
+    load_complete_queue_runtime.cache_clear()
+
+
+def test_target_complete_ready_count_must_be_explicit() -> None:
+    with pytest.raises(SystemExit, match="必须显式提供"):
+        _resolve_complete_ready_count(profile="target", users=16, requested=None)
+    assert _resolve_complete_ready_count(profile="smoke", users=2, requested=None) == 100
+    assert _resolve_complete_ready_count(profile="target", users=16, requested=200) == 200
+    with pytest.raises(SystemExit, match="必须不少于"):
+        _resolve_complete_ready_count(profile="target", users=16, requested=15)
+
+
+def test_target_upload_init_requires_100_rps(tmp_path: Path) -> None:
+    stats_path = tmp_path / "stats_stats.csv"
+    with stats_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "Type",
+                "Name",
+                "Request Count",
+                "Failure Count",
+                "Median Response Time",
+                "Average Response Time",
+                "Min Response Time",
+                "Max Response Time",
+                "Requests/s",
+                "95%",
+                "99%",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "Type": "POST",
+                "Name": "upload_init",
+                "Request Count": "1000",
+                "Failure Count": "0",
+                "Median Response Time": "100",
+                "Average Response Time": "120",
+                "Min Response Time": "50",
+                "Max Response Time": "280",
+                "Requests/s": "99.9",
+                "95%": "250",
+                "99%": "270",
+            }
+        )
+
+    report = _write_report(
+        output_dir=tmp_path,
+        profile="target",
+        scenario="upload_init",
+        fixture=_fixture(),
+        users=100,
+        spawn_rate=20.0,
+        run_time="60s",
+        locust_exit_code=0,
+    )
+
+    result = report["results"][0]
+    assert result["target_min_rps"] == 100.0
+    assert result["passed"] is False
+    assert report["summary"]["missing_required_metrics"] == []
+    assert report["passed"] is False
+
+
+def test_target_upload_complete_requires_end_to_end_metric(tmp_path: Path) -> None:
+    stats_path = tmp_path / "stats_stats.csv"
+    with stats_path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "Type",
+                "Name",
+                "Request Count",
+                "Failure Count",
+                "Median Response Time",
+                "Average Response Time",
+                "Min Response Time",
+                "Max Response Time",
+                "Requests/s",
+                "95%",
+                "99%",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "Type": "BENCH",
+                "Name": "upload_complete_api_without_storage_merge",
+                "Request Count": "100",
+                "Failure Count": "0",
+                "Median Response Time": "100",
+                "Average Response Time": "120",
+                "Min Response Time": "50",
+                "Max Response Time": "280",
+                "Requests/s": "60",
+                "95%": "250",
+                "99%": "270",
+            }
+        )
+
+    report = _write_report(
+        output_dir=tmp_path,
+        profile="target",
+        scenario="upload_complete",
+        fixture=_fixture(),
+        users=100,
+        spawn_rate=20.0,
+        run_time="60s",
+        locust_exit_code=0,
+    )
+
+    assert report["summary"]["missing_required_metrics"] == ["upload_complete_end_to_end"]
+    assert report["passed"] is False
 
 
 def test_fixture_cleanup_soft_deletes_before_single_purge() -> None:

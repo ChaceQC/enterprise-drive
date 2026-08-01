@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,8 +16,15 @@ class AuditRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
 
-    async def add_audit_log(self, *, event: AuditEvent, context: AuditContext) -> AuditLog:
+    async def add_audit_log(
+        self,
+        *,
+        event: AuditEvent,
+        context: AuditContext,
+        flush: bool = True,
+    ) -> AuditLog:
         audit_log = AuditLog(
+            id=uuid4(),
             tenant_id=event.tenant_id,
             actor_id=event.actor_id,
             actor_type=event.actor_type,
@@ -32,7 +39,8 @@ class AuditRepository:
             metadata_json=event.metadata,
         )
         self.session.add(audit_log)
-        await self.session.flush()
+        if flush:
+            await self.session.flush()
         return audit_log
 
     async def add_outbox_event(
@@ -43,8 +51,10 @@ class AuditRepository:
         aggregate_type: str,
         aggregate_id: UUID,
         payload: dict[str, object],
+        flush: bool = True,
     ) -> OutboxEvent:
         outbox_event = OutboxEvent(
+            id=uuid4(),
             tenant_id=tenant_id,
             event_type=event_type,
             aggregate_type=aggregate_type,
@@ -52,7 +62,8 @@ class AuditRepository:
             payload=payload,
         )
         self.session.add(outbox_event)
-        await self.session.flush()
+        if flush:
+            await self.session.flush()
         return outbox_event
 
     async def list_audit_logs(

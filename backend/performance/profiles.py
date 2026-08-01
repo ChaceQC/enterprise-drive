@@ -49,6 +49,11 @@ TARGET_P95_MS: dict[str, float] = {
     "admin_audit": 1_000.0,
 }
 
+TARGET_MIN_RPS_BY_SCENARIO: dict[str, dict[str, float]] = {
+    "upload_init": {"upload_init": 100.0},
+    "upload_complete": {"upload_complete_end_to_end": 50.0},
+}
+
 
 def get_profile(name: str) -> BenchmarkProfile:
     try:

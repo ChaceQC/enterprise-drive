@@ -1,5 +1,58 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-01 BE-033 多维配额策略
+
+### 当前状态
+
+- `BE-033` 核心运行时已完成，工程主线不再被 `BE-029` 目标规模压测阻塞。
+- 下一项按编号进入 `BE-034` 高密级下载代理与 HTTP Range；后续验证只运行与新增功能直接相关的最小定向集合。
+
+### 已完成
+
+- 新增 `quota_policies` 表、SQLAlchemy 模型、迁移约束和租户优先级索引，支持扩展名、MIME 前缀、累计额度、单文件大小和启停状态。
+- 复用 `quota_accounts` / `quota_ledger` 表达 `space`、`tenant`、`user`、`policy` 四类账户；用户和租户默认额度为 `0` 时关闭对应维度。
+- 上传初始化执行多维快速检查；秒传和 multipart complete 创建版本时在同一事务内按固定顺序执行原子条件扣减，任一维度不足都会回滚本次创建。
+- 彻底删除和回收站保留期清理按文件版本正向流水释放全部关联账户，兼容旧版本只有空间流水的历史数据。
+- 新增 `DRIVE_DEFAULT_USER_QUOTA_BYTES`、`DRIVE_DEFAULT_TENANT_QUOTA_BYTES`、`DRIVE_QUOTA_POLICY_ENABLED`，并同步 Windows 环境模板和 Compose。
+- 明确 `quota_policies` 当前由数据库事实表提供；账户/策略管理 HTTP API、部门额度和多维通用校准归 `BE-044`。
+
+### 验证
+
+- 复用前一轮定向回归结果：原上传、空间容量校准和回收站清理相关测试 `18 passed`，新增代码定向 Ruff/Mypy 与 Alembic 静态 SQL 已通过。
+- 本轮只补齐遗漏的 `storage_adapter` 测试夹具导入，并单次运行 `uv run pytest -p no:cacheprovider tests/test_quota_multidimensional.py -q`，结果为 `2 passed`。
+- 未重新执行 `BE-029` 压测、完整 Docker 恢复或全量测试。
+
+### 风险与边界
+
+- 现有账户的 `limit_bytes` 是数据库事实，修改环境默认值不会自动覆盖已创建账户；后续由 `BE-044` 管理 API 显式调整并写审计。
+- 策略当前按上传文件名扩展名和请求中的 MIME 元数据匹配；服务端内容分类、密级标签和 DLP 判定属于后续治理能力。
+- `quota.reconcile_space_usage` 仍只校准空间账户，多维通用校准尚未实现。
+
+### 下一步
+
+1. 完成一次定向 Ruff、Mypy 和迁移 SQL 检查后提交并推送当前成果。
+2. 实现 `BE-034`：为高密级/强审计场景增加后端代理下载、单段 HTTP Range、流式响应和下载结果审计；普通文件继续使用短期预签名直连。
+3. `BE-029` 目标规模数据灌入和完整 target profile 保留到发布性能门禁，不再作为当前工程任务的前置条件。
+
+### 涉及文件
+
+- `backend/app/modules/quota/models.py`
+- `backend/app/modules/quota/repository.py`
+- `backend/app/modules/quota/service.py`
+- `backend/migrations/versions/20260801_0014_multidimensional_quota.py`
+- `backend/app/modules/upload/service.py`
+- `backend/app/modules/upload/lifecycle.py`
+- `backend/app/modules/file/service.py`
+- `backend/app/modules/file/trash_cleanup.py`
+- `backend/tests/test_quota_multidimensional.py`
+- `.env.windows.example`
+- `compose.windows.yml`
+- `README.md`
+- `backend/README.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-08-01 BE-031/BE-032 对象存储验收对账
 
 ### 当前状态

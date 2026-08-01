@@ -91,10 +91,13 @@ class UploadService:
             parent_id=parent.id,
             normalized_name=normalized_name,
         )
-        await self.quota_service.ensure_space_capacity(
+        await self.quota_service.ensure_upload_capacity(
             tenant_id=current_user.tenant_id,
             space_id=space_id,
             size_bytes=size_bytes,
+            user_id=current_user.id,
+            file_name=normalized_name,
+            mime_type=mime_type,
         )
 
         existing_blob = await self.repository.get_blob_by_hash(
@@ -243,6 +246,9 @@ class UploadService:
                 space_id=parent.space_id,
                 version_id=version.id,
                 size_bytes=size_bytes,
+                user_id=current_user.id,
+                file_name=node.name,
+                mime_type=mime_type,
             )
             await self.repository.flush()
             await record_upload_event(

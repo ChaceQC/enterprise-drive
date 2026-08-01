@@ -87,10 +87,13 @@ class UploadLifecycleService:
             upload_session=upload_session,
         )
         await self._ensure_name_available(current_user=current_user, upload_session=upload_session)
-        await self.quota_service.ensure_space_capacity(
+        await self.quota_service.ensure_upload_capacity(
             tenant_id=tenant_id,
             space_id=upload_session.space_id,
             size_bytes=upload_session.size_bytes,
+            user_id=user_id,
+            file_name=upload_session.file_name,
+            mime_type=upload_session.mime_type,
         )
         upload_session.status = "completing"
         await self.repository.commit()
@@ -170,21 +173,13 @@ class UploadLifecycleService:
                 parts=[(part.part_no, part.etag, part.size_bytes) for part in parts],
                 uploaded_at=now,
             )
-            existing_blob = await self.repository.get_blob_by_hash(
+            existing_blob = await self.repository.get_blob_by_hash_any_status(
                 tenant_id=tenant_id,
                 hash_algo=upload_session.hash_algo,
                 content_hash=upload_session.content_hash,
                 size_bytes=upload_session.size_bytes,
             )
             if existing_blob is None:
-                existing_blob_any_status = await self.repository.get_blob_by_hash_any_status(
-                    tenant_id=tenant_id,
-                    hash_algo=upload_session.hash_algo,
-                    content_hash=upload_session.content_hash,
-                    size_bytes=upload_session.size_bytes,
-                )
-                if existing_blob_any_status is not None:
-                    raise ApiError("BLOB_DELETING", "文件内容正在清理，请稍后重试", status_code=409)
                 blob = await self.repository.create_file_blob(
                     tenant_id=tenant_id,
                     hash_algo=upload_session.hash_algo,
@@ -195,6 +190,8 @@ class UploadLifecycleService:
                     ref_count=1,
                 )
             else:
+                if existing_blob.status != "active":
+                    raise ApiError("BLOB_DELETING", "文件内容正在清理，请稍后重试", status_code=409)
                 blob = existing_blob
                 blob_referenced = await self.repository.increment_blob_ref_count(
                     tenant_id=tenant_id,
@@ -225,6 +222,9 @@ class UploadLifecycleService:
                 space_id=upload_session.space_id,
                 version_id=version.id,
                 size_bytes=upload_session.size_bytes,
+                user_id=user_id,
+                file_name=node.name,
+                mime_type=upload_session.mime_type,
             )
             upload_session.status = "completed"
             upload_session.completed_node_id = node.id
@@ -461,21 +461,15 @@ class UploadLifecycleService:
         size_bytes = upload_session.size_bytes
         storage_bucket = upload_session.storage_bucket
         source_key = upload_session.storage_key
-        existing_blob = await self.repository.get_blob_by_hash(
+        existing_blob = await self.repository.get_blob_by_hash_any_status(
             tenant_id=tenant_id,
             hash_algo=hash_algo,
             content_hash=content_hash,
             size_bytes=size_bytes,
         )
         if existing_blob is not None:
-            return existing_blob.storage_key
-        existing_blob_any_status = await self.repository.get_blob_by_hash_any_status(
-            tenant_id=tenant_id,
-            hash_algo=hash_algo,
-            content_hash=content_hash,
-            size_bytes=size_bytes,
-        )
-        if existing_blob_any_status is not None:
+            if existing_blob.status == "active":
+                return existing_blob.storage_key
             await self._mark_failed(
                 current_user=current_user,
                 session_id=upload_session_id,

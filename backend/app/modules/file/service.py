@@ -367,6 +367,7 @@ class FileService:
                 space_id=node.space_id,
                 ref_id=node.id,
                 size_bytes=released_bytes,
+                version_ids=[version.id for version in versions],
             )
             blob_refs_updated = await self.repository.decrement_blob_ref_counts(
                 tenant_id=current_user.tenant_id,

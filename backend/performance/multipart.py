@@ -5,7 +5,7 @@ from contextlib import suppress
 from typing import Any
 from urllib.parse import urlsplit
 
-import httpx
+import requests
 
 
 def parse_server_timing(header: str) -> dict[str, float]:
@@ -26,19 +26,21 @@ def parse_server_timing(header: str) -> dict[str, float]:
 
 def upload_presigned_part(
     *,
-    client: httpx.Client,
+    client: requests.Session,
     upload_url: str,
     content: bytes,
     headers: dict[str, str],
+    timeout_seconds: float,
 ) -> str:
     started = time.perf_counter()
-    response: httpx.Response | None = None
+    response: requests.Response | None = None
     error: Exception | None = None
     try:
         response = client.put(
             upload_url,
-            content=content,
+            data=content,
             headers=headers,
+            timeout=timeout_seconds,
         )
         response.raise_for_status()
         etag = str(response.headers.get("etag") or "").strip('"')
@@ -61,18 +63,19 @@ def upload_presigned_part(
 
 def warm_storage_connection(
     *,
-    client: httpx.Client,
+    client: requests.Session,
     upload_url: str,
+    timeout_seconds: float,
 ) -> None:
     parsed = urlsplit(upload_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("预签名上传 URL 缺少有效 origin")
     health_url = f"{parsed.scheme}://{parsed.netloc}/minio/health/live"
     started = time.perf_counter()
-    response: httpx.Response | None = None
+    response: requests.Response | None = None
     error: Exception | None = None
     try:
-        response = client.get(health_url)
+        response = client.get(health_url, timeout=timeout_seconds)
         response.raise_for_status()
     except Exception as exc:
         error = exc

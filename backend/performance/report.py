@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from performance.fixture import BenchmarkFixture
-from performance.profiles import TARGET_P95_MS
+from performance.profiles import TARGET_MIN_RPS_BY_SCENARIO, TARGET_P95_MS
 
 
 def read_stats(path: Path) -> list[dict[str, Any]]:
@@ -46,6 +46,7 @@ def read_stats(path: Path) -> list[dict[str, Any]]:
                     "p99_ms": float(row.get("99%") or 0),
                     "requests_per_second": float(row.get("Requests/s") or 0),
                     "target_p95_ms": target,
+                    "target_min_rps": None,
                     "passed": failures == 0 and (target is None or p95 <= target),
                 }
             )
@@ -63,8 +64,17 @@ def write_report(
     run_time: str,
     locust_exit_code: int,
     environment_snapshot: dict[str, Any] | None = None,
+    complete_mode: str | None = None,
+    complete_ready_count: int | None = None,
 ) -> dict[str, Any]:
     results = read_stats(output_dir / "stats.csv")
+    required_metrics = _apply_target_throughput_requirements(
+        results=results,
+        profile=profile,
+        scenario=scenario,
+    )
+    present_metrics = {str(result["name"]) for result in results}
+    missing_required_metrics = sorted(required_metrics - present_metrics)
     total_requests = sum(int(result["request_count"]) for result in results)
     total_failures = sum(int(result["failure_count"]) for result in results)
     http_requests = sum(
@@ -90,13 +100,28 @@ def write_report(
             "derived_metric_count": derived_metrics,
             "failure_count": total_failures,
             "failure_rate": (round(total_failures / total_requests, 6) if total_requests else 0.0),
+            "missing_required_metrics": missing_required_metrics,
         },
         "workload": {
             "fixture_folder_count": len(fixture.folder_ids),
+            "upload_init_cleanup_mode": (
+                os.getenv("PERF_UPLOAD_INIT_CLEANUP", "abort")
+                if scenario in {"upload_init", "mixed"}
+                else None
+            ),
             "multipart_size_bytes": (
                 int(os.getenv("PERF_MULTIPART_SIZE_BYTES", "0"))
                 if scenario == "upload_complete"
                 else None
+            ),
+            "storage_warmup_mode": (
+                os.getenv("PERF_STORAGE_WARMUP_MODE", "per_user")
+                if scenario == "upload_complete"
+                else None
+            ),
+            "complete_mode": complete_mode if scenario == "upload_complete" else None,
+            "complete_ready_count": (
+                complete_ready_count if scenario == "upload_complete" else None
             ),
         },
         "environment": {
@@ -113,6 +138,7 @@ def write_report(
         "passed": bool(results)
         and locust_exit_code == 0
         and environment_complete
+        and not missing_required_metrics
         and all(bool(result["passed"]) for result in results),
         "artifacts": {
             "stats_csv": "stats_stats.csv",
@@ -120,6 +146,16 @@ def write_report(
             "failures_csv": "stats_failures.csv",
             "exceptions_csv": "stats_exceptions.csv",
             "html": "report.html",
+            "complete_queue": (
+                "complete_queue.json"
+                if scenario == "upload_complete" and complete_mode == "prepared"
+                else None
+            ),
+            "complete_cleanup": (
+                "complete_cleanup.json"
+                if scenario == "upload_complete" and complete_mode == "prepared"
+                else None
+            ),
         },
     }
     (output_dir / "report.json").write_text(
@@ -127,6 +163,25 @@ def write_report(
         encoding="utf-8",
     )
     return report
+
+
+def _apply_target_throughput_requirements(
+    *,
+    results: list[dict[str, Any]],
+    profile: str,
+    scenario: str,
+) -> set[str]:
+    if profile != "target":
+        return set()
+    targets = TARGET_MIN_RPS_BY_SCENARIO.get(scenario, {})
+    for result in results:
+        minimum_rps = targets.get(str(result["name"]))
+        result["target_min_rps"] = minimum_rps
+        if minimum_rps is not None:
+            result["passed"] = bool(result["passed"]) and (
+                float(result["requests_per_second"]) >= minimum_rps
+            )
+    return set(targets)
 
 
 def _git_commit() -> str:

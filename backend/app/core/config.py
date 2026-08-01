@@ -178,6 +178,9 @@ class Settings(BaseSettings):
     upload_presign_expires_seconds: int = 900
     download_presign_expires_seconds: int = 300
     default_space_quota_bytes: int = 1024 * 1024 * 1024 * 1024
+    default_user_quota_bytes: int = Field(default=0, ge=0)
+    default_tenant_quota_bytes: int = Field(default=0, ge=0)
+    quota_policy_enabled: bool = True
     rate_limit_enabled: bool = True
     login_ip_rate_limit_count: int = Field(default=30, ge=1)
     login_account_rate_limit_count: int = Field(default=10, ge=1)

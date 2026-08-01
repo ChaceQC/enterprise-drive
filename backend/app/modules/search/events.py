@@ -31,6 +31,7 @@ async def emit_search_index_requested(
             "reason": reason,
             **(metadata or {}),
         },
+        flush=False,
     )
 
 
@@ -58,6 +59,7 @@ async def emit_search_acl_rebuild_requested(
             "reason": reason,
             **(metadata or {}),
         },
+        flush=False,
     )
 
 
@@ -85,4 +87,5 @@ async def emit_search_extract_requested(
             "reason": reason,
             **(metadata or {}),
         },
+        flush=False,
     )

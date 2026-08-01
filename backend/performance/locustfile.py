@@ -5,13 +5,23 @@ import json
 import logging
 import os
 import secrets
+from functools import lru_cache
 from pathlib import Path
+from threading import Lock
 from typing import Any
+from urllib.parse import urlsplit
 
-import httpx
+import requests
+from gevent import spawn_later  # type: ignore[import-untyped]
+from gevent.lock import Semaphore as GeventSemaphore  # type: ignore[import-untyped]
 from locust import HttpUser, between, task
 from locust.exception import StopUser
 
+from performance.complete_queue import (
+    PreparedCompleteItem,
+    mark_prepared_complete_item_finished,
+    take_prepared_complete_item,
+)
 from performance.multipart import (
     record_complete_timing,
     upload_presigned_part,
@@ -20,19 +30,41 @@ from performance.multipart import (
 
 logging.getLogger("httpx").setLevel(logging.WARNING)
 
+_WARMED_STORAGE_ORIGINS: set[str] = set()
+_STORAGE_WARMUP_LOCK = Lock()
+_DEFAULT_WAIT_TIME = between(0.1, 0.3)
+_COMPLETE_SEMAPHORE: GeventSemaphore | None = None
+if os.getenv("PERF_COMPLETE_QUEUE_PATH"):
+    _COMPLETE_SEMAPHORE = GeventSemaphore(max(1, int(os.getenv("PERF_COMPLETE_CONCURRENCY", "24"))))
 
-def _load_fixture() -> dict[str, Any]:
-    fixture_path = os.getenv("PERF_FIXTURE_PATH")
-    if not fixture_path:
-        raise RuntimeError("PERF_FIXTURE_PATH 未设置")
+
+@lru_cache(maxsize=4)
+def _load_fixture_cached(fixture_path: str) -> dict[str, Any]:
     payload = json.loads(Path(fixture_path).read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
         raise RuntimeError("性能 fixture JSON 必须是对象")
     return payload
 
 
+def _load_fixture() -> dict[str, Any]:
+    fixture_path = os.getenv("PERF_FIXTURE_PATH")
+    if not fixture_path:
+        raise RuntimeError("PERF_FIXTURE_PATH 未设置")
+    return _load_fixture_cached(fixture_path)
+
+
+def _take_prepared_complete_item() -> PreparedCompleteItem | None:
+    queue_path = os.getenv("PERF_COMPLETE_QUEUE_PATH")
+    if not queue_path:
+        return None
+    return take_prepared_complete_item(queue_path)
+
+
 class BenchmarkUser(HttpUser):
-    wait_time = between(0.1, 0.3)
+    def wait_time(self) -> float:
+        if self.scenario == "upload_complete" and os.getenv("PERF_COMPLETE_QUEUE_PATH"):
+            return 0.0
+        return float(_DEFAULT_WAIT_TIME(self))
 
     def on_start(self) -> None:
         try:
@@ -42,15 +74,12 @@ class BenchmarkUser(HttpUser):
             self.username = os.environ["PERF_USERNAME"]
             self.password = os.environ["PERF_PASSWORD"]
             self.csrf_token = ""
-            self.storage_client = httpx.Client(
-                timeout=float(os.getenv("PERF_MULTIPART_TIMEOUT_SECONDS", "30")),
-                trust_env=False,
-            )
+            self.storage_client: requests.Session | None = None
             self.storage_client_warmed = False
             self.fixture_list_parent_id = str(
                 self.fixture.get("fixture_root_id") or self.fixture["parent_id"]
             )
-            if self.scenario != "login" and not self._login():
+            if self.scenario != "login" and not self._use_prepared_session() and not self._login():
                 raise StopUser()
         except (KeyError, OSError, ValueError, RuntimeError) as exc:
             raise StopUser() from exc
@@ -81,6 +110,18 @@ class BenchmarkUser(HttpUser):
                 response.failure("login response missing drive_csrf")
                 return False
             return True
+
+    def _use_prepared_session(self) -> bool:
+        session_token = os.getenv("PERF_SESSION_TOKEN")
+        csrf_token = os.getenv("PERF_CSRF_TOKEN")
+        if session_token is None and csrf_token is None:
+            return False
+        if not session_token or not csrf_token:
+            raise RuntimeError("PERF_SESSION_TOKEN 与 PERF_CSRF_TOKEN 必须同时设置")
+        self.client.cookies.set("drive_session", session_token)
+        self.client.cookies.set("drive_csrf", csrf_token)
+        self.csrf_token = csrf_token
+        return True
 
     def _headers(self, *, transfer: bool = False) -> dict[str, str]:
         headers = {"X-CSRF-Token": self.csrf_token}
@@ -167,7 +208,11 @@ class BenchmarkUser(HttpUser):
                 response.failure(f"upload init status={response.status_code}")
                 return
             payload = response.json()
-            if payload.get("mode") == "multipart" and payload.get("session_id"):
+            if (
+                payload.get("mode") == "multipart"
+                and payload.get("session_id")
+                and os.getenv("PERF_UPLOAD_INIT_CLEANUP", "abort").lower() != "deferred"
+            ):
                 self._abort_upload(str(payload["session_id"]))
 
     def _abort_upload(self, session_id: str) -> None:
@@ -181,9 +226,18 @@ class BenchmarkUser(HttpUser):
                 response.failure(f"upload abort status={response.status_code}")
 
     def _upload_complete(self) -> None:
+        queue_path = os.getenv("PERF_COMPLETE_QUEUE_PATH")
+        if queue_path:
+            prepared_item = _take_prepared_complete_item()
+            if prepared_item is None:
+                raise StopUser()
+            self._complete_prepared_upload(prepared_item)
+            return
+
         size_bytes = int(os.getenv("PERF_MULTIPART_SIZE_BYTES", str(64 * 1024)))
         if size_bytes < 1:
             raise StopUser()
+        storage_client = self._storage_client()
         prefix = secrets.token_bytes(min(size_bytes, 32))
         content = prefix + (b"\x00" * (size_bytes - len(prefix)))
         digest = hashlib.sha256(content).hexdigest()
@@ -229,16 +283,17 @@ class BenchmarkUser(HttpUser):
             if not isinstance(upload_headers, dict):
                 upload_headers = {}
             if not self.storage_client_warmed:
-                warm_storage_connection(
-                    client=self.storage_client,
+                self._warm_storage_connection(
+                    client=storage_client,
                     upload_url=str(presigned["upload_url"]),
                 )
                 self.storage_client_warmed = True
             etag = upload_presigned_part(
-                client=self.storage_client,
+                client=storage_client,
                 upload_url=str(presigned["upload_url"]),
                 content=content,
                 headers={str(key): str(value) for key, value in upload_headers.items()},
+                timeout_seconds=float(os.getenv("PERF_MULTIPART_TIMEOUT_SECONDS", "30")),
             )
             with self.client.post(
                 f"/api/v1/uploads/{session_id}/complete",
@@ -274,6 +329,83 @@ class BenchmarkUser(HttpUser):
                 self._cleanup_completed_node(completed_node_id)
             elif session_id is not None:
                 self._abort_upload(session_id)
+
+    def _complete_prepared_upload(self, item: PreparedCompleteItem) -> None:
+        queue_path = os.environ["PERF_COMPLETE_QUEUE_PATH"]
+        semaphore = _COMPLETE_SEMAPHORE
+        if semaphore is not None:
+            semaphore.acquire()
+        try:
+            with self.client.post(
+                f"/api/v1/uploads/{item.session_id}/complete",
+                headers={
+                    **self._headers(transfer=True),
+                    "X-Drive-Benchmark": "BE-029",
+                },
+                json={
+                    "parts": [
+                        {
+                            "part_no": 1,
+                            "etag": item.etag,
+                            "size_bytes": item.size_bytes,
+                        }
+                    ]
+                },
+                name="upload_complete_end_to_end",
+                catch_response=True,
+            ) as response:
+                if response.status_code != 200:
+                    response.failure(f"upload complete status={response.status_code}")
+                    return
+                response_time_ms = float(response.request_meta.get("response_time") or 0)
+                context = response.request_meta.get("context")
+                record_complete_timing(
+                    response_time_ms=response_time_ms,
+                    server_timing_header=response.headers.get("Server-Timing", ""),
+                    context=context if isinstance(context, dict) else {},
+                )
+        finally:
+            if semaphore is not None:
+                semaphore.release()
+            if mark_prepared_complete_item_finished(queue_path):
+                runner = self.environment.runner
+                if runner is not None:
+                    spawn_later(1.0, runner.quit)
+
+    def _storage_client(self) -> requests.Session:
+        if self.storage_client is None:
+            self.storage_client = requests.Session()
+            self.storage_client.trust_env = False
+        return self.storage_client
+
+    def _warm_storage_connection(self, *, client: requests.Session, upload_url: str) -> None:
+        mode = os.getenv("PERF_STORAGE_WARMUP_MODE", "per_user").lower()
+        if mode == "disabled":
+            return
+        if mode != "per_process":
+            warm_storage_connection(
+                client=client,
+                upload_url=upload_url,
+                timeout_seconds=float(os.getenv("PERF_MULTIPART_TIMEOUT_SECONDS", "30")),
+            )
+            return
+
+        parsed = urlsplit(upload_url)
+        origin = f"{parsed.scheme}://{parsed.netloc}"
+        with _STORAGE_WARMUP_LOCK:
+            if origin in _WARMED_STORAGE_ORIGINS:
+                return
+            _WARMED_STORAGE_ORIGINS.add(origin)
+        try:
+            warm_storage_connection(
+                client=client,
+                upload_url=upload_url,
+                timeout_seconds=float(os.getenv("PERF_MULTIPART_TIMEOUT_SECONDS", "30")),
+            )
+        except Exception:
+            with _STORAGE_WARMUP_LOCK:
+                _WARMED_STORAGE_ORIGINS.discard(origin)
+            raise
 
     def _cleanup_completed_node(self, node_id: str) -> None:
         with self.client.delete(

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, String, Uuid
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.security import utc_now
@@ -70,4 +70,39 @@ class QuotaLedger(Base):
         DateTime(timezone=True),
         nullable=False,
         default=utc_now,
+    )
+
+
+class QuotaPolicy(Base):
+    """按文件名后缀或 MIME 前缀选择的策略配额。"""
+
+    __tablename__ = "quota_policies"
+    __table_args__ = (
+        Index("idx_quota_policies_tenant_priority", "tenant_id", "is_active", "priority"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    limit_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    max_file_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    extensions: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    mime_prefixes: Mapped[list[str]] = mapped_column(JSON, nullable=False, default=list)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
     )

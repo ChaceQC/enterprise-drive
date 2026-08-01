@@ -1,14 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import and_, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import utc_now
 from app.modules.file.models import FileVersion, Node
-from app.modules.quota.models import QuotaAccount, QuotaLedger
+from app.modules.quota.models import QuotaAccount, QuotaLedger, QuotaPolicy
 from app.modules.space.models import Space
 
 
@@ -61,6 +62,56 @@ class QuotaRepository:
         await self.session.flush()
         return account
 
+    async def ensure_account(
+        self,
+        *,
+        tenant_id: UUID,
+        owner_type: str,
+        owner_id: UUID,
+        limit_bytes: int,
+    ) -> QuotaAccount:
+        account = await self.get_account(
+            tenant_id=tenant_id,
+            owner_type=owner_type,
+            owner_id=owner_id,
+        )
+        if account is not None:
+            return account
+        try:
+            async with self.session.begin_nested():
+                account = QuotaAccount(
+                    tenant_id=tenant_id,
+                    owner_type=owner_type,
+                    owner_id=owner_id,
+                    limit_bytes=limit_bytes,
+                    used_bytes=0,
+                )
+                self.session.add(account)
+                await self.session.flush()
+        except IntegrityError:
+            # 并发请求已经创建了同一维度账户，读取已提交的事实即可。
+            account = None
+        if account is None:
+            account = await self.get_account(
+                tenant_id=tenant_id,
+                owner_type=owner_type,
+                owner_id=owner_id,
+            )
+        if account is None:
+            raise RuntimeError("quota account creation race did not resolve")
+        return account
+
+    async def list_active_policies(self, *, tenant_id: UUID) -> list[QuotaPolicy]:
+        result = await self.session.execute(
+            select(QuotaPolicy)
+            .where(
+                QuotaPolicy.tenant_id == tenant_id,
+                QuotaPolicy.is_active.is_(True),
+            )
+            .order_by(QuotaPolicy.priority, QuotaPolicy.created_at, QuotaPolicy.id)
+        )
+        return list(result.scalars().all())
+
     async def try_add_usage(
         self,
         *,
@@ -109,6 +160,47 @@ class QuotaRepository:
         )
         return result.scalar_one_or_none()
 
+    async def subtract_usage_by_account_id(
+        self,
+        *,
+        tenant_id: UUID,
+        account_id: UUID,
+        delta_bytes: int,
+    ) -> UUID | None:
+        result = await self.session.execute(
+            update(QuotaAccount)
+            .where(
+                QuotaAccount.tenant_id == tenant_id,
+                QuotaAccount.id == account_id,
+                QuotaAccount.used_bytes >= delta_bytes,
+            )
+            .values(
+                used_bytes=QuotaAccount.used_bytes - delta_bytes,
+                updated_at=utc_now(),
+            )
+            .returning(QuotaAccount.id)
+        )
+        return result.scalar_one_or_none()
+
+    async def list_ledger_entries_for_refs(
+        self,
+        *,
+        tenant_id: UUID,
+        ref_type: str,
+        ref_ids: list[UUID],
+    ) -> list[QuotaLedger]:
+        if not ref_ids:
+            return []
+        result = await self.session.execute(
+            select(QuotaLedger).where(
+                QuotaLedger.tenant_id == tenant_id,
+                QuotaLedger.ref_type == ref_type,
+                QuotaLedger.ref_id.in_(ref_ids),
+                QuotaLedger.delta_bytes > 0,
+            )
+        )
+        return list(result.scalars().all())
+
     async def add_ledger(
         self,
         *,
@@ -121,6 +213,7 @@ class QuotaRepository:
         ref_id: UUID,
     ) -> QuotaLedger:
         ledger = QuotaLedger(
+            id=uuid4(),
             tenant_id=tenant_id,
             account_id=account_id,
             account_type=account_type,
@@ -130,7 +223,6 @@ class QuotaRepository:
             ref_id=ref_id,
         )
         self.session.add(ledger)
-        await self.session.flush()
         return ledger
 
     async def get_account_by_id_for_update(

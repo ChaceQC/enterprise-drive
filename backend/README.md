@@ -226,15 +226,16 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - 文件树节点重命名、移动、删除到回收站、恢复和彻底删除。
 - 空间创建、文件夹创建、重命名、移动、删除、恢复和彻底删除审计事件。
 - `upload_sessions`、`upload_parts` 基础表和迁移。
-- `quota_accounts`、`quota_ledger` 基础表和迁移。
+- `quota_accounts`、`quota_ledger`、`quota_policies` 基础表和迁移。
 - 空间创建时同步初始化默认空间容量账户。
 - MinIO Python SDK 对象存储适配器，业务层通过 `StorageAdapter` 协议隔离具体 SDK。
 - 上传初始化、上传状态查询、分片预签名 URL、multipart complete 和 abort 接口。
 - 上传、文件下载和外链下载响应使用 `Drive Transfer Protocol v1`（`DTP/1`）标识；客户端可通过 `X-Drive-Transfer-Protocol: DTP/1` 显式协商，未知版本返回 HTTP 426。
 - 秒传分支：命中同租户同 hash、同大小 blob 时直接创建文件节点和版本，并增加 blob 引用计数。
 - multipart complete 成功合并后服务端校验 `sha256`，通过后将新对象归档到 `objects/{tenant_id}/{hash_prefix}/{content_hash}`，再写入 `file_blobs`、`nodes`、`file_versions`、`upload_parts` 和上传会话完成结果。
-- 秒传和 multipart complete 创建文件版本时原子增加空间容量快照，并写入 `quota_ledger` 容量流水。
-- 删除到回收站保留空间容量占用；彻底删除回收站节点时释放对应文件版本容量，并写入 `file_purged` 负向容量流水。
+- 秒传和 multipart complete 创建文件版本时原子增加空间、可选租户、可选用户和匹配策略账户的容量快照，并分别写入 `quota_ledger` 容量流水。
+- `quota_policies` 按扩展名或 MIME 前缀匹配累计额度与单文件大小限制；策略管理 HTTP API 后续由 `BE-044` 提供。
+- 删除到回收站保留容量占用；彻底删除回收站节点时按文件版本正向流水释放全部关联维度，并写入 `file_purged` 负向容量流水。
 - 上传初始化、秒传、complete、abort 和 hash 不匹配等失败审计事件。
 - `upload.expire_sessions` 维护任务，按租户清理过期上传会话并写入 `upload.expired` 审计事件。
 - `file.cleanup_expired_trash` 维护任务，按删除批次根节点清理超过保留期的回收站子树，释放容量、扣减 blob 引用并写入系统审计和搜索删除事件。
@@ -343,6 +344,9 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - `DRIVE_UPLOAD_PRESIGN_EXPIRES_SECONDS`
 - `DRIVE_DOWNLOAD_PRESIGN_EXPIRES_SECONDS`
 - `DRIVE_DEFAULT_SPACE_QUOTA_BYTES`
+- `DRIVE_DEFAULT_USER_QUOTA_BYTES`
+- `DRIVE_DEFAULT_TENANT_QUOTA_BYTES`
+- `DRIVE_QUOTA_POLICY_ENABLED`
 - `DRIVE_RATE_LIMIT_ENABLED`
 - `DRIVE_LOGIN_IP_RATE_LIMIT_COUNT`
 - `DRIVE_LOGIN_ACCOUNT_RATE_LIMIT_COUNT`
@@ -373,9 +377,9 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - `DRIVE_PREVIEW_TASK_RATE_LIMIT`
 - `DRIVE_PREVIEW_PRESIGN_EXPIRES_SECONDS`
 
-当前上传接口已通过 `PermissionService` 校验父目录节点级 `upload` 权限；初始化和 multipart complete 都会重新检查，避免会话创建后权限收紧仍可完成上传。容量初版按空间维度实现：空间创建时建立默认容量账户，上传初始化会快速检查空间剩余容量，秒传和 multipart complete 创建文件版本时通过原子 update 增加 `quota_accounts.used_bytes`，并写入 `quota_ledger`。删除到回收站不释放容量；彻底删除回收站节点时通过原子 update 扣减 `quota_accounts.used_bytes`，并写入 `reason=file_purged`、`ref_type=node` 的负向容量流水。容量校准任务 `quota.reconcile_space_usage` 使用 PostgreSQL 中的文件版本记录作为事实来源，默认按 `limit` 批大小和 cursor 扫完整个租户，只报告空间容量快照和账本漂移；传入 `repair=true` 时会修复缺失的空间容量账户，已有账户修复前会锁定账户行并重新聚合实际用量和账本合计，再校准 `quota_accounts.used_bytes`，仅按最新差额写入 `reason=quota_reconciled` 账本流水和 `quota.reconciled` 系统审计。彻底删除接口不在用户请求事务中同步删除最终对象；`file.cleanup_unreferenced_blobs` 会扫描 active、`ref_count=0` 且无 `file_versions` 引用的 blob，先标记为 `deleting`，再删除对象存储内容和 DB 元数据。对象存储删除失败会恢复为 `active` 并计入 `storage_errors`。`file.cleanup_orphaned_objects` 用于对象复制成功但 DB 最终化失败后的反向治理，只扫描受控 `objects/{tenant_id}/{hash_prefix}/{sha256}` key，跳过非受控 key，默认 dry-run，显式 `dry_run=False` 才删除对象；删除成功、失败和 dry-run 计划均写入系统审计，审计 metadata 不保存原始 storage key，并通过 `orphan_object_cleanup_total{status}` 暴露扫描、计划、清理、失败和跳过计数。用户/租户维度配额将在后续步骤补齐。
+当前上传接口已通过 `PermissionService` 校验父目录节点级 `upload` 权限；初始化和 multipart complete 都会重新检查，避免会话创建后权限收紧仍可完成上传。`BE-033` 已把容量服务扩展为多维账本：空间账户始终启用，`DRIVE_DEFAULT_TENANT_QUOTA_BYTES` 和 `DRIVE_DEFAULT_USER_QUOTA_BYTES` 大于 `0` 时分别启用租户、用户账户，`DRIVE_QUOTA_POLICY_ENABLED=true` 时按 `quota_policies` 的优先级匹配扩展名或 MIME 前缀，并执行累计额度和单文件上限。上传初始化执行快速检查；秒传和 multipart complete 创建文件版本时在同一事务内按固定维度顺序执行条件 update，任一维度不足都会回滚整次创建。删除到回收站不释放容量；彻底删除时按版本关联的正向流水原子释放全部账户，并写入 `reason=file_purged`、`ref_type=node` 的负向流水。现有账户额度是数据库事实，不会因环境默认值变化自动覆盖；策略及账户管理 HTTP API 归 `BE-044`。容量校准任务 `quota.reconcile_space_usage` 仍以 PostgreSQL 文件版本为事实来源，仅报告和修复空间账户；多维通用校准也归后续管理/治理任务。彻底删除接口不在用户请求事务中同步删除最终对象；`file.cleanup_unreferenced_blobs` 会扫描 active、`ref_count=0` 且无 `file_versions` 引用的 blob，先标记为 `deleting`，再删除对象存储内容和 DB 元数据。对象存储删除失败会恢复为 `active` 并计入 `storage_errors`。`file.cleanup_orphaned_objects` 用于对象复制成功但 DB 最终化失败后的反向治理，只扫描受控 `objects/{tenant_id}/{hash_prefix}/{sha256}` key，跳过非受控 key，默认 dry-run，显式 `dry_run=False` 才删除对象；删除成功、失败和 dry-run 计划均写入系统审计，审计 metadata 不保存原始 storage key，并通过 `orphan_object_cleanup_total{status}` 暴露扫描、计划、清理、失败和跳过计数。
 
-回收站自动清理由 `file.cleanup_expired_trash` 承担，默认使用 `DRIVE_TRASH_RETENTION_DAYS=30` 和 `DRIVE_TRASH_CLEANUP_INTERVAL_SECONDS=3600`。查询使用 `idx_nodes_trash_cleanup(tenant_id, is_deleted, deleted_at, id)`，只把没有“同删除时间、同删除人父节点”的过期节点视为删除批次根节点，避免一个目录子树被重复领取。任务锁定根节点和子树，删除全部版本与节点，按版本大小释放空间容量并写 `file_purged` 账本，扣减 blob 引用，发送 `reason=trash_retention_expired` 的搜索事件，记录 `file.trash.retention_purged` 系统审计，并通过 `trash_cleanup_total{status}`、`trash_cleanup_released_bytes_total` 暴露结果。普通目录仍在单个事务内处理；超大目录后台分片属于 `BE-046`。
+回收站自动清理由 `file.cleanup_expired_trash` 承担，默认使用 `DRIVE_TRASH_RETENTION_DAYS=30` 和 `DRIVE_TRASH_CLEANUP_INTERVAL_SECONDS=3600`。查询使用 `idx_nodes_trash_cleanup(tenant_id, is_deleted, deleted_at, id)`，只把没有“同删除时间、同删除人父节点”的过期节点视为删除批次根节点，避免一个目录子树被重复领取。任务锁定根节点和子树，删除全部版本与节点，按版本流水释放空间、租户、用户和策略账户并写 `file_purged` 账本，扣减 blob 引用，发送 `reason=trash_retention_expired` 的搜索事件，记录 `file.trash.retention_purged` 系统审计，并通过 `trash_cleanup_total{status}`、`trash_cleanup_released_bytes_total` 暴露结果。普通目录仍在单个事务内处理；超大目录后台分片属于 `BE-046`。
 
 维护任务可通过 Celery 任务调用：
 

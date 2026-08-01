@@ -66,6 +66,9 @@ def get_upload_service(
         quota_service=QuotaService(
             repository=QuotaRepository(session),
             default_space_limit_bytes=settings.default_space_quota_bytes,
+            default_user_limit_bytes=settings.default_user_quota_bytes,
+            default_tenant_limit_bytes=settings.default_tenant_quota_bytes,
+            policy_enabled=settings.quota_policy_enabled,
         ),
         storage=storage,
         settings=settings,
@@ -91,6 +94,9 @@ def get_upload_lifecycle_service(
         quota_service=QuotaService(
             repository=QuotaRepository(session),
             default_space_limit_bytes=settings.default_space_quota_bytes,
+            default_user_limit_bytes=settings.default_user_quota_bytes,
+            default_tenant_limit_bytes=settings.default_tenant_quota_bytes,
+            policy_enabled=settings.quota_policy_enabled,
         ),
         storage=storage,
         audit_service=AuditService(repository=AuditRepository(session)),

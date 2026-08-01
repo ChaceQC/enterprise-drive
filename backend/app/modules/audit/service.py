@@ -11,7 +11,11 @@ class AuditService:
         self.repository = repository
 
     async def record(self, *, event: AuditEvent, context: AuditContext) -> None:
-        audit_log = await self.repository.add_audit_log(event=event, context=context)
+        audit_log = await self.repository.add_audit_log(
+            event=event,
+            context=context,
+            flush=False,
+        )
         await self.repository.add_outbox_event(
             tenant_id=event.tenant_id,
             event_type=f"audit.{event.action}",
@@ -26,6 +30,7 @@ class AuditService:
                 "actor_id": str(event.actor_id) if event.actor_id else None,
                 "risk_level": event.risk_level,
             },
+            flush=False,
         )
 
     async def record_permission_changed(
@@ -56,4 +61,5 @@ class AuditService:
             aggregate_type=scope,
             aggregate_id=resource_id,
             payload=payload,
+            flush=False,
         )

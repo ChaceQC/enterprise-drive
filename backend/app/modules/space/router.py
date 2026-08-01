@@ -45,6 +45,9 @@ def get_space_service(
         quota_service=QuotaService(
             repository=QuotaRepository(session),
             default_space_limit_bytes=settings.default_space_quota_bytes,
+            default_user_limit_bytes=settings.default_user_quota_bytes,
+            default_tenant_limit_bytes=settings.default_tenant_quota_bytes,
+            policy_enabled=settings.quota_policy_enabled,
         ),
         settings=settings,
         audit_service=AuditService(repository=AuditRepository(session)),

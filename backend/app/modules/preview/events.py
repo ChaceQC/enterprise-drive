@@ -31,4 +31,5 @@ async def emit_preview_render_requested(
             "reason": reason,
             **(metadata or {}),
         },
+        flush=False,
     )
