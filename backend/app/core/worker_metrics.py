@@ -7,6 +7,7 @@ from typing import Any
 from prometheus_client import (
     CollectorRegistry,
     Counter,
+    Gauge,
     Histogram,
     multiprocess,
     start_http_server,
@@ -52,6 +53,61 @@ trash_cleanup_total = Counter(
 trash_cleanup_released_bytes_total = Counter(
     "trash_cleanup_released_bytes_total",
     "回收站保留期清理释放的容量字节数",
+    registry=WORKER_METRICS_REGISTRY,
+)
+
+maintenance_task_consecutive_failures = Gauge(
+    "maintenance_task_consecutive_failures",
+    "维护任务当前连续失败次数",
+    ("task",),
+    registry=WORKER_METRICS_REGISTRY,
+    multiprocess_mode="livemostrecent",
+)
+
+maintenance_task_alert_active = Gauge(
+    "maintenance_task_alert_active",
+    "维护任务连续失败告警状态",
+    ("task",),
+    registry=WORKER_METRICS_REGISTRY,
+    multiprocess_mode="livemostrecent",
+)
+
+maintenance_task_stale = Gauge(
+    "maintenance_task_stale",
+    "维护任务是否超过允许执行间隔仍未完成",
+    ("task",),
+    registry=WORKER_METRICS_REGISTRY,
+    multiprocess_mode="livemostrecent",
+)
+
+maintenance_task_last_success_timestamp_seconds = Gauge(
+    "maintenance_task_last_success_timestamp_seconds",
+    "维护任务最近一次成功时间 Unix timestamp",
+    ("task",),
+    registry=WORKER_METRICS_REGISTRY,
+    multiprocess_mode="livemostrecent",
+)
+
+maintenance_task_last_failure_timestamp_seconds = Gauge(
+    "maintenance_task_last_failure_timestamp_seconds",
+    "维护任务最近一次失败时间 Unix timestamp",
+    ("task",),
+    registry=WORKER_METRICS_REGISTRY,
+    multiprocess_mode="livemostrecent",
+)
+
+maintenance_task_last_finished_timestamp_seconds = Gauge(
+    "maintenance_task_last_finished_timestamp_seconds",
+    "维护任务最近一次完成时间 Unix timestamp",
+    ("task",),
+    registry=WORKER_METRICS_REGISTRY,
+    multiprocess_mode="livemostrecent",
+)
+
+maintenance_task_result_total = Counter(
+    "maintenance_task_result_total",
+    "维护任务返回结果中的累计计数",
+    ("task", "metric"),
     registry=WORKER_METRICS_REGISTRY,
 )
 
@@ -101,6 +157,44 @@ def record_trash_cleanup_released_bytes(*, size_bytes: int) -> None:
     if size_bytes <= 0:
         return
     trash_cleanup_released_bytes_total.inc(size_bytes)
+
+
+def set_maintenance_task_health(
+    *,
+    task: str,
+    consecutive_failures: int,
+    alert_active: bool,
+    stale: bool,
+    last_finished_at: float,
+    last_success_at: float,
+    last_failure_at: float,
+) -> None:
+    normalized_task = _bounded_label(task)
+    maintenance_task_consecutive_failures.labels(task=normalized_task).set(
+        max(consecutive_failures, 0)
+    )
+    maintenance_task_alert_active.labels(task=normalized_task).set(1 if alert_active else 0)
+    maintenance_task_stale.labels(task=normalized_task).set(1 if stale else 0)
+    maintenance_task_last_finished_timestamp_seconds.labels(task=normalized_task).set(
+        max(last_finished_at, 0.0)
+    )
+    maintenance_task_last_success_timestamp_seconds.labels(task=normalized_task).set(
+        max(last_success_at, 0.0)
+    )
+    maintenance_task_last_failure_timestamp_seconds.labels(task=normalized_task).set(
+        max(last_failure_at, 0.0)
+    )
+
+
+def record_maintenance_task_result_metrics(*, task: str, result: object) -> None:
+    if not isinstance(result, dict):
+        return
+    normalized_task = _bounded_label(task)
+    for key, value in result.items():
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or value <= 0:
+            continue
+        metric = _bounded_label(str(key))
+        maintenance_task_result_total.labels(task=normalized_task, metric=metric).inc(value)
 
 
 def worker_metrics_registry_for_exposition() -> CollectorRegistry:

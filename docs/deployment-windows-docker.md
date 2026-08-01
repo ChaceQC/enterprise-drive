@@ -206,7 +206,7 @@ CERTBOT_EMAIL=ops@example.com
 
 - API `/metrics` 只暴露 API 进程内的 HTTP 请求数/延迟、上传、下载、权限判断、Outbox 状态和搜索索引延迟指标。HTTP 标签使用完整路由模板，避免原始 URL、路径参数、用户/租户 ID、request_id 或 token 形成高基数。
 - API 默认 `DRIVE_API_WORKERS=2`，通过 `PROMETHEUS_MULTIPROC_DIR=/tmp/enterprise-drive/prometheus` 聚合。后端 runtime entrypoint 在容器每次启动前清理旧 metric `.db` 文件，然后 `exec` 原 API/migration/seed/Worker/beat 命令；在线 worker 不执行目录清理。
-- Worker 是独立容器，各自内部 `9100` 端口只提供本容器的 `worker_tasks_total`、`worker_task_duration_seconds`、预览失败和维护任务指标。后续 Prometheus Server 必须把 5 个 Worker 配成 5 个 scrape target，不能假设 API `/metrics` 会跨容器聚合。
+- Worker 是独立容器，各自内部 `9100` 端口只提供本容器的 `worker_tasks_total`、`worker_task_duration_seconds`、预览失败和维护任务指标。maintenance Worker 还暴露连续失败、告警状态、stale、最近完成时间和任务返回计数。后续 Prometheus Server 必须把 5 个 Worker 配成 5 个 scrape target，不能假设 API `/metrics` 会跨容器聚合。
 - JSON 日志自动带 `service`、`env`、`request_id`、`task_id`、`trace_id`、`span_id`；HTTP 请求结束日志包含 route/method/status/latency，Celery task 结束日志包含 task/queue/status/latency。
 - OpenTelemetry exporter 默认 `none`，不会向外部发送 span。生产接入 collector 时使用 `DRIVE_TRACING_EXPORTER=otlp_http`，把 `DRIVE_TRACING_OTLP_ENDPOINT` 设为完整 traces endpoint，例如 `http://otel-collector:4318/v1/traces`。`DRIVE_TRACING_OTLP_HEADERS` 必须是 JSON 对象，认证信息只放在未提交的 `.env.windows` 或受控 secret 管理中。
 - `outbox_pending_total` 和 `search_index_lag_seconds` 在 API scrape 时以短超时刷新。PostgreSQL 不可用时 `/metrics` 仍返回已有进程指标，但数据库 gauge 可能短暂保留上次成功值。
@@ -369,6 +369,8 @@ Preview Worker 不能和 audit/permission 队列混跑。
 - 后续接入的过期分享、预览产物和其他生命周期治理任务
 
 Beat 使用 UTC。当前 schedule 文件位于容器临时目录，可由静态配置重建；任务事实和执行结果仍以数据库、审计和任务自身状态为准。每个维护任务必须幂等，不能仅依赖 beat 单实例保证。
+
+`BE-035` 使用 Celery signal 统一记录上述五个周期维护任务的连续失败状态，Redis key 为 `maintenance_health:{task_name}`。达到配置阈值时 Worker 写结构化错误日志并设置 Prometheus alert Gauge；主进程定时刷新 stale 和时间戳指标。规则文件位于 `deploy/monitoring/maintenance-alerts.yml`，详细指标、配置和排障流程见 `docs/maintenance-monitoring.md`。Redis 只保存监控状态，不替代 PostgreSQL 与审计事实。
 
 ## 8. Preview Worker
 

@@ -1,0 +1,42 @@
+groups:
+  - name: enterprise-drive-maintenance
+    rules:
+      - alert: EnterpriseDriveMaintenanceConsecutiveFailures
+        expr: maintenance_task_alert_active == 1
+        for: 1m
+        labels:
+          severity: critical
+          service: enterprise-drive
+        annotations:
+          summary: "企业网盘维护任务连续失败"
+          description: "任务 {{ $labels.task }} 已达到连续失败阈值，请检查 maintenance Worker、Redis、PostgreSQL 和对象存储。"
+
+      - alert: EnterpriseDriveMaintenanceTaskStale
+        expr: maintenance_task_stale == 1
+        for: 5m
+        labels:
+          severity: warning
+          service: enterprise-drive
+        annotations:
+          summary: "企业网盘维护任务长时间未完成"
+          description: "任务 {{ $labels.task }} 已超过配置的多个调度周期未完成，请检查 Celery beat、maintenance 队列和 Worker。"
+
+      - alert: EnterpriseDriveMaintenanceStorageErrors
+        expr: increase(maintenance_task_result_total{metric="storage_errors"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: enterprise-drive
+        annotations:
+          summary: "企业网盘维护任务出现对象存储错误"
+          description: "任务 {{ $labels.task }} 在最近 15 分钟报告了对象存储错误。"
+
+      - alert: EnterpriseDriveQuotaDriftDetected
+        expr: increase(maintenance_task_result_total{task="quota.reconcile_space_usage",metric=~"snapshot_drifts|ledger_drifts"}[1h]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: enterprise-drive
+        annotations:
+          summary: "企业网盘容量账本出现漂移"
+          description: "容量校准任务在最近 1 小时发现快照或账本漂移，请检查报告并按维护窗口决定是否修复。"

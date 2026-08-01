@@ -394,6 +394,16 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - `file.cleanup_orphaned_objects(tenant_id=None, limit=100, after_storage_key=None, dry_run=True, request_id=None, scan_all=True)`
 - `permission.invalidate_cache(batch_size=None)`
 
+`BE-035` 已把上述五个周期维护任务接入统一健康状态。Celery signal 在任务结束后把连续失败次数和最近成功/失败时间原子写入 Redis，达到阈值时输出结构化告警日志；maintenance Worker 的 `9100/metrics` 暴露连续失败、告警状态、stale、最近完成时间和任务返回计数。Redis 状态写入失败不会改变任务原结果。配置项包括：
+
+- `DRIVE_MAINTENANCE_ALERT_CONSECUTIVE_FAILURES`
+- `DRIVE_MAINTENANCE_ALERT_STALE_INTERVALS`
+- `DRIVE_MAINTENANCE_STATE_TTL_SECONDS`
+- `DRIVE_MAINTENANCE_STATE_REDIS_TIMEOUT_SECONDS`
+- `DRIVE_MAINTENANCE_HEALTH_REFRESH_SECONDS`
+
+Prometheus 规则位于 `../deploy/monitoring/maintenance-alerts.yml`，完整说明见 `../docs/maintenance-monitoring.md`。
+
 ## 下载接口
 
 - `GET /api/v1/files/{node_id}/download`

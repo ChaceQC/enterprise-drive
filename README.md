@@ -160,6 +160,7 @@ GitHub `backend-ci` 同时启动临时 PostgreSQL 16 容器、执行 Alembic upg
 - `backend/README.md`：后端工程启动与验证说明。
 - `docs/deployment-windows-docker.md`：Windows 11 Docker Desktop 正式部署、运维、备份与回滚说明。
 - `docs/deployment-preview-worker.md`：预览 Worker 资源配额和部署说明。
+- `docs/maintenance-monitoring.md`：maintenance 周期任务状态、指标、告警规则和排障顺序。
 - `docs/performance-benchmark.md`：`BE-029` Locust 性能基准、fixture、资源边界和报告格式。
 - `docs/security-testing.md`：`BE-030` 威胁模型、Bandit/pip-audit 门禁、登录防护和安全修复记录。
 

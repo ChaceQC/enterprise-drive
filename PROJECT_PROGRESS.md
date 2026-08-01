@@ -1,5 +1,58 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-01 BE-035 维护任务调度告警
+
+### 当前状态
+
+- 五个既有 maintenance 周期任务已接入统一连续失败状态、指标和告警规则；未新增第二套调度器。
+- 下一项按编号进入 `BE-036` 文件版本列表、指定版本下载与回滚。
+
+### 已完成
+
+- 保留 Celery beat 的 UTC 调度和 maintenance 专用队列，统一监控 `upload.expire_sessions`、回收站清理、blob 清理、孤儿对象扫描和空间容量校准。
+- 新增 Redis 原子状态 `maintenance_health:{task_name}`，跨 Worker 子进程和重启保存连续失败、告警状态、最近完成/成功/失败时间；成功执行自动清零。
+- Celery `task_postrun` signal 在任务结束后更新状态，达到连续失败阈值时写结构化 `maintenance.alert` 错误日志；监控写入异常不会改变原任务结果。
+- maintenance Worker 新增连续失败、告警、stale、最近完成/成功/失败时间 Gauge，以及从任务返回字典采集的通用 `maintenance_task_result_total{task,metric}` Counter。
+- Worker 主进程按配置周期从 Redis 刷新 Gauge，任务超出多个调度周期未完成时设置 stale。
+- 新增 `deploy/monitoring/maintenance-alerts.yml`，覆盖连续失败、长时间未完成、对象存储错误和容量漂移。
+- 新增 `docs/maintenance-monitoring.md`，记录配置、指标、Redis 边界、Prometheus 接入和排障顺序。
+
+### 边界
+
+- 根 Compose 仍不内置 Prometheus Server/Alertmanager；生产监控必须抓取 `worker-maintenance:9100`、加载规则并接入企业值班通知。
+- Redis 只保存运行监控状态，不替代 PostgreSQL、对象存储和审计事实；Redis 数据丢失会重置失败 streak，但不会改变业务数据。
+- 当前告警覆盖既有五个维护任务；过期分享、预览产物和后续生命周期任务接入时必须加入同一任务清单和调度间隔映射。
+
+### 验证
+
+- 只运行一次变更文件 Ruff format check、Ruff lint 和 `uv run mypy app`，全部通过。
+- 只运行 `tests/test_observability.py` 与 `tests/test_celery_schedule.py`，结果为 `8 passed`。
+- 已用项目环境解析 `deploy/monitoring/maintenance-alerts.yml`，确认规则结构有效；未启动 Docker、全量测试或性能压测。
+
+### 下一步
+
+1. 只运行一次维护监控定向 Ruff、Mypy 和 observability/schedule 测试后提交推送。
+2. 进入 `BE-036`，实现文件版本列表、指定版本下载和回滚为新版本，并复用权限、容量和审计服务。
+3. 外部 Alertmanager、Grafana 看板和通知路由在部署监控系统时加载本轮规则，不阻塞后端工程顺序。
+
+### 涉及文件
+
+- `backend/app/core/maintenance_health.py`
+- `backend/app/core/worker_observability.py`
+- `backend/app/core/worker_metrics.py`
+- `backend/app/core/config.py`
+- `backend/tests/test_observability.py`
+- `deploy/monitoring/maintenance-alerts.yml`
+- `docs/maintenance-monitoring.md`
+- `docs/deployment-windows-docker.md`
+- `.env.windows.example`
+- `compose.windows.yml`
+- `README.md`
+- `backend/README.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-08-01 BE-034 高密级下载代理
 
 ### 当前状态

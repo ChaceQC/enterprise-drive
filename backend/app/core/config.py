@@ -173,6 +173,11 @@ class Settings(BaseSettings):
     blob_cleanup_interval_seconds: int = Field(default=3600, ge=1)
     orphan_object_scan_interval_seconds: int = Field(default=86400, ge=1)
     quota_reconciliation_interval_seconds: int = Field(default=86400, ge=1)
+    maintenance_alert_consecutive_failures: int = Field(default=3, ge=1)
+    maintenance_alert_stale_intervals: int = Field(default=3, ge=2)
+    maintenance_state_ttl_seconds: int = Field(default=30 * 24 * 3600, ge=3600)
+    maintenance_state_redis_timeout_seconds: float = Field(default=1.0, gt=0, le=10)
+    maintenance_health_refresh_seconds: int = Field(default=30, ge=5, le=300)
     upload_session_ttl_minutes: int = 1440
     upload_part_size_bytes: int = 8 * 1024 * 1024
     upload_presign_expires_seconds: int = 900
