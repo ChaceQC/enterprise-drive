@@ -88,6 +88,23 @@ class FileRepository:
         result = await self.session.execute(select(Node).where(*conditions))
         return result.scalar_one_or_none()
 
+    async def get_node_by_id_for_update(
+        self,
+        *,
+        tenant_id: UUID,
+        node_id: UUID,
+    ) -> Node | None:
+        result = await self.session.execute(
+            select(Node)
+            .where(
+                Node.tenant_id == tenant_id,
+                Node.id == node_id,
+                Node.is_deleted.is_(False),
+            )
+            .with_for_update()
+        )
+        return result.scalar_one_or_none()
+
     async def get_node_path_ids(
         self,
         *,
@@ -220,6 +237,95 @@ class FileRepository:
         if row is None:
             return None
         return row[0], row[1]
+
+    async def get_version_with_blob(
+        self,
+        *,
+        tenant_id: UUID,
+        node_id: UUID,
+        version_id: UUID,
+    ) -> tuple[FileVersion, FileBlob] | None:
+        return await self.get_current_version_with_blob(
+            tenant_id=tenant_id,
+            node_id=node_id,
+            version_id=version_id,
+        )
+
+    async def list_versions(
+        self,
+        *,
+        tenant_id: UUID,
+        node_id: UUID,
+        limit: int,
+        cursor: PageCursor | None,
+    ) -> list[FileVersion]:
+        conditions = [
+            FileVersion.tenant_id == tenant_id,
+            FileVersion.node_id == node_id,
+        ]
+        if cursor is not None:
+            conditions.append(
+                or_(
+                    FileVersion.created_at < cursor.created_at,
+                    and_(
+                        FileVersion.created_at == cursor.created_at,
+                        FileVersion.id < cursor.item_id,
+                    ),
+                )
+            )
+        result = await self.session.execute(
+            select(FileVersion)
+            .where(*conditions)
+            .order_by(FileVersion.created_at.desc(), FileVersion.id.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def next_version_no(self, *, tenant_id: UUID, node_id: UUID) -> int:
+        result = await self.session.execute(
+            select(func.coalesce(func.max(FileVersion.version_no), 0)).where(
+                FileVersion.tenant_id == tenant_id,
+                FileVersion.node_id == node_id,
+            )
+        )
+        return int(result.scalar_one()) + 1
+
+    async def create_file_version(
+        self,
+        *,
+        tenant_id: UUID,
+        node_id: UUID,
+        blob_id: UUID,
+        version_no: int,
+        size_bytes: int,
+        mime_type: str | None,
+        created_by: UUID,
+    ) -> FileVersion:
+        version = FileVersion(
+            tenant_id=tenant_id,
+            node_id=node_id,
+            blob_id=blob_id,
+            version_no=version_no,
+            size_bytes=size_bytes,
+            mime_type=mime_type,
+            created_by=created_by,
+        )
+        self.session.add(version)
+        await self.session.flush()
+        return version
+
+    async def increment_blob_ref_count(self, *, tenant_id: UUID, blob_id: UUID) -> bool:
+        result = await self.session.execute(
+            update(FileBlob)
+            .where(
+                FileBlob.tenant_id == tenant_id,
+                FileBlob.id == blob_id,
+                FileBlob.status == "active",
+            )
+            .values(ref_count=FileBlob.ref_count + 1)
+            .returning(FileBlob.id)
+        )
+        return result.scalar_one_or_none() is not None
 
     async def list_versions_for_nodes(
         self,

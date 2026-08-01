@@ -32,12 +32,16 @@ from app.modules.file.schemas import (
     FileDownloadUrlResponse,
     FileListResponse,
     FileNodeResponse,
+    FileVersionListResponse,
+    FileVersionRollbackRequest,
+    FileVersionRollbackResponse,
     MoveNodeRequest,
     PurgeNodeResponse,
     RenameNodeRequest,
     RestoreNodeRequest,
 )
 from app.modules.file.service import FileService
+from app.modules.file.version_service import FileVersionService
 from app.modules.org.repository import OrgRepository
 from app.modules.org.service import OrgService
 from app.modules.permission.repository import PermissionRepository
@@ -90,6 +94,33 @@ def get_file_download_service(
         permission_service=PermissionService(
             repository=permission_repository,
             org_service=org_service,
+        ),
+        storage=storage,
+        settings=settings,
+        audit_service=AuditService(repository=AuditRepository(session)),
+    )
+
+
+def get_file_version_service(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    storage: Annotated[StorageAdapter, Depends(get_storage_adapter)],
+) -> FileVersionService:
+    permission_repository = PermissionRepository(session)
+    org_service = OrgService(repository=OrgRepository(session))
+    return FileVersionService(
+        repository=FileRepository(session),
+        space_repository=SpaceRepository(session),
+        permission_service=PermissionService(
+            repository=permission_repository,
+            org_service=org_service,
+        ),
+        quota_service=QuotaService(
+            repository=QuotaRepository(session),
+            default_space_limit_bytes=settings.default_space_quota_bytes,
+            default_user_limit_bytes=settings.default_user_quota_bytes,
+            default_tenant_limit_bytes=settings.default_tenant_quota_bytes,
+            policy_enabled=settings.quota_policy_enabled,
         ),
         storage=storage,
         settings=settings,
@@ -208,6 +239,87 @@ async def purge_node(
     return await service.purge_node(
         current_user=current_user,
         node_id=node_id,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.get("/{node_id}/versions", response_model=FileVersionListResponse)
+async def list_file_versions(
+    http_request: Request,
+    node_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[FileVersionService, Depends(get_file_version_service)],
+    cursor: Annotated[str | None, Query(min_length=1)] = None,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> FileVersionListResponse:
+    return await service.list_versions(
+        current_user=current_user,
+        node_id=node_id,
+        cursor=cursor,
+        page_size=page_size,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.get(
+    "/{node_id}/versions/{version_id}/download",
+    response_model=FileDownloadUrlResponse,
+    dependencies=[Depends(ensure_supported_transfer_protocol)],
+)
+async def create_version_download_url(
+    http_request: Request,
+    node_id: UUID,
+    version_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    service: Annotated[FileVersionService, Depends(get_file_version_service)],
+) -> FileDownloadUrlResponse:
+    try:
+        await enforce_rate_limit(
+            settings=settings,
+            rate_limiter=rate_limiter,
+            current_user=current_user,
+            action="file.download_presign",
+            resource_key=f"node:{node_id}:version:{version_id}",
+            request=http_request,
+        )
+        response = await service.create_version_download_url(
+            current_user=current_user,
+            node_id=node_id,
+            version_id=version_id,
+            audit_context=build_audit_context(http_request),
+        )
+    except ApiError as exc:
+        record_download_request(
+            channel="internal_version",
+            outcome="denied" if exc.status_code < 500 else "error",
+        )
+        raise
+    except Exception:
+        record_download_request(channel="internal_version", outcome="error")
+        raise
+    record_download_request(channel="internal_version", outcome="allowed")
+    return response
+
+
+@router.post(
+    "/{node_id}/versions/{version_id}/rollback",
+    response_model=FileVersionRollbackResponse,
+)
+async def rollback_file_version(
+    http_request: Request,
+    node_id: UUID,
+    version_id: UUID,
+    request: FileVersionRollbackRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[FileVersionService, Depends(get_file_version_service)],
+) -> FileVersionRollbackResponse:
+    return await service.rollback_version(
+        current_user=current_user,
+        node_id=node_id,
+        source_version_id=version_id,
+        expected_current_version_id=request.expected_current_version_id,
         audit_context=build_audit_context(http_request),
     )
 

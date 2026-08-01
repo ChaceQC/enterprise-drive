@@ -44,6 +44,7 @@ class ForeignFixture:
     folder_id: UUID
     deleted_folder_id: UUID
     file_node_id: UUID
+    file_version_id: UUID
     share_id: UUID
     raw_token: str
     acl_entry_id: UUID
@@ -163,6 +164,7 @@ async def _prepare_foreign_fixture(
         parent_id=root_node_id,
     )
     file_node_id = UUID(completed["node_id"])
+    file_version_id = UUID(completed["version_id"])
 
     acl_response = await client.post(
         f"/api/v1/files/{root_node_id}/acl",
@@ -211,6 +213,7 @@ async def _prepare_foreign_fixture(
         folder_id=UUID(str(folder["id"])),
         deleted_folder_id=UUID(str(deleted_folder["id"])),
         file_node_id=file_node_id,
+        file_version_id=file_version_id,
         share_id=UUID(str(share_payload["id"])),
         raw_token=str(share_payload["raw_token"]),
         acl_entry_id=UUID(str(acl_response.json()["id"])),
@@ -332,6 +335,18 @@ async def test_internal_routes_hide_foreign_tenant_resources(
         ("DELETE", "/api/v1/files/{node_id}/purge"): (
             f"/api/v1/files/{fixture.deleted_folder_id}/purge",
             None,
+        ),
+        ("GET", "/api/v1/files/{node_id}/versions"): (
+            f"/api/v1/files/{fixture.file_node_id}/versions",
+            None,
+        ),
+        ("GET", "/api/v1/files/{node_id}/versions/{version_id}/download"): (
+            f"/api/v1/files/{fixture.file_node_id}/versions/{fixture.file_version_id}/download",
+            None,
+        ),
+        ("POST", "/api/v1/files/{node_id}/versions/{version_id}/rollback"): (
+            f"/api/v1/files/{fixture.file_node_id}/versions/{fixture.file_version_id}/rollback",
+            {},
         ),
         ("GET", "/api/v1/files/{node_id}/download"): (
             f"/api/v1/files/{fixture.file_node_id}/download",

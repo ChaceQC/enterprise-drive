@@ -71,3 +71,33 @@ class FileDownloadUrlResponse(DriveTransferProtocolResponse):
     download_url: str
     expires_at: datetime
     headers: dict[str, str]
+
+
+class FileVersionResponse(BaseModel):
+    id: UUID
+    node_id: UUID
+    version_no: int
+    size_bytes: int
+    mime_type: str | None
+    created_by: UUID
+    created_at: datetime
+    is_current: bool
+
+
+class FileVersionListResponse(BaseModel):
+    node_id: UUID
+    current_version_id: UUID | None
+    items: list[FileVersionResponse]
+    next_cursor: str | None = None
+
+
+class FileVersionRollbackRequest(BaseModel):
+    expected_current_version_id: UUID | None = None
+
+
+class FileVersionRollbackResponse(BaseModel):
+    node_id: UUID
+    source_version_id: UUID
+    new_version_id: UUID
+    version_no: int
+    current_version_id: UUID

@@ -139,7 +139,7 @@ uv run pytest tests/test_route_security_matrix.py `
   tests/test_security_adversarial.py -q
 ```
 
-矩阵与运行时 OpenAPI 的 36 个 `/api/v1` route 完全对账，覆盖匿名、CSRF、管理员、真实跨租户资源和活跃会话撤权；对抗输入覆盖损坏/超大图片、文档路径与扩展名注入、Range 权限、预签名 URL、不同 token 外链穷举、Trusted Host 和 CORS。
+矩阵与运行时 OpenAPI 的 40 个 `/api/v1` route 完全对账，覆盖匿名、CSRF、管理员、真实跨租户资源和活跃会话撤权；对抗输入覆盖损坏/超大图片、文档路径与扩展名注入、Range 权限、预签名 URL、不同 token 外链穷举、Trusted Host 和 CORS。
 
 真实 Nginx 原始 HTTP 安全 smoke：
 
@@ -224,6 +224,7 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - `acl_entries` 基础表和迁移，支持 `user`、`department`、`group` 三类节点 ACL 主体、allow/deny、继承开关和 deny 优先。
 - 文件夹创建、目录子节点列表和签名 cursor pagination。
 - 文件树节点重命名、移动、删除到回收站、恢复和彻底删除。
+- 文件版本签名 cursor 列表、指定历史版本 DTP/1 预签名下载，以及把历史内容回滚为递增新版本；回滚支持可选当前版本前置条件，复用 blob 并同步容量、审计、搜索和预览事件。
 - 空间创建、文件夹创建、重命名、移动、删除、恢复和彻底删除审计事件。
 - `upload_sessions`、`upload_parts` 基础表和迁移。
 - `quota_accounts`、`quota_ledger`、`quota_policies` 基础表和迁移。
@@ -291,6 +292,9 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - `DELETE /api/v1/files/{node_id}`
 - `DELETE /api/v1/files/{node_id}/purge`
 - `POST /api/v1/files/{node_id}/restore`
+- `GET /api/v1/files/{node_id}/versions`
+- `GET /api/v1/files/{node_id}/versions/{version_id}/download`
+- `POST /api/v1/files/{node_id}/versions/{version_id}/rollback`
 - `GET /api/v1/files/{node_id}/preview`
 - `GET /api/v1/search?q=...&limit=...&cursor=...`
 
@@ -408,8 +412,11 @@ Prometheus 规则位于 `../deploy/monitoring/maintenance-alerts.yml`，完整�
 
 - `GET /api/v1/files/{node_id}/download`
 - `GET /api/v1/files/{node_id}/content`
+- `GET /api/v1/files/{node_id}/versions/{version_id}/download`
 
 下载接口基于 `nodes.current_version_id` 查询当前版本和 blob，返回 `download_url`、`expires_at`、`file_name`、`version_id`、`size_bytes`、`mime_type` 和额外 `headers`。S3/MinIO 适配器会使用 `ResponseContentDisposition` 设置下载文件名，并同时提供 ASCII `filename` 和 UTF-8 `filename*`。
+
+历史版本下载按 URL 中的 `version_id` 查询同一文件节点下的不可变版本，并复用 DTP/1、节点级 `download` 权限、预签名限流和 active blob 校验。版本列表使用 `read_meta` 权限和签名 cursor；版本回滚使用 `update` 权限，在锁定节点后校验可选 `expected_current_version_id`，创建新的 `file_versions` 记录并把 `nodes.current_version_id` 指向新版本，旧版本保持不变。
 
 下载预签名已接入基础限流，按 `tenant + user + node + IP` 维度计数。触发限流时返回 HTTP 429，错误码为 `RATE_LIMITED`。
 

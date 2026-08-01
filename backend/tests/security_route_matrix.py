@@ -15,6 +15,7 @@ AuthorizationPolicy = Literal[
     "node_grant",
     "node_list",
     "node_preview",
+    "node_read_meta",
     "node_restore",
     "node_share",
     "node_update",
@@ -32,6 +33,7 @@ _TARGET_NODE_ID = "00000000-0000-4000-8000-000000000004"
 _ACL_ENTRY_ID = "00000000-0000-4000-8000-000000000005"
 _SHARE_ID = "00000000-0000-4000-8000-000000000006"
 _UPLOAD_SESSION_ID = "00000000-0000-4000-8000-000000000007"
+_VERSION_ID = "00000000-0000-4000-8000-000000000008"
 _RAW_SHARE_TOKEN = "0" * 32
 _CONTENT_HASH = "0" * 64
 
@@ -273,6 +275,34 @@ ROUTE_SECURITY_MATRIX: tuple[SecurityRouteCase, ...] = (
         tenant_scope="resource",
         csrf_mode="required",
         authorization="node_delete",
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/files/{node_id}/versions",
+        request_path=f"/api/v1/files/{_NODE_ID}/versions",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="none",
+        authorization="node_read_meta",
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/files/{node_id}/versions/{version_id}/download",
+        request_path=f"/api/v1/files/{_NODE_ID}/versions/{_VERSION_ID}/download",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="none",
+        authorization="node_download",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/files/{node_id}/versions/{version_id}/rollback",
+        request_path=f"/api/v1/files/{_NODE_ID}/versions/{_VERSION_ID}/rollback",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="node_update",
+        json_body={},
     ),
     SecurityRouteCase(
         method="GET",

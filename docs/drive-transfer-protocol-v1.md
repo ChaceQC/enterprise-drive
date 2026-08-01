@@ -37,6 +37,7 @@ DTP/1 不定义新的 TCP、UDP、TLS、QUIC、加密算法或可靠传输实现
 | 完成上传 | `POST /api/v1/uploads/{session_id}/complete` |
 | 取消上传 | `POST /api/v1/uploads/{session_id}/abort` |
 | 获取文件下载签名 | `GET /api/v1/files/{node_id}/download` |
+| 获取指定历史版本下载签名 | `GET /api/v1/files/{node_id}/versions/{version_id}/download` |
 | 受控代理下载 | `GET /api/v1/files/{node_id}/content` |
 | 获取外链下载签名 | `POST /api/v1/public/shares/download` |
 
@@ -62,7 +63,7 @@ X-Drive-Transfer-Protocol: DTP/1
 
 为兼容已有 Web/API 调用，当前服务端允许省略该请求头；省略时按 `DTP/1` 处理。
 
-全部上传响应、文件下载签名响应和外链下载签名响应必须返回：
+全部上传响应、当前/历史版本文件下载签名响应和外链下载签名响应必须返回：
 
 ```json
 {
@@ -205,6 +206,8 @@ Multipart ETag 只作为对象存储分片完成参数，禁止把它当作整�
 - 必要请求头
 - `protocol_version`
 
+当前版本使用 `/api/v1/files/{node_id}/download`；指定不可变历史版本使用 `/api/v1/files/{node_id}/versions/{version_id}/download`。两个入口都重新检查节点级 `download` 权限和 active blob 状态，历史版本入口不得因为该版本不是 `current_version_id` 而拒绝。版本回滚属于控制操作：服务端创建引用目标历史内容的新版本并更新当前指针，禁止改写或复用原历史版本 ID。
+
 Rust 客户端必须：
 
 1. 下载到同目录随机临时文件。
@@ -230,6 +233,8 @@ DTP/1 客户端至少识别：
 - `PARENT_NOT_FOUND`
 - `NODE_NOT_FOUND`
 - `NODE_NAME_EXISTS`
+- `FILE_VERSION_NOT_FOUND`
+- `FILE_VERSION_CONFLICT`
 - `QUOTA_EXCEEDED`
 - `BLOB_DELETING`
 - `UPLOAD_SESSION_NOT_FOUND`
@@ -259,6 +264,7 @@ DTP/1 客户端至少识别：
 | 秒传、multipart、状态查询、单分片签名 | 已实现 |
 | 幂等 complete、abort、服务端 SHA-256 | 已实现 |
 | 预签名 HTTPS 下载 | 已实现 |
+| 指定历史版本 DTP/1 预签名下载 | 已实现 |
 | 受控流式代理与单段 HTTP Range | 已实现 |
 | 批量分片签名 | `DC-006` 实现 |
 | 服务端并发/带宽提示 | `DC-006` 实现 |

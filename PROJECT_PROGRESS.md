@@ -1,5 +1,57 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-01 BE-036 文件版本列表、指定版本下载与回滚
+
+### 当前状态
+
+- 文件版本列表、指定历史版本下载和回滚为新版本的核心 API 已完成。
+- 下一项按编号进入 `BE-037` 回收站列表与批量文件操作；继续执行“实现优先、每项一次最小定向验证”，不恢复目标压测或全量重复测试。
+
+### 已完成
+
+- 新增 `GET /api/v1/files/{node_id}/versions`，使用节点级 `read_meta` 权限和签名 cursor 分页，返回 `current_version_id` 并逐项标记 `is_current`。
+- 新增 `GET /api/v1/files/{node_id}/versions/{version_id}/download`，使用节点级 `download` 权限、现有预签名限流和 DTP/1 响应，允许下载同一节点的指定历史版本。
+- 新增 `POST /api/v1/files/{node_id}/versions/{version_id}/rollback`，使用节点级 `update` 权限；支持可选 `expected_current_version_id`，当前版本变化时返回 `FILE_VERSION_CONFLICT`。
+- 回滚锁定目标节点，生成递增 `version_no`，复用历史版本 blob 并增加引用计数；旧版本记录保持不变。
+- 新版本创建与空间、可选用户/租户及匹配策略配额扣减处于同一事务，并更新 `nodes.current_version_id`。
+- 回滚写入 `file.version.rolled_back` 审计及 `search.index_requested`、`search.extract_requested`、`preview.render_requested` 事件；列表和历史下载分别写入 `file.versions.listed`、`file.version.downloaded`。
+- 安全路由矩阵和跨租户 fixture 已同步，运行时 OpenAPI 路由总数更新为 40，排除 ping/login 后为 38。
+
+### 验证
+
+- 只运行一次变更文件 Ruff format check、Ruff lint 和 `uv run mypy app`，全部通过。
+- 只运行 `tests/test_file_versions.py` 与安全矩阵/OpenAPI 精确对账用例，结果为 `3 passed`。
+- 定向用例覆盖签名 cursor、历史版本下载、回滚创建版本 2、blob 引用与配额 ledger、审计/搜索/预览事件，以及 viewer 可列表/下载但不可回滚；未运行全量测试、Docker 集成或性能压测。
+
+### 边界
+
+- 当前版本下载仍可使用 `/files/{node_id}/download`，历史版本使用带 `version_id` 的独立入口；受控代理 `/content` 目前只代理当前版本。
+- 回滚按新文件版本计入容量，不释放被替换的当前版本容量；只有彻底删除相应版本后才按正向流水释放。
+- 批量版本回滚、版本备注/保留策略和历史版本代理 Range 不在本轮核心范围。
+
+### 下一步
+
+1. 提交并推送 `BE-036`。
+2. 实现 `BE-037` 回收站签名 cursor 列表，以及批量删除、移动、恢复和彻底删除。
+3. 所有批量写入口接入 `Idempotency-Key`，逐项返回成功或失败，不以单项失败回滚已完成的其他项。
+
+### 涉及文件
+
+- `backend/app/modules/file/repository.py`
+- `backend/app/modules/file/router.py`
+- `backend/app/modules/file/schemas.py`
+- `backend/app/modules/file/version_service.py`
+- `backend/tests/test_file_versions.py`
+- `backend/tests/security_route_matrix.py`
+- `backend/tests/test_route_security_matrix.py`
+- `backend/tests/test_route_security_cross_tenant.py`
+- `README.md`
+- `backend/README.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `docs/drive-transfer-protocol-v1.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-08-01 BE-035 维护任务调度告警
 
 ### 当前状态
