@@ -364,16 +364,23 @@ jobs:
           dependency-snapshot: false
           upload-artifact: false
 
-      - name: Generate full Grype vulnerability report
-        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+      - name: Install pinned Grype scanner
+        id: grype
+        uses: anchore/scan-action/download-grype@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:
-          sbom: supply-chain-artifacts/minio-${{ matrix.component }}.spdx.json
-          fail-build: false
-          output-format: json
-          output-file: supply-chain-artifacts/minio-${{ matrix.component }}.grype.json
-          severity-cutoff: critical
-          only-fixed: false
           grype-version: v0.115.0
+
+      - name: Generate full Grype vulnerability report
+        env:
+          GRYPE_CMD: ${{ steps.grype.outputs.cmd }}
+          SBOM: supply-chain-artifacts/minio-${{ matrix.component }}.spdx.json
+          REPORT: supply-chain-artifacts/minio-${{ matrix.component }}.grype.json
+        run: |
+          set -euo pipefail
+          "${GRYPE_CMD}" \
+            --output json \
+            --file "${REPORT}" \
+            "sbom:${SBOM}"
 
       - name: Report baseline and gate newly discovered Critical vulnerabilities
         env:
