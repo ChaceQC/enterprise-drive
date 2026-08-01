@@ -1,5 +1,56 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-01 BE-030 路由、租户与对抗输入安全矩阵
+
+### 当前状态
+
+- `BE-030` 第二轮动态安全测试已完成代码与本地验证；尚未提交推送和等待 GitHub Actions。
+- 运行时 OpenAPI 当前包含 36 个 `/api/v1` method + path；排除 `GET /ping` 和 `POST /auth/login` 后为原计划口径的 34 个 route。
+
+### 已完成
+
+- 新增 `tests/security_route_matrix.py`，为全部 36 个 API route 固定 method、模板路径、最小合法请求、访问模式、租户范围、CSRF 模式和资源授权策略。
+- 新增 OpenAPI 集合一致性门禁：矩阵与 `create_app(settings).openapi()["paths"]` 必须完全一致，新增、删除或改名 route 未同步矩阵时测试会失败。
+- 对全部 36 个 route 执行匿名 ASGI 请求：受保护入口统一返回 `401/AUTH_REQUIRED`；登录返回统一无效凭据；无 Cookie 登出保持幂等；ping 和外链入口保持既定公开边界。
+- 对全部 20 个登录态副作用 route 执行缺失 CSRF 测试，统一返回 `403/CSRF_TOKEN_INVALID`；有会话登出也必须校验 CSRF，无会话登出仍可幂等成功。
+- 验证 11 个登录态读取 route 可通过身份门禁，普通用户访问管理员审计 route 返回 `403/ADMIN_REQUIRED`。
+- 建立真实第二租户夹具，包含用户、空间、根目录、活动/回收站节点、文件版本、ACL、外链分享和未完成上传会话；26 个内部资源 route 使用真实外租户 ID 时全部返回 404，空间列表和管理员审计结果也不泄露外租户记录。
+- 验证已登录成员在空间成员关系被删除后无需重新登录即失去空间列表和写权限，活跃 Cookie Session 不缓存业务授权。
+- 新增损坏图片、超大图片、Office 扩展名命令注入、文档路径穿越/NUL、Range 授权、预签名 URL 凭据隔离和不同 token 外链穷举测试。
+- 外链访问和下载在攻击者轮换原始 token 时仍受来源 IP 总量窗口限制；前两次无效 token 返回 404，达到临时测试门槛后返回 `429/RATE_LIMITED`。
+
+### 阻塞与风险
+
+- ASGI 动态矩阵不替代 Nginx 与真实 TCP 层的 Host、CORS、冲突 `Content-Length`/`Transfer-Encoding`、超大请求体和慢请求测试。
+- 当前 Range 验证确认请求头不能绕过权限且预签名响应不携带 Cookie/CSRF；完整后端代理 Range 属于 `BE-034`，尚未实现。
+- MinIO Server/Client 既有 Critical 基线、真实公网 DNS/受信 TLS 和外部扫描仍是正式上线风险。
+
+### 下一步
+
+1. 增加 Trusted Host、CORS、超大 API 请求以及 Nginx 原始 HTTP 请求边界测试，完成 `BE-030` 剩余动态门禁。
+2. 运行完整 Ruff、格式、Bandit、pip-audit、Mypy 和 pytest，并使用真实 Docker 验证 gateway/Nginx 边界。
+3. 同步安全文档后提交推送，等待 GitHub Actions 全部 job 成功。
+
+### 验证
+
+- `uv run pytest -o addopts='' tests/test_route_security_matrix.py tests/test_route_security_cross_tenant.py tests/test_security_adversarial.py -q`：`53 passed in 15.63s`。
+- 四个新增 Python 文件 Ruff、格式检查与 Mypy：通过。
+- `uv lock --check`、全量 Ruff、格式检查、Bandit、pip-audit 和 `uv run mypy app`：全部通过；Bandit 中危/高危为 0，依赖已知漏洞为 0。
+- 完整 `uv run pytest -p no:cacheprovider -q`：通过；收集 `245` 个测试，其中 `241 passed, 4 skipped`。
+
+### 涉及文件
+
+- `backend/tests/security_route_matrix.py`
+- `backend/tests/test_route_security_matrix.py`
+- `backend/tests/test_route_security_cross_tenant.py`
+- `backend/tests/test_security_adversarial.py`
+- `docs/security-testing.md`
+- `README.md`
+- `backend/README.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-07-31 BE-030 production Settings 自校验
 
 ### 当前状态

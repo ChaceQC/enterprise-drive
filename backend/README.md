@@ -131,6 +131,16 @@ uv run mypy app
 uv run pytest
 ```
 
+### BE-030 路由与对抗输入矩阵
+
+```powershell
+uv run pytest tests/test_route_security_matrix.py `
+  tests/test_route_security_cross_tenant.py `
+  tests/test_security_adversarial.py -q
+```
+
+矩阵与运行时 OpenAPI 的 36 个 `/api/v1` route 完全对账，覆盖匿名、CSRF、管理员、真实跨租户资源和活跃会话撤权；对抗输入覆盖损坏/超大图片、文档路径与扩展名注入、Range 权限、预签名 URL 和不同 token 外链穷举。Host/CORS、超大请求和 Nginx 原始 HTTP 边界仍需使用真实 gateway 补齐。
+
 真实 Docker 可观测性 smoke：
 
 ```powershell

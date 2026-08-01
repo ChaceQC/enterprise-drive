@@ -1,0 +1,435 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import Literal
+
+AccessMode = Literal["public", "session", "admin"]
+TenantScope = Literal["none", "session", "tenant_slug", "resource"]
+CsrfMode = Literal["none", "optional_session", "required"]
+AuthorizationPolicy = Literal[
+    "anonymous",
+    "authenticated",
+    "external_share",
+    "node_delete",
+    "node_download",
+    "node_grant",
+    "node_list",
+    "node_preview",
+    "node_restore",
+    "node_share",
+    "node_update",
+    "node_upload",
+    "space_manage",
+    "space_member",
+    "super_admin",
+    "upload_owner",
+]
+
+_SPACE_ID = "00000000-0000-4000-8000-000000000001"
+_USER_ID = "00000000-0000-4000-8000-000000000002"
+_NODE_ID = "00000000-0000-4000-8000-000000000003"
+_TARGET_NODE_ID = "00000000-0000-4000-8000-000000000004"
+_ACL_ENTRY_ID = "00000000-0000-4000-8000-000000000005"
+_SHARE_ID = "00000000-0000-4000-8000-000000000006"
+_UPLOAD_SESSION_ID = "00000000-0000-4000-8000-000000000007"
+_RAW_SHARE_TOKEN = "0" * 32
+_CONTENT_HASH = "0" * 64
+
+
+@dataclass(frozen=True, slots=True)
+class SecurityRouteCase:
+    method: str
+    template_path: str
+    request_path: str
+    access_mode: AccessMode
+    tenant_scope: TenantScope
+    csrf_mode: CsrfMode
+    authorization: AuthorizationPolicy
+    json_body: dict[str, object] | None = None
+    query: dict[str, str | int] = field(default_factory=dict)
+    headers: dict[str, str] = field(default_factory=dict)
+    anonymous_status: int = 401
+    anonymous_code: str | None = "AUTH_REQUIRED"
+
+    @property
+    def id(self) -> str:
+        normalized_path = self.template_path.removeprefix("/api/v1/").replace("/", "-")
+        return f"{self.method.lower()}-{normalized_path}"
+
+    @property
+    def route_key(self) -> tuple[str, str]:
+        return self.method, self.template_path
+
+
+ROUTE_SECURITY_MATRIX: tuple[SecurityRouteCase, ...] = (
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/admin/audit-logs",
+        request_path="/api/v1/admin/audit-logs",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="super_admin",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/auth/login",
+        request_path="/api/v1/auth/login",
+        access_mode="public",
+        tenant_scope="tenant_slug",
+        csrf_mode="none",
+        authorization="anonymous",
+        json_body={
+            "tenant_slug": "default",
+            "username": "missing-user",
+            "password": "missing-password",
+        },
+        anonymous_status=401,
+        anonymous_code="AUTH_INVALID_CREDENTIALS",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/auth/session/rotate",
+        request_path="/api/v1/auth/session/rotate",
+        access_mode="session",
+        tenant_scope="session",
+        csrf_mode="required",
+        authorization="authenticated",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/auth/logout",
+        request_path="/api/v1/auth/logout",
+        access_mode="public",
+        tenant_scope="session",
+        csrf_mode="optional_session",
+        authorization="anonymous",
+        anonymous_status=200,
+        anonymous_code=None,
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/auth/me",
+        request_path="/api/v1/auth/me",
+        access_mode="session",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="authenticated",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/spaces",
+        request_path="/api/v1/spaces",
+        access_mode="session",
+        tenant_scope="session",
+        csrf_mode="required",
+        authorization="authenticated",
+        json_body={"slug": "matrix-space", "name": "矩阵空间"},
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/spaces",
+        request_path="/api/v1/spaces",
+        access_mode="session",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="authenticated",
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/spaces/{space_id}/members",
+        request_path=f"/api/v1/spaces/{_SPACE_ID}/members",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="none",
+        authorization="space_manage",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/spaces/{space_id}/members",
+        request_path=f"/api/v1/spaces/{_SPACE_ID}/members",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="space_manage",
+        json_body={"user_id": _USER_ID, "role": "viewer"},
+    ),
+    SecurityRouteCase(
+        method="PATCH",
+        template_path="/api/v1/spaces/{space_id}/members/{user_id}",
+        request_path=f"/api/v1/spaces/{_SPACE_ID}/members/{_USER_ID}",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="space_manage",
+        json_body={"role": "viewer"},
+    ),
+    SecurityRouteCase(
+        method="DELETE",
+        template_path="/api/v1/spaces/{space_id}/members/{user_id}",
+        request_path=f"/api/v1/spaces/{_SPACE_ID}/members/{_USER_ID}",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="space_manage",
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/files/{node_id}/acl",
+        request_path=f"/api/v1/files/{_NODE_ID}/acl",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="none",
+        authorization="node_grant",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/files/{node_id}/acl",
+        request_path=f"/api/v1/files/{_NODE_ID}/acl",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="node_grant",
+        json_body={
+            "subject_type": "user",
+            "subject_id": _USER_ID,
+            "effect": "allow",
+            "actions": ["read_meta"],
+        },
+    ),
+    SecurityRouteCase(
+        method="PATCH",
+        template_path="/api/v1/files/{node_id}/acl/{entry_id}",
+        request_path=f"/api/v1/files/{_NODE_ID}/acl/{_ACL_ENTRY_ID}",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="node_grant",
+        json_body={"effect": "allow", "actions": ["read_meta"]},
+    ),
+    SecurityRouteCase(
+        method="DELETE",
+        template_path="/api/v1/files/{node_id}/acl/{entry_id}",
+        request_path=f"/api/v1/files/{_NODE_ID}/acl/{_ACL_ENTRY_ID}",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="node_grant",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/files/folders",
+        request_path="/api/v1/files/folders",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="node_upload",
+        json_body={"space_id": _SPACE_ID, "name": "matrix-folder"},
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/files",
+        request_path="/api/v1/files",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="none",
+        authorization="node_list",
+        query={"space_id": _SPACE_ID},
+    ),
+    SecurityRouteCase(
+        method="PATCH",
+        template_path="/api/v1/files/{node_id}",
+        request_path=f"/api/v1/files/{_NODE_ID}",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="node_update",
+        json_body={"name": "renamed-node"},
+    ),
+    SecurityRouteCase(
+        method="DELETE",
+        template_path="/api/v1/files/{node_id}",
+        request_path=f"/api/v1/files/{_NODE_ID}",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="node_delete",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/files/{node_id}/move",
+        request_path=f"/api/v1/files/{_NODE_ID}/move",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="node_update",
+        json_body={"target_parent_id": _TARGET_NODE_ID},
+    ),
+    SecurityRouteCase(
+        method="DELETE",
+        template_path="/api/v1/files/{node_id}/purge",
+        request_path=f"/api/v1/files/{_NODE_ID}/purge",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="node_delete",
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/files/{node_id}/download",
+        request_path=f"/api/v1/files/{_NODE_ID}/download",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="none",
+        authorization="node_download",
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/files/{node_id}/preview",
+        request_path=f"/api/v1/files/{_NODE_ID}/preview",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="none",
+        authorization="node_preview",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/files/{node_id}/restore",
+        request_path=f"/api/v1/files/{_NODE_ID}/restore",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="node_restore",
+        json_body={},
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/search",
+        request_path="/api/v1/search",
+        access_mode="session",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="authenticated",
+        query={"q": "matrix"},
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/shares",
+        request_path="/api/v1/shares",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="node_share",
+        json_body={"share_type": "external", "root_node_id": _NODE_ID},
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/shares/{share_id}",
+        request_path=f"/api/v1/shares/{_SHARE_ID}",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="none",
+        authorization="node_share",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/shares/{share_id}/revoke",
+        request_path=f"/api/v1/shares/{_SHARE_ID}/revoke",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="node_share",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/public/shares/access",
+        request_path="/api/v1/public/shares/access",
+        access_mode="public",
+        tenant_scope="tenant_slug",
+        csrf_mode="none",
+        authorization="external_share",
+        json_body={"tenant_slug": "default", "raw_token": _RAW_SHARE_TOKEN},
+        anonymous_status=404,
+        anonymous_code="SHARE_NOT_FOUND",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/public/shares/download",
+        request_path="/api/v1/public/shares/download",
+        access_mode="public",
+        tenant_scope="tenant_slug",
+        csrf_mode="none",
+        authorization="external_share",
+        json_body={
+            "tenant_slug": "default",
+            "raw_token": _RAW_SHARE_TOKEN,
+            "node_id": _NODE_ID,
+        },
+        anonymous_status=404,
+        anonymous_code="SHARE_NOT_FOUND",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/uploads/init",
+        request_path="/api/v1/uploads/init",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="node_upload",
+        json_body={
+            "space_id": _SPACE_ID,
+            "parent_id": _TARGET_NODE_ID,
+            "file_name": "matrix.bin",
+            "size_bytes": 1,
+            "content_hash": _CONTENT_HASH,
+        },
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/uploads/{session_id}",
+        request_path=f"/api/v1/uploads/{_UPLOAD_SESSION_ID}",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="none",
+        authorization="upload_owner",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/uploads/{session_id}/parts/{part_no}/presign",
+        request_path=f"/api/v1/uploads/{_UPLOAD_SESSION_ID}/parts/1/presign",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="upload_owner",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/uploads/{session_id}/complete",
+        request_path=f"/api/v1/uploads/{_UPLOAD_SESSION_ID}/complete",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="upload_owner",
+        json_body={"parts": [{"part_no": 1, "etag": "etag"}]},
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/uploads/{session_id}/abort",
+        request_path=f"/api/v1/uploads/{_UPLOAD_SESSION_ID}/abort",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="upload_owner",
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/ping",
+        request_path="/api/v1/ping",
+        access_mode="public",
+        tenant_scope="none",
+        csrf_mode="none",
+        authorization="anonymous",
+        anonymous_status=200,
+        anonymous_code=None,
+    ),
+)

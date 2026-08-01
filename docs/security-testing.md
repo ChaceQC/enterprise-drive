@@ -80,6 +80,36 @@ DRIVE_LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
 
 提交 `a52b4ce` 对应 GitHub Actions run `30661668693`，backend、Windows 部署、镜像策略和两个 MinIO supply-chain job 全部成功；CI 实际执行 188 个后端测试、新增安全扫描、observability Docker smoke 以及 runtime/preview 镜像构建。
 
+## 2026-08-01 路由、租户与对抗输入矩阵
+
+### 全路由身份与 CSRF
+
+`tests/security_route_matrix.py` 登记运行时 OpenAPI 的全部 36 个 `/api/v1` method + path，并记录最小合法请求、公开/会话/管理员模式、租户范围、CSRF 模式和资源授权策略。矩阵集合与 `create_app(settings).openapi()["paths"]` 必须完全一致，避免新增 route 未进入安全审计。
+
+- 全部受保护 route 的匿名请求返回 `401/AUTH_REQUIRED`。
+- 登录保持统一 `AUTH_INVALID_CREDENTIALS`；无 Cookie 登出幂等成功；ping 和外链入口保持公开。
+- 20 个副作用 route 在有效 Cookie Session 但缺失 CSRF 时统一返回 `403/CSRF_TOKEN_INVALID`。
+- 普通用户访问管理员审计 route 返回 `403/ADMIN_REQUIRED`。
+
+### 真实跨租户与撤权
+
+测试建立第二租户的真实用户、空间、根目录、活动/回收站节点、文件版本、ACL、外链和上传会话，再由默认租户管理员访问：
+
+- 26 个内部资源 route 全部返回 404，不泄露外租户资源类型、状态或标识。
+- 默认租户空间列表不包含外租户空间，管理员审计查询不返回外租户日志。
+- 外链仍按 `tenant_slug + raw_token` 的公开能力模型工作，不错误绑定内部 Cookie Session。
+- 已登录成员的空间关系被删除后，原 Cookie Session 立即失去空间列表和写权限，不需要重新登录。
+
+### 对抗输入与传输边界
+
+- 伪装成 PNG 的损坏内容进入终态 `image_decode_failed`，不生成预览工件。
+- 超过 `preview_max_source_bytes` 的图片在读取/解码前标记 `file_too_large`。
+- Office 扩展名命令注入、路径穿越、反斜杠和 NUL 文件名被拒绝。
+- `Range` 请求头不能绕过下载权限；返回的预签名 URL 不包含 Cookie、CSRF 或 URL userinfo。
+- 外链攻击者轮换不同原始 token 时，访问和下载仍受来源 IP 总量窗口限制，达到门槛后返回 `429/RATE_LIMITED`。
+
+新增矩阵与对抗输入测试本地结果为 `53 passed`。
+
 ### 首轮验证闭环
 
 - 完整锁文件、同步、Ruff、格式、Bandit、pip-audit、Mypy 和 pytest 门禁全部通过；完整测试结果为 `172 passed, 4 skipped`。
@@ -99,7 +129,8 @@ DRIVE_LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
 
 ## 后续审计
 
-- 对 34 个 API route 建立未认证、普通用户、跨租户、撤权并发和管理员矩阵。
-- 增加动态安全测试，覆盖 Host/CORS/CSRF、请求走私边界、超大请求、恶意图片/文档、Range、预签名 URL 和外链穷举。
+- 补充 Trusted Host、CORS、超大 API 请求以及 Nginx 原始 HTTP 的冲突 `Content-Length`/`Transfer-Encoding` 和慢请求边界。
+- 使用真实 Docker gateway 执行上述网络层测试；ASGI route 矩阵不替代 Nginx/TCP 行为。
+- 完整后端代理 Range、增强审计、水印或 DLP 继续由 `BE-034` 交付。
 - Sprint 11 再实现阶梯延迟、临时锁定、管理员解锁、验证码和登录安全告警；当前固定窗口不替代完整账号安全治理。
 - 正式上线前处理 MinIO Server/Client 既有 Critical 基线，并完成真实公网 DNS、受信 TLS、外部扫描和恢复演练。

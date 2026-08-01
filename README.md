@@ -66,6 +66,8 @@ Sprint 3 已落地上传会话基础：`upload_sessions`、`upload_parts` 迁移
 
 `BE-027` 可观测性已完成：API `/metrics` 暴露路由模板维度的请求数/延迟、上传下载、权限、Outbox 和搜索延迟指标，正式 2-worker Uvicorn 使用 Prometheus multiprocess 聚合；5 个 Celery Worker 分别在 Compose 内部 `9100` 暴露 task 数量、状态、耗时及本进程业务指标。JSON 日志自动关联 `service`、`env`、`request_id`、`task_id`、`trace_id` 和 `span_id`；OpenTelemetry exporter 默认 `none`，可配置 Console 或 OTLP/HTTP。
 
+`BE-030` 已完成第二轮 API 安全矩阵：运行时 OpenAPI 的 36 个 route 全部纳入匿名、登录态 CSRF、管理员、真实跨租户和成员撤权测试；损坏/超大图片、文档路径与扩展名注入、Range 权限、预签名 URL 和轮换 token 外链穷举也已覆盖。下一步补充 Trusted Host、CORS、超大请求和真实 Nginx 原始 HTTP 边界。
+
 Sprint 4 权限系统已新增 `space_members` 基础表，创建空间时会自动写入当前用户的 `owner` 角色成员关系。空间列表、文件树、上传初始化、multipart complete 和下载已通过 `PermissionService` 做空间级成员角色检查：`viewer` 可列表和下载，`editor` 可上传与修改，`owner/admin` 可执行全部空间级动作。空间成员管理 API 已接入，支持 owner/admin 添加、调整和移除成员，权限变更会递增空间权限版本并写入审计。节点 ACL 已支持 `user`、`department`、`group` 三类主体，基于 org 事实表展开用户部门和用户组，支持 allow/deny、继承开关和 deny 优先，并已覆盖文件列表、创建文件夹、上传初始化、multipart complete 和下载入口；文件列表响应会通过批量权限评估返回每个子节点的常用动作权限，避免列表页逐项查询。空间成员和节点 ACL 变更都会写入 `permission.changed` outbox event，`permission.invalidate_cache` 会消费该事件并删除匹配的 Redis 权限缓存 key；部门/用户组 ACL 变更当前保守失效租户内节点权限缓存。搜索 ACL 已新增 token builder 和 `search.acl_rebuild_requested` outbox event；秒传、multipart complete、重命名、移动、删除、恢复和彻底删除会写入 `search.index_requested`，上传完成还会写入 `search.extract_requested`。`search.dispatch_outbox` 会从 PostgreSQL 重新构建文件索引文档写入 OpenSearch，不再活跃或已彻底删除的文件会删除索引文档，并在 ACL 变更后按 space 或 node 子树保守重建索引 token；搜索抽取入口当前支持安全的小型 UTF-8 文本类文件、PDF 可复制正文、DOCX 段落/表格、PPTX 文本框/表格和 XLSX 单元格抽取，PDF 使用成熟开源库 `pypdf`，DOCX 使用成熟开源库 `python-docx`，PPTX 使用成熟开源库 `python-pptx`，XLSX 使用成熟开源库 `openpyxl`，抽取结果写入 `file_versions.search_text` 并刷新索引 `content` 字段，解码或解析失败标记为 `failed`，归档或正文超限标记为 `skipped`，对象存储读取失败交给 outbox 重试。预览基础链路已接入 `preview.render_requested` outbox event 和 `preview` 队列，当前使用成熟开源库 Pillow 将图片生成私有 WebP 预览产物，通过 Poppler `pdftoppm` 将 PDF 首页渲染为图片后复用同一 WebP 产物链路，并通过 LibreOffice headless 将 Office 文档先转换为 PDF 再复用 PDF/图片链路；`preview.dispatch_outbox` 已配置 Celery 软/硬超时、速率限制、结构化失败日志和 `preview_failures_total` 指标；`GET /api/v1/files/{node_id}/preview` 会通过 `preview` 权限校验后返回短期私有预览 URL。`GET /api/v1/search` 已接入查询层 `acl_tokens` allow 过滤、`deny_acl_tokens` 排除过滤、签名 cursor 分页、HTML 编码的 `<mark>` 高亮片段、`search.query` 限流和 `read_meta` 二次权限校验。最终对象的 DB 驱动清理由 `file.cleanup_unreferenced_blobs` 承担；对象存储中没有 DB 元数据的孤儿最终对象由 `file.cleanup_orphaned_objects` 承担。
 
 分享模块已建立基础数据模型、迁移、服务层和基础 HTTP API：支持内部分享、外链分享、提取码哈希、过期时间、访问/下载次数上限、撤销状态、分享项、内部接收人和访问日志表。创建分享会逐个校验节点级 `share` 权限，外链只返回一次 256-bit 级随机 `raw_token`，数据库只保存全局唯一 token hash 和提取码 hash；`POST /api/v1/shares`、`GET /api/v1/shares/{share_id}`、`POST /api/v1/shares/{share_id}/revoke` 已接入 Cookie Session、CSRF、创建者边界、审计与 outbox。`POST /api/v1/public/shares/access` 已接入 `tenant_slug`、外链 token、提取码、状态、过期、访问次数校验，以及 IP 总量和 `token + IP` 维度限流，会在带租户边界的查询后原子增加 `view_count` 并写入 `share_access_logs`。`POST /api/v1/public/shares/download` 已接入外链下载：请求体使用 `tenant_slug`、`raw_token`、`node_id` 和可选 `passcode`，校验分享状态、提取码、下载权限、分享项范围、文件当前版本和下载次数限制，通过数据库条件 update 原子增加 `download_count`，返回短期私有对象下载 URL，并写入 `share_access_logs` 和 `share.external.downloaded` 审计；当前外链下载仍采用预签名 URL，Range/后端代理策略后续按高密级或水印场景补齐。
@@ -82,6 +84,14 @@ uv run ruff check .
 uv run ruff format --check .
 uv run mypy app
 uv run pytest
+```
+
+BE-030 路由、租户和对抗输入矩阵：
+
+```powershell
+uv run pytest tests/test_route_security_matrix.py `
+  tests/test_route_security_cross_tenant.py `
+  tests/test_security_adversarial.py -q
 ```
 
 真实 Docker 可观测性 smoke 会自动创建并清理隔离的 PostgreSQL、Redis、2-worker API、migration 和 maintenance Worker，验证多进程指标、真实 Celery task 以及 API/Worker trace 日志：
