@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 import time
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -35,6 +37,15 @@ class AuditGenerationResult:
 
 async def connect_database(database_url: str) -> asyncpg.Connection:
     return await asyncpg.connect(_normalize_database_url(database_url), command_timeout=180)
+
+
+@asynccontextmanager
+async def database_connection(database_url: str) -> AsyncIterator[asyncpg.Connection]:
+    connection = await connect_database(database_url)
+    try:
+        yield connection
+    finally:
+        await connection.close()
 
 
 async def resolve_identity(

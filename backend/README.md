@@ -192,7 +192,7 @@ uv run pytest tests/test_storage_minio_integration.py -q
 
 性能基准工具位于 `backend/performance/`，使用 dev group 中的 Locust；不会构建、拉取或启动服务。先按 `docs/performance-benchmark.md` 启动已经构建的真实 Compose 环境，再用 `uv run python -X utf8 -m performance.runner` 运行 `smoke`、`baseline` 或显式 `target` profile。报告包含 Locust CSV/HTML 和项目 `report.json`，fixture 默认在运行结束后清理。
 
-`uv run python -X utf8 -m performance.target_data` 独立准备 BE-029 target 数据：OpenSearch 使用专属 `be029-*` index，审计日志使用专属 action；两类数据均按批次写入、原子保存 checkpoint，可中断恢复。大于 100,000 条的数据必须传 `--confirm-large-target`，并建议用 `--max-batches` 分阶段推进。`status` 查询真实计数，`cleanup --confirm-run-id` 只清理当前 state 所属数据；该工具不会隐式构建、拉取、启动或删除其他资源。
+`uv run python -X utf8 -m performance.target_data` 独立准备 BE-029 target 数据：OpenSearch 使用专属 `be029-*` index，审计日志使用专属 action；两类数据均按批次写入、原子保存 checkpoint，可中断恢复。`--max-batches` 默认值为 `1`，显式传 `0` 才表示本次不限批次；大于 100,000 条的数据还必须传 `--confirm-large-target`。`status` 查询真实计数，`cleanup --confirm-run-id` 只清理当前 state 所属数据；该工具不会隐式构建、拉取、启动或删除其他资源。
 
 ## 当前能力
 

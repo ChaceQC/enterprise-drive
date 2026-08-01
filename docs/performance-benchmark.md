@@ -49,7 +49,7 @@ uv run python -X utf8 -m performance.target_data `
   --confirm-run-id <state.run_id>
 ```
 
-正式目标必须显式确认并分阶段执行；默认每次只推进有限批次，避免一次性占满 CPU、内存或磁盘：
+正式目标必须显式确认并分阶段执行；`--max-batches` 默认值为 `1`，显式传 `0` 才表示本次不限批次，避免误操作时一次性占满 CPU、内存或磁盘：
 
 ```powershell
 uv run python -X utf8 -m performance.target_data `
@@ -63,6 +63,8 @@ uv run python -X utf8 -m performance.target_data `
 ```
 
 state 不保存数据库密码；清理只接受 state 中完全匹配的 `run_id`，只删除其专属 OpenSearch index 和带有精确 benchmark action 的审计行。完成数据生成后仍需执行真实 multipart complete 压测和 target profile，不能把“数据已准备”误报为完整性能验收。
+
+2026-08-01 已使用本地固定镜像和两个受限临时容器完成 `1,000/1,000` 小规模闭环：默认参数先生成 `100/100` 并保存 checkpoint，显式 `--max-batches 0` 后恢复到 `1,000/1,000`；清理后审计 action 真实剩余 `0`，专属 OpenSearch index 返回 `404`，本轮容器剩余 `0`。PostgreSQL 限制为 `0.75 CPU / 768 MiB / 128 PIDs`，OpenSearch 限制为 `1 CPU / 1536 MiB / 256 PIDs`，运行阶段均使用 `--pull never`。这只验证生成器的恢复和清理闭环，不代表目标规模性能验收。
 
 ## 运行步骤
 

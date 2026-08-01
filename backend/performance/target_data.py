@@ -11,8 +11,8 @@ from typing import Any
 
 from app.core.config import Settings
 from performance.target_audit import (
-    connect_database,
     count_target_audit_rows,
+    database_connection,
     delete_target_audit_rows,
     generate_audit_rows,
     resolve_identity,
@@ -54,7 +54,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--search-term", default="be029-anchor")
     parser.add_argument("--opensearch-batch-size", type=int, default=1_000)
     parser.add_argument("--audit-batch-size", type=int, default=10_000)
-    parser.add_argument("--max-batches", type=int, default=0)
+    parser.add_argument(
+        "--max-batches",
+        type=int,
+        default=1,
+        help="本次最多处理的批次数；默认 1，显式传 0 表示不限批次",
+    )
     parser.add_argument("--throttle-seconds", type=float, default=0.05)
     parser.add_argument(
         "--confirm-large-target",
@@ -93,7 +98,7 @@ async def _prepare(args: argparse.Namespace, state_path: Path) -> dict[str, Any]
             audit_rows=args.audit_rows,
             confirmed=args.confirm_large_target,
         )
-        async with await connect_database(args.database_url) as connection:
+        async with database_connection(args.database_url) as connection:
             tenant_id, actor_id = await resolve_identity(
                 connection,
                 tenant_slug=args.tenant_slug,
@@ -131,7 +136,7 @@ async def _prepare(args: argparse.Namespace, state_path: Path) -> dict[str, Any]
         )
         opensearch_result = asdict(opensearch_generation)
     if phase in {"audit", "all"}:
-        async with await connect_database(args.database_url) as connection:
+        async with database_connection(args.database_url) as connection:
             state, audit_generation = await generate_audit_rows(
                 connection=connection,
                 state=state,
@@ -154,7 +159,7 @@ async def _prepare(args: argparse.Namespace, state_path: Path) -> dict[str, Any]
 async def _status(args: argparse.Namespace, state_path: Path) -> dict[str, Any]:
     state = read_target_state(state_path)
     client = build_opensearch_client(args.opensearch_url)
-    async with await connect_database(args.database_url) as connection:
+    async with database_connection(args.database_url) as connection:
         audit_count = await count_target_audit_rows(connection=connection, state=state)
     opensearch_count = count_target_documents(client=client, state=state)
     return {
@@ -173,7 +178,7 @@ async def _cleanup(args: argparse.Namespace, state_path: Path) -> dict[str, Any]
         raise ValueError("--confirm-run-id 与 state.run_id 不一致")
     client = build_opensearch_client(args.opensearch_url)
     index_deleted = delete_target_index(client=client, state=state)
-    async with await connect_database(args.database_url) as connection:
+    async with database_connection(args.database_url) as connection:
         state, deleted, audit_completed = await delete_target_audit_rows(
             connection=connection,
             state=state,

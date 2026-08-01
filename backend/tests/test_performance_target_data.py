@@ -7,8 +7,9 @@ from uuid import UUID
 
 import pytest
 
+from performance import target_audit
 from performance.target_audit import _audit_records
-from performance.target_data import _validate_large_target
+from performance.target_data import _build_parser, _validate_large_target
 from performance.target_opensearch import _document_action
 from performance.target_state import (
     TargetDataState,
@@ -102,3 +103,36 @@ def test_large_target_requires_explicit_confirmation() -> None:
 
     _validate_large_target(opensearch_docs=100_000, audit_rows=0, confirmed=True)
     _validate_large_target(opensearch_docs=100, audit_rows=100, confirmed=False)
+
+
+def test_target_data_cli_defaults_to_one_batch_and_zero_is_unlimited() -> None:
+    default_args = _build_parser().parse_args(["--state", "state.json", "prepare"])
+    unlimited_args = _build_parser().parse_args(
+        ["--state", "state.json", "--max-batches", "0", "prepare"]
+    )
+
+    assert default_args.max_batches == 1
+    assert unlimited_args.max_batches == 0
+
+
+@pytest.mark.asyncio
+async def test_database_connection_always_closes(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeConnection:
+        closed = False
+
+        async def close(self) -> None:
+            self.closed = True
+
+    connection = FakeConnection()
+
+    async def fake_connect_database(_database_url: str) -> FakeConnection:
+        return connection
+
+    monkeypatch.setattr(target_audit, "connect_database", fake_connect_database)
+
+    with pytest.raises(RuntimeError, match="fixture failure"):
+        async with target_audit.database_connection("postgresql://fixture") as opened:
+            assert opened is connection
+            raise RuntimeError("fixture failure")
+
+    assert connection.closed is True

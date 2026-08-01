@@ -124,7 +124,7 @@ uv run pytest tests/test_storage_minio_integration.py -q
 
 GitHub `backend-ci` 会启动临时 MinIO，并运行这组真实对象存储集成测试，覆盖 MinIO SDK multipart 私有方法封装、预签名上传/下载、copy、delete、list、hash 校验和孤儿最终对象扫描。
 
-BE-029 目标规模数据准备使用 `uv run python -X utf8 -m performance.target_data`，OpenSearch 文档和审计日志分阶段批量生成，state checkpoint 支持中断恢复；默认禁止大规模执行，必须显式确认并可用 `--max-batches`、`--throttle-seconds` 控制资源。详见 `docs/performance-benchmark.md`。
+BE-029 目标规模数据准备使用 `uv run python -X utf8 -m performance.target_data`，OpenSearch 文档和审计日志分阶段批量生成，state checkpoint 支持中断恢复；`--max-batches` 默认只推进 1 批，显式传 `0` 才表示本次不限批次，大于 100,000 条的数据仍必须显式确认。详见 `docs/performance-benchmark.md`。
 
 `backend-ci` 在 runtime image 构建后还会执行 `scripts/smoke_observability_docker.py`，使用隔离的真实 PostgreSQL、Redis、2-worker API 和 Celery Worker 验证可观测性进程边界。
 

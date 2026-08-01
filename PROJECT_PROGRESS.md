@@ -31,12 +31,16 @@
 - 已实现 `backend/performance/target_state.py`、`target_opensearch.py`、`target_audit.py` 和 `target_data.py`，但尚未把 100 万 OpenSearch 文档和 1,000 万审计日志灌入真实环境。
 - 生成器把 OpenSearch 与审计分成独立阶段，使用确定性 ID、专属 `be029-*` index/action、原子 state checkpoint、批次上限和节流参数；大规模执行必须显式 `--confirm-large-target`。
 - 清理要求精确匹配 `run_id`，只删除当前 state 所属 index 和审计 action，不执行全库、全 index 或不受控 Docker 清理。
+- CLI 默认每次只执行 1 批，只有显式 `--max-batches 0` 才不限批次；当前小规模恢复与清理闭环已经完成，目标规模验收仍未完成。
 
 ### 已完成
 
 - OpenSearch 生成器支持单批/多批恢复，使用单 shard、零 replica、生成期间关闭 refresh，完成后恢复 refresh 并记录真实文档数与 index store bytes。
 - PostgreSQL 审计生成器使用临时 staging table + `COPY` + `ON CONFLICT DO NOTHING`，每批提交后保存 checkpoint；清理按批次删除并可中断恢复。
-- 单元与静态验证：target 相关测试 `13 passed`，Ruff、格式检查和 Mypy 全部通过。
+- 修复 `asyncpg.Connection` 不支持异步上下文管理器的问题，改为 `try/finally` 关闭连接，并增加异常路径连接关闭测试。
+- 真实 Docker run `be029-docker-6f4bbdb7`：默认单批生成并观察到 OpenSearch/审计 `100/100`，显式不限批次后恢复到 `1,000/1,000`；cleanup 后审计剩余 `0`、专属 index 返回 `404`、测试容器剩余 `0`。
+- 资源边界：PostgreSQL `0.75 CPU / 768 MiB / 128 PIDs`，OpenSearch `1 CPU / 1536 MiB / 256 PIDs`，均使用本地固定镜像和 `--pull never`；完成态快照约为 PostgreSQL `70.07 MiB`、OpenSearch `1.229 GiB`。
+- 单元与静态验证：CLI 默认批次与连接关闭新增回归已通过，Ruff、格式检查和 Mypy 全部通过。
 
 ### 未完成
 
@@ -45,9 +49,9 @@
 
 ### 下一步
 
-1. 用真实 Docker Compose 先执行 1,000/1,000 小批次生成、status、断点恢复和 cleanup。
-2. 再按资源预算分阶段推进 100 万/1,000 万数据，保留每批报告和可回滚 checkpoint。
-3. 实现真实 multipart complete 预热/压测及性能报告字段，再做完整 target profile。
+1. 先提交并推送本轮连接关闭、默认批次、测试和文档改动，确认 GitHub Actions。
+2. 随后按 `AGENT.md`、技术计划书和 `PROJECT_PLAN.md` 从 `BE-001` 开始逐项核对源码、迁移、API、测试和文档，定位编号最早的未完成验收项。
+3. 实现该最早缺口并完成真实依赖验证；`BE-029` 的 100 万/1,000 万目标灌入和 multipart target 验收保留为已知未完成项，不抢占更早里程碑。
 
 ## 2026-08-01 BE-030 路由、租户与网络安全矩阵
 
