@@ -1,5 +1,29 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-01 BE-031/BE-032 对象存储验收对账
+
+### 当前状态
+
+- `BE-031` 与 `BE-032` 的既有实现已逐条对照源码、测试、CI 配置和技术计划验收，当前任务验收完成。
+- 后续只保留不属于本轮验收的企业级补强：MinIO SDK 升级兼容、异常恢复、同 hash 并发竞争，以及 `BE-035` 的失败告警和运行看板。
+
+### 已完成
+
+- `file.cleanup_orphaned_objects` 默认 dry-run，按对象存储游标分批扫描受控最终对象 key；显式删除只处理无 DB `file_blobs.storage_key` 引用的对象。
+- 非受控 key、已引用对象和跨批次游标均有测试；删除失败保留对象并写错误审计，审计 metadata 只保存 storage key hash，不保存原始 key。
+- 维护任务已注册到 Celery maintenance 队列和 beat，默认以 `dry_run=true`、`scan_all=true` 调度；worker 汇总多租户和多批次结果。
+- 真实 MinIO 集成覆盖对象读写/hash、copy、delete、list 游标、预签名下载、multipart 创建/分片预签名/abort/complete、服务端 hash 和孤儿扫描。
+
+### 验证
+
+- 本机真实 Docker：使用 `.env.windows.example` 中已存在的 MinIO digest 镜像，运行阶段 `--pull never`、`0.50 CPU / 512m / 512m swap / 128 PIDs`；定向 `test_blob_cleanup.py`、`test_celery_schedule.py`、`test_observability.py`、`test_storage_minio_integration.py` 共 `20 passed`，结束后测试容器为 `0`。
+- GitHub Actions `backend-ci` 已通过 `DRIVE_RUN_MINIO_TESTS=1` 启动临时 MinIO，并执行同一真实对象存储测试路径；最近闭环 run `30681696299` 的 backend、Windows、镜像策略和两个 MinIO supply-chain job 全部成功。
+
+### 下一步
+
+1. 进入 `BE-029 target`，先实现可恢复、分阶段、资源受限、可清理的目标数据生成器。
+2. 再执行真实 multipart complete 压测和完整 target profile，记录硬件、镜像 digest、数据量、p50/p95/p99、错误率、OpenSearch refresh/磁盘与审计写入耗时。
+
 ## 2026-08-01 BE-030 路由、租户与网络安全矩阵
 
 ### 当前状态
