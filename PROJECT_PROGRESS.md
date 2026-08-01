@@ -5,7 +5,9 @@
 ### 当前状态
 
 - route/租户/对抗输入批次已通过提交 `94ed1d4` 和 GitHub Actions run `30680735602` 闭环，5 个 job 全部成功。
-- Host/CORS 与真实 Nginx 原始 HTTP 收尾已完成本地代码和 Docker 验证，尚未提交推送。
+- Host/CORS 与真实 Nginx 原始 HTTP 收尾已通过提交 `65ab794` 和 GitHub Actions run `30681448854` 闭环，5 个 job 全部成功。
+- 提交 `ff00542` 已消除 MinIO 供应链报告阶段的误导性“Failed minimum severity”注解；run `30681696299` 再次通过全部 5 个 job，注解命中数为 0，新增 Critical 基线门禁仍然保留。
+- `BE-030` 已完成本地门禁、真实 Docker 验证和远端 CI 闭环。
 - 运行时 OpenAPI 当前包含 36 个 `/api/v1` method + path；排除 `GET /ping` 和 `POST /auth/login` 后为原计划口径的 34 个 route。
 
 ### 已完成
@@ -31,9 +33,8 @@
 
 ### 下一步
 
-1. 运行完整 Ruff、格式、Bandit、pip-audit、Mypy 和 pytest。
-2. 提交推送 Nginx 网络安全收尾，等待 GitHub Actions 中新增 raw HTTP smoke 成功。
-3. 对账 `BE-031`、`BE-032` 的既有实现与验收证据，再继续最早仍未完成的 `BE-029 target` 子任务。
+1. 对账 `BE-031`、`BE-032` 的既有实现、真实 MinIO 测试与 CI 验收证据。
+2. 继续最早仍未完成的 `BE-029 target` 子任务，按资源受限、分阶段、可恢复、可清理方式补齐目标规模数据生成与验收。
 
 ### 验证
 
@@ -45,6 +46,8 @@
 - 新增 Host/CORS 后 `tests/test_security_adversarial.py`：`10 passed`。
 - 真实 Nginx smoke 使用本地 `nginx:1.27-alpine` 镜像 `sha256:65645c7bb6a0...`，结果为 `200/400/400/413/100`；测试容器结束后为 0。
 - 网络层收尾后的完整 `uv run pytest -p no:cacheprovider -q`：通过；收集 `247` 个测试，其中 `243 passed, 4 skipped`。
+- 网络层提交 `65ab794` 对应 GitHub Actions run `30681448854`：backend、windows-deployment、minio-image-policy 和两个 MinIO supply-chain job 全部成功，backend job 实际通过 raw HTTP security smoke。
+- CI 提示修复提交 `ff00542` 对应 GitHub Actions run `30681696299`：5 个 job 全部成功；完整日志中 `Failed minimum severity level`、GitHub `error/warning` 注解和 Grype severity-threshold 假失败文本命中数均为 0。
 
 ### 涉及文件
 

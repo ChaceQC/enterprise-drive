@@ -119,13 +119,13 @@ DRIVE_LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
 - smoke 只创建一个随机命名 Nginx 容器，结束后强制删除并确认无残留。
 - CI 先显式拉取 Nginx/Certbot，再以 `--pull never` 执行模板校验和 raw HTTP smoke，镜像下载与安全验证保持分离。
 
-### 首轮验证闭环
+### 验证闭环
 
-- 完整锁文件、同步、Ruff、格式、Bandit、pip-audit、Mypy 和 pytest 门禁全部通过；完整测试结果为 `172 passed, 4 skipped`。
-- runtime 与 preview 镜像分别在 `1 CPU / 2 GiB`、`1 CPU / 3 GiB` BuildKit 上限下使用 `--pull=false` 串行重建，两个镜像都确认安装 `Pillow 12.3.0`。
-- 隔离真实 Compose 使用已有本地镜像和 `--no-build --pull never` 启动 API 必需依赖。账号限流阈值临时设为 1 后，错误登录第一次返回 `401/AUTH_INVALID_CREDENTIALS`，第二次返回 `429/RATE_LIMITED`，动作是 `auth.login.account`。
-- 真实 Compose 采样峰值为 5 个运行容器、`123.1%` aggregate Docker CPU 和 `1426.3 MiB` 容器内存；验证结束后隔离 project 的容器、网络和卷全部清理。
-- 提交 `25acecf` 对应 GitHub Actions run `30660034411`，backend、Windows 部署、镜像策略和两个 MinIO supply-chain job 全部成功。
+- 完整 `uv lock --check`、Ruff、格式、Bandit、pip-audit、Mypy 和 pytest 门禁全部通过；最终本地测试收集 247 个用例，结果为 `243 passed, 4 skipped`。
+- route/租户批次提交 `94ed1d4` 对应 GitHub Actions run `30680735602`，5 个 job 全部成功。
+- 网络层提交 `65ab794` 对应 run `30681448854`，backend、Windows 部署、镜像策略和两个 MinIO supply-chain job 全部成功；backend job 实际执行 Nginx 模板校验和 raw HTTP security smoke。
+- 原供应链报告步骤虽然配置 `fail-build: false`，但仍以 Grype `--fail-on critical` 生成报告，已知基线会产生误导性的“Failed minimum severity”警告；真正的新增 Critical 判定由后续基线脚本负责。
+- 提交 `ff00542` 改为先安装固定版本 Grype，再不带 `--fail-on` 生成完整 JSON 报告，后续基线脚本继续只阻断新增 Critical。对应 run `30681696299` 的 5 个 job 全部成功，完整日志中上述假失败文本和 GitHub error/warning 注解命中数为 0。
 
 ## 现有有效边界
 
