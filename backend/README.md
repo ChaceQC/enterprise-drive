@@ -139,7 +139,17 @@ uv run pytest tests/test_route_security_matrix.py `
   tests/test_security_adversarial.py -q
 ```
 
-矩阵与运行时 OpenAPI 的 36 个 `/api/v1` route 完全对账，覆盖匿名、CSRF、管理员、真实跨租户资源和活跃会话撤权；对抗输入覆盖损坏/超大图片、文档路径与扩展名注入、Range 权限、预签名 URL 和不同 token 外链穷举。Host/CORS、超大请求和 Nginx 原始 HTTP 边界仍需使用真实 gateway 补齐。
+矩阵与运行时 OpenAPI 的 36 个 `/api/v1` route 完全对账，覆盖匿名、CSRF、管理员、真实跨租户资源和活跃会话撤权；对抗输入覆盖损坏/超大图片、文档路径与扩展名注入、Range 权限、预签名 URL、不同 token 外链穷举、Trusted Host 和 CORS。
+
+真实 Nginx 原始 HTTP 安全 smoke：
+
+```powershell
+uv run python -X utf8 scripts/smoke_gateway_security_docker.py `
+  --image nginx:1.27-alpine `
+  --template ..\deploy\windows\nginx\default.conf.template
+```
+
+脚本只使用本地已有镜像和 `--pull never`，限制为 `0.25 CPU / 128m / 64 PIDs`，验证冲突 CL/TE、重复 Content-Length、API body limit 和 storage `100 Continue`，结束后删除随机测试容器。`backend-ci` 会先显式 pull，再执行同一 smoke。
 
 真实 Docker 可观测性 smoke：
 

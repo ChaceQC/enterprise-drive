@@ -1,10 +1,11 @@
 # PROJECT_PROGRESS.md
 
-## 2026-08-01 BE-030 路由、租户与对抗输入安全矩阵
+## 2026-08-01 BE-030 路由、租户与网络安全矩阵
 
 ### 当前状态
 
-- `BE-030` 第二轮动态安全测试已完成代码与本地验证；尚未提交推送和等待 GitHub Actions。
+- route/租户/对抗输入批次已通过提交 `94ed1d4` 和 GitHub Actions run `30680735602` 闭环，5 个 job 全部成功。
+- Host/CORS 与真实 Nginx 原始 HTTP 收尾已完成本地代码和 Docker 验证，尚未提交推送。
 - 运行时 OpenAPI 当前包含 36 个 `/api/v1` method + path；排除 `GET /ping` 和 `POST /auth/login` 后为原计划口径的 34 个 route。
 
 ### 已完成
@@ -18,18 +19,21 @@
 - 验证已登录成员在空间成员关系被删除后无需重新登录即失去空间列表和写权限，活跃 Cookie Session 不缓存业务授权。
 - 新增损坏图片、超大图片、Office 扩展名命令注入、文档路径穿越/NUL、Range 授权、预签名 URL 凭据隔离和不同 token 外链穷举测试。
 - 外链访问和下载在攻击者轮换原始 token 时仍受来源 IP 总量窗口限制；前两次无效 token 返回 404，达到临时测试门槛后返回 `429/RATE_LIMITED`。
+- 新增 Trusted Host 与 CORS 预检测试：未知 Host 在 route dispatch 前返回 400，CORS 只回显显式允许的 origin。
+- 新增 `scripts/smoke_gateway_security_docker.py`，只使用本地已有 Nginx 镜像并固定 `--pull never`，容器限制为 `0.25 CPU / 128m / 64 PIDs`、只读根文件系统和 `no-new-privileges`。
+- 真实 Nginx 原始 TCP smoke 验证：健康检查 200、`Content-Length + Transfer-Encoding` 冲突 400、重复冲突 `Content-Length` 400、API Host 的 2 KiB 请求在 1 KiB 门槛下返回 413、storage Host 对同一长度先返回 `100 Continue`。
+- `backend-ci` 增加显式 Nginx/Certbot pull，后续模板校验和 raw HTTP smoke 全部使用 `--pull never`，不再把镜像下载隐含在验证命令中。
 
 ### 阻塞与风险
 
-- ASGI 动态矩阵不替代 Nginx 与真实 TCP 层的 Host、CORS、冲突 `Content-Length`/`Transfer-Encoding`、超大请求体和慢请求测试。
 - 当前 Range 验证确认请求头不能绕过权限且预签名响应不携带 Cookie/CSRF；完整后端代理 Range 属于 `BE-034`，尚未实现。
 - MinIO Server/Client 既有 Critical 基线、真实公网 DNS/受信 TLS 和外部扫描仍是正式上线风险。
 
 ### 下一步
 
-1. 增加 Trusted Host、CORS、超大 API 请求以及 Nginx 原始 HTTP 请求边界测试，完成 `BE-030` 剩余动态门禁。
-2. 运行完整 Ruff、格式、Bandit、pip-audit、Mypy 和 pytest，并使用真实 Docker 验证 gateway/Nginx 边界。
-3. 同步安全文档后提交推送，等待 GitHub Actions 全部 job 成功。
+1. 运行完整 Ruff、格式、Bandit、pip-audit、Mypy 和 pytest。
+2. 提交推送 Nginx 网络安全收尾，等待 GitHub Actions 中新增 raw HTTP smoke 成功。
+3. 对账 `BE-031`、`BE-032` 的既有实现与验收证据，再继续最早仍未完成的 `BE-029 target` 子任务。
 
 ### 验证
 
@@ -37,6 +41,10 @@
 - 四个新增 Python 文件 Ruff、格式检查与 Mypy：通过。
 - `uv lock --check`、全量 Ruff、格式检查、Bandit、pip-audit 和 `uv run mypy app`：全部通过；Bandit 中危/高危为 0，依赖已知漏洞为 0。
 - 完整 `uv run pytest -p no:cacheprovider -q`：通过；收集 `245` 个测试，其中 `241 passed, 4 skipped`。
+- route/租户批次提交 `94ed1d4` 已推送；GitHub Actions run `30680735602` 的 backend、windows-deployment、minio-image-policy 和两个 MinIO supply-chain job 全部成功。
+- 新增 Host/CORS 后 `tests/test_security_adversarial.py`：`10 passed`。
+- 真实 Nginx smoke 使用本地 `nginx:1.27-alpine` 镜像 `sha256:65645c7bb6a0...`，结果为 `200/400/400/413/100`；测试容器结束后为 0。
+- 网络层收尾后的完整 `uv run pytest -p no:cacheprovider -q`：通过；收集 `247` 个测试，其中 `243 passed, 4 skipped`。
 
 ### 涉及文件
 
@@ -44,6 +52,9 @@
 - `backend/tests/test_route_security_matrix.py`
 - `backend/tests/test_route_security_cross_tenant.py`
 - `backend/tests/test_security_adversarial.py`
+- `backend/scripts/smoke_gateway_security_docker.py`
+- `.github/workflows/backend-ci.yml`
+- `AGENT.md`
 - `docs/security-testing.md`
 - `README.md`
 - `backend/README.md`

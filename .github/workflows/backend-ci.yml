@@ -212,6 +212,12 @@ jobs:
               )
           '
 
+      - name: Pull gateway validation images
+        working-directory: .
+        run: |
+          docker pull nginx:1.27-alpine
+          docker pull certbot/certbot:v5.6.0
+
       - name: Validate Nginx gateway templates
         working-directory: .
         run: |
@@ -220,13 +226,13 @@ jobs:
           docker volume create "${tls_volume}" >/dev/null
           trap 'docker volume rm -f "${tls_volume}" >/dev/null 2>&1 || true' EXIT
 
-          docker run --rm \
+          docker run --rm --pull never \
             --mount "type=volume,source=${tls_volume},target=/etc/letsencrypt" \
             --entrypoint sh \
             certbot/certbot:v5.6.0 \
             -ec 'mkdir -p /etc/letsencrypt/live/enterprise-drive; openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=drive.example.com" -addext "subjectAltName=DNS:drive.example.com,DNS:storage.example.com" -keyout /etc/letsencrypt/live/enterprise-drive/privkey.pem -out /etc/letsencrypt/live/enterprise-drive/fullchain.pem >/dev/null 2>&1'
 
-          docker run --rm \
+          docker run --rm --pull never \
             --add-host api:127.0.0.1 \
             --add-host minio:127.0.0.1 \
             --mount "type=bind,source=${PWD}/deploy/windows/nginx/tls.conf.template,target=/etc/nginx/templates/default.conf.template,readonly" \
@@ -241,12 +247,18 @@ jobs:
             -e DRIVE_PROXY_SEND_TIMEOUT=300s \
             nginx:1.27-alpine nginx -t
 
-          docker run --rm \
+          docker run --rm --pull never \
             --mount "type=bind,source=${PWD}/deploy/windows/nginx/acme-bootstrap.conf.template,target=/etc/nginx/templates/default.conf.template,readonly" \
             -e DRIVE_SERVER_NAME=drive.example.com \
             -e DRIVE_STORAGE_SERVER_NAME=storage.example.com \
             nginx:1.27-alpine nginx -t
           test "$(grep -Fc 'location = /gateway-healthz {' deploy/windows/nginx/acme-bootstrap.conf.template)" -eq 2
+
+      - name: Run gateway raw HTTP security smoke
+        run: |
+          uv run python -X utf8 scripts/smoke_gateway_security_docker.py \
+            --image nginx:1.27-alpine \
+            --template ../deploy/windows/nginx/default.conf.template
 
       - name: Build API and core Worker image
         run: docker build --target runtime --tag enterprise-drive-backend:ci .

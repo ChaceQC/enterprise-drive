@@ -3,13 +3,14 @@ from __future__ import annotations
 from uuid import UUID
 
 import pytest
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
 from app.infrastructure.preview.libreoffice import _normalize_extension
 from app.infrastructure.storage.testing import InMemoryStorageAdapter
+from app.main import create_app
 from app.modules.file.models import FileBlob, FileVersion
 from app.modules.preview.converters import PreviewRenderError
 from app.modules.preview.models import PreviewArtifact
@@ -317,3 +318,55 @@ async def test_external_token_guessing_is_rate_limited_across_distinct_tokens(
     assert [response.status_code for response in download_responses] == [404, 404, 429]
     assert access_responses[-1].json()["details"]["action"] == "share.external_access"
     assert download_responses[-1].json()["details"]["action"] == "share.external_download"
+
+
+@pytest.mark.asyncio
+async def test_trusted_host_rejects_unknown_host_before_route_dispatch(settings: Settings) -> None:
+    settings.trusted_hosts = ["drive.example.test"]
+    app = create_app(settings)
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(
+        transport=transport, base_url="http://drive.example.test"
+    ) as test_client:
+        allowed_response = await test_client.get("/api/v1/ping")
+        denied_response = await test_client.get(
+            "/api/v1/ping",
+            headers={"Host": "attacker.example.test"},
+        )
+
+    assert allowed_response.status_code == 200
+    assert denied_response.status_code == 400
+    assert "attacker.example.test" not in denied_response.text
+
+
+@pytest.mark.asyncio
+async def test_cors_preflight_allows_only_configured_origin(settings: Settings) -> None:
+    settings.trusted_hosts = ["drive.example.test"]
+    settings.cors_origins = ["https://app.example.test"]
+    app = create_app(settings)
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(
+        transport=transport, base_url="http://drive.example.test"
+    ) as test_client:
+        allowed_response = await test_client.options(
+            "/api/v1/ping",
+            headers={
+                "Origin": "https://app.example.test",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+        denied_response = await test_client.options(
+            "/api/v1/ping",
+            headers={
+                "Origin": "https://attacker.example.test",
+                "Access-Control-Request-Method": "GET",
+            },
+        )
+
+    assert allowed_response.status_code == 200
+    assert allowed_response.headers["access-control-allow-origin"] == "https://app.example.test"
+    assert allowed_response.headers["access-control-allow-credentials"] == "true"
+    assert denied_response.status_code == 400
+    assert "access-control-allow-origin" not in denied_response.headers

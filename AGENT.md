@@ -376,7 +376,7 @@ uv run mypy app
 - 权限：验证继承、拒绝优先、空间角色、目录 ACL、越权下载失败。
 - 审计：验证成功和失败操作都写入 audit log，outbox 投递失败可重试。
 - 部署：检查 Dockerfile、根 `compose.windows.yml`、Nginx gateway、`.env.windows.example`、`deploy/windows/manage.ps1`、named volumes、自动化备份/校验/隔离恢复、回滚说明和 Windows Docker Desktop 启停流程；必须确认只有 gateway 发布宿主端口。
-- 安全：检查公网端口、后台入口、文件访问路径、对象存储 bucket、敏感日志。
+- 安全：检查公网端口、后台入口、文件访问路径、对象存储 bucket、敏感日志；Nginx gateway 或请求体策略变化还必须执行 `scripts/smoke_gateway_security_docker.py`，以真实原始 HTTP 验证冲突 CL/TE、重复 Content-Length、API body limit 和 storage 流式边界。该 smoke 必须先显式准备镜像，运行阶段使用 `--pull never` 和 CPU/memory/PID 上限。
 
 如果某项验证无法执行，必须在最终说明和 `PROJECT_PROGRESS.md` 中记录原因。
 

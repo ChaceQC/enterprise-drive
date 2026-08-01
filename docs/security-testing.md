@@ -110,6 +110,15 @@ DRIVE_LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
 
 新增矩阵与对抗输入测试本地结果为 `53 passed`。
 
+### Host、CORS 与真实 Nginx 原始 HTTP
+
+- Trusted Host 测试确认未知 Host 在业务 route dispatch 前返回 400，响应不反射攻击者 Host。
+- CORS 预检只为显式配置的 origin 返回 `Access-Control-Allow-Origin` 与 credentials，未配置 origin 返回 400 且不带允许头。
+- `scripts/smoke_gateway_security_docker.py` 使用仓库正式 `default.conf.template` 和本地 Nginx 镜像，固定 `--pull never`、`0.25 CPU / 128m / 64 PIDs`、只读根文件系统与 `no-new-privileges`。
+- 原始 TCP 结果：健康检查 200，冲突 `Content-Length + Transfer-Encoding` 400，重复冲突 `Content-Length` 400，API Host 在 1 KiB 门槛下拒绝 2 KiB 请求并返回 413，storage Host 对同一长度返回 `100 Continue`。
+- smoke 只创建一个随机命名 Nginx 容器，结束后强制删除并确认无残留。
+- CI 先显式拉取 Nginx/Certbot，再以 `--pull never` 执行模板校验和 raw HTTP smoke，镜像下载与安全验证保持分离。
+
 ### 首轮验证闭环
 
 - 完整锁文件、同步、Ruff、格式、Bandit、pip-audit、Mypy 和 pytest 门禁全部通过；完整测试结果为 `172 passed, 4 skipped`。
@@ -129,8 +138,6 @@ DRIVE_LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
 
 ## 后续审计
 
-- 补充 Trusted Host、CORS、超大 API 请求以及 Nginx 原始 HTTP 的冲突 `Content-Length`/`Transfer-Encoding` 和慢请求边界。
-- 使用真实 Docker gateway 执行上述网络层测试；ASGI route 矩阵不替代 Nginx/TCP 行为。
 - 完整后端代理 Range、增强审计、水印或 DLP 继续由 `BE-034` 交付。
 - Sprint 11 再实现阶梯延迟、临时锁定、管理员解锁、验证码和登录安全告警；当前固定窗口不替代完整账号安全治理。
 - 正式上线前处理 MinIO Server/Client 既有 Critical 基线，并完成真实公网 DNS、受信 TLS、外部扫描和恢复演练。
