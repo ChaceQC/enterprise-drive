@@ -194,6 +194,8 @@ uv run pytest tests/test_storage_minio_integration.py -q
 
 `uv run python -X utf8 -m performance.target_data` 独立准备 BE-029 target 数据：OpenSearch 使用专属 `be029-*` index，审计日志使用专属 action；两类数据均按批次写入、原子保存 checkpoint，可中断恢复。`--max-batches` 默认值为 `1`，显式传 `0` 才表示本次不限批次；大于 100,000 条的数据还必须传 `--confirm-large-target`。`status` 查询真实计数，`cleanup --confirm-run-id` 只清理当前 state 所属数据；该工具不会隐式构建、拉取、启动或删除其他资源。
 
+`performance.runner` 的 `upload_complete` 场景会真实执行 DTP/1 初始化、分片预签名、无 Cookie 的 MinIO 直传、complete 和清理，并通过测试环境 `Server-Timing` 分解对象存储合并与 API 其余耗时。真实 Compose 运行时传入 `--docker-compose-project <project>`，报告 `BE-029/2` 会记录 p50/p95/p99、错误率、硬件与磁盘、Docker server/容器限额和镜像 digest、PostgreSQL 索引/体量以及 OpenSearch refresh/store 状态。
+
 ## 当前能力
 
 - FastAPI 应用入口。

@@ -34,6 +34,10 @@ from app.modules.upload.schemas import (
     CompleteUploadResponse,
 )
 from app.modules.upload.storage_keys import build_object_storage_key
+from app.modules.upload.timing import (
+    UploadCompleteTimings,
+    measure_upload_complete_phase,
+)
 
 
 class UploadLifecycleService:
@@ -63,6 +67,7 @@ class UploadLifecycleService:
         session_id: UUID,
         parts: list[CompleteUploadPartRequest],
         audit_context: AuditContext | None = None,
+        timings: UploadCompleteTimings | None = None,
     ) -> CompleteUploadResponse:
         tenant_id = current_user.tenant_id
         user_id = current_user.id
@@ -91,19 +96,20 @@ class UploadLifecycleService:
         await self.repository.commit()
 
         try:
-            completed = await self.storage.complete_multipart_upload(
-                bucket=upload_session.storage_bucket,
-                storage_key=upload_session.storage_key,
-                provider_upload_id=str(upload_session.provider_upload_id),
-                parts=[
-                    CompletedUploadPart(
-                        part_no=part.part_no,
-                        etag=part.etag,
-                        size_bytes=part.size_bytes,
-                    )
-                    for part in parts
-                ],
-            )
+            with measure_upload_complete_phase(timings, "storage_complete"):
+                completed = await self.storage.complete_multipart_upload(
+                    bucket=upload_session.storage_bucket,
+                    storage_key=upload_session.storage_key,
+                    provider_upload_id=str(upload_session.provider_upload_id),
+                    parts=[
+                        CompletedUploadPart(
+                            part_no=part.part_no,
+                            etag=part.etag,
+                            size_bytes=part.size_bytes,
+                        )
+                        for part in parts
+                    ],
+                )
         except Exception as exc:
             await self._mark_failed(
                 current_user=current_user,
@@ -124,20 +130,22 @@ class UploadLifecycleService:
             )
             raise ApiError("UPLOAD_SIZE_MISMATCH", "上传对象大小不匹配", status_code=422)
 
-        await self._validate_completed_object_hash(
-            current_user=current_user,
-            upload_session=upload_session,
-            audit_context=audit_context,
-        )
-        storage_bucket = upload_session.storage_bucket
-        temp_storage_key = upload_session.storage_key
-        try:
-            final_storage_key = await self._prepare_final_object(
+        with measure_upload_complete_phase(timings, "hash_validation"):
+            await self._validate_completed_object_hash(
                 current_user=current_user,
-                tenant_id=tenant_id,
                 upload_session=upload_session,
                 audit_context=audit_context,
             )
+        storage_bucket = upload_session.storage_bucket
+        temp_storage_key = upload_session.storage_key
+        try:
+            with measure_upload_complete_phase(timings, "final_object"):
+                final_storage_key = await self._prepare_final_object(
+                    current_user=current_user,
+                    tenant_id=tenant_id,
+                    upload_session=upload_session,
+                    audit_context=audit_context,
+                )
         except ApiError:
             await self._delete_temp_object(
                 bucket=storage_bucket,

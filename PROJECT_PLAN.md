@@ -183,7 +183,9 @@
 
 ## 5. 当前下一步
 
-2026-08-01 `BE-030`、`BE-031` 和 `BE-032` 已完成源码、测试、真实 Docker 与 CI 对账；`BE-029` 目标数据生成器也已完成默认单批、checkpoint 恢复和精确清理的 `1,000/1,000` 真实 Docker 小闭环。接下来不继续顺延后期性能扩展，而是按 `AGENT.md` 和技术计划书从 `BE-001` 起逐项核对代码、迁移、API、测试和文档，定位并实现编号最早的未完成验收项。
+2026-08-01 `BE-030`、`BE-031` 和 `BE-032` 已完成源码、测试、真实 Docker 与 CI 对账；`BE-029` 目标数据生成器也已完成默认单批、checkpoint 恢复和精确清理的 `1,000/1,000` 真实 Docker 小闭环。编号最早仍未完成的是 `BE-029` 的目标规模灌入和完整 target profile，当前继续按该任务的验收项收尾。
+
+2026-08-01 `BE-029` multipart/report 收尾已通过真实隔离 Compose：`upload_complete` 执行 DTP/1 init、part presign、无 Cookie MinIO PUT、complete 和清理；Server-Timing 分段的 storage merge P95 为 `30 ms`，扣除 merge 的 complete API P95 为 `190 ms`，稳态 PUT P95 为 `120 ms`，0 失败。`report.json` 已升级为 `BE-029/2`，真实采集主机内存/磁盘、Docker server、9 个 compose 容器的 image ID/digest/限额、PostgreSQL `133` 个索引和 `10,361,879` bytes 数据库体量；该报告 smoke 的容器、卷和网络均清理为 `0`。100 万/1,000 万目标数据实际灌入和完整 target profile 仍是当前下一步。
 
 2026-07-31 已完成 `BE-026` lifecycle cleanup jobs：现有 `upload.expire_sessions` 和 `file.cleanup_unreferenced_blobs` 加上新增 `file.cleanup_expired_trash` 已覆盖原验收中的过期上传、blob 清理和回收站清理。新增任务按删除批次根节点扫描并锁定子树，删除版本和节点、释放容量、扣减 blob 引用、写入搜索删除事件与系统审计；迁移 head 更新为 `20260731_0013`，Celery beat、Windows Compose 环境、Prometheus 指标、SQLite 回归测试和真实 PostgreSQL Docker 集成测试均已同步。随后已按编号完成 `BE-027` metrics/tracing 和 `BE-028` Windows Docker Compose 正式部署门禁。
 

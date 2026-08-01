@@ -44,6 +44,7 @@ PROFILES: dict[str, BenchmarkProfile] = {
 TARGET_P95_MS: dict[str, float] = {
     "file_list_permission_batch": 500.0,
     "upload_init": 300.0,
+    "upload_complete_api_without_storage_merge": 800.0,
     "search": 800.0,
     "admin_audit": 1_000.0,
 }

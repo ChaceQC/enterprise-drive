@@ -17,6 +17,7 @@ from performance.fixture import (
     read_fixture,
     write_fixture,
 )
+from performance.multipart import parse_server_timing
 from performance.profiles import get_profile
 from performance.runner import _run_locust, _write_report
 
@@ -41,6 +42,18 @@ def test_profiles_keep_smoke_below_target_resource_budget() -> None:
     assert smoke.fixture_folders == 100
     assert smoke.users == 2
     assert smoke.run_time == "20s"
+
+
+def test_server_timing_parser_extracts_upload_complete_phases() -> None:
+    timings = parse_server_timing(
+        "storage_complete;dur=12.5, hash_validation;dur=3.25, final_object;dur=8"
+    )
+
+    assert timings == {
+        "storage_complete": 12.5,
+        "hash_validation": 3.25,
+        "final_object": 8.0,
+    }
 
 
 def test_fixture_round_trip_uses_utf8_json(tmp_path: Path) -> None:
@@ -122,9 +135,15 @@ def test_report_marks_each_request_against_p95_target(tmp_path: Path) -> None:
     )
 
     assert report["passed"] is False
+    assert report["schema_version"] == "BE-029/2"
+    assert report["summary"]["request_count"] == 20
+    assert report["summary"]["http_request_count"] == 20
+    assert report["summary"]["derived_metric_count"] == 0
+    assert report["summary"]["failure_rate"] == 0.0
     assert report["environment"]["locust_version"]
     assert report["environment"]["fixture_created_space"] is False
     by_name = {item["name"]: item for item in report["results"]}
+    assert by_name["file_list_permission_batch"]["p50_ms"] == 50.0
     assert by_name["file_list_permission_batch"]["passed"] is True
     assert by_name["search"]["passed"] is False
 

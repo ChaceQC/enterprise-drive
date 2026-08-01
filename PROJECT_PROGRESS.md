@@ -41,6 +41,8 @@
 - 真实 Docker run `be029-docker-6f4bbdb7`：默认单批生成并观察到 OpenSearch/审计 `100/100`，显式不限批次后恢复到 `1,000/1,000`；cleanup 后审计剩余 `0`、专属 index 返回 `404`、测试容器剩余 `0`。
 - 资源边界：PostgreSQL `0.75 CPU / 768 MiB / 128 PIDs`，OpenSearch `1 CPU / 1536 MiB / 256 PIDs`，均使用本地固定镜像和 `--pull never`；完成态快照约为 PostgreSQL `70.07 MiB`、OpenSearch `1.229 GiB`。
 - 单元与静态验证：CLI 默认批次与连接关闭新增回归已通过，Ruff、格式检查和 Mypy 全部通过。
+- `upload_complete` 已补齐真实 multipart 链路：DTP/1 init、part presign、无 Cookie/无代理环境继承的 MinIO PUT、complete、Server-Timing 分段和节点清理；每用户首个存储连接 warm-up 单独计量。
+- `report.json` 已升级为 `BE-029/2`，新增 p50、平均/最小/最大延迟、汇总错误率、主机内存/磁盘、Docker server、compose 容器限额与镜像 digest、PostgreSQL 索引/数据库体量和 OpenSearch 状态。
 
 ### 未完成
 
@@ -49,9 +51,9 @@
 
 ### 下一步
 
-1. 先提交并推送本轮连接关闭、默认批次、测试和文档改动，确认 GitHub Actions。
-2. 随后按 `AGENT.md`、技术计划书和 `PROJECT_PLAN.md` 从 `BE-001` 开始逐项核对源码、迁移、API、测试和文档，定位编号最早的未完成验收项。
-3. 实现该最早缺口并完成真实依赖验证；`BE-029` 的 100 万/1,000 万目标灌入和 multipart target 验收保留为已知未完成项，不抢占更早里程碑。
+1. 先提交并推送本轮 multipart、报告和文档改动，确认 GitHub Actions。
+2. 继续在受限真实 Compose 中分阶段灌入 100 万 OpenSearch 文档和 1,000 万审计日志，利用 `BE-029/2` 报告记录每批耗时、refresh/store、数据库索引和磁盘。
+3. 用同一隔离 project 完成 target profile 的 10,000 节点、100 RPS 初始化上传、50 RPS complete 和搜索/审计门槛，再提交最终 BE-029 验收。
 
 ## 2026-08-01 BE-030 路由、租户与网络安全矩阵
 

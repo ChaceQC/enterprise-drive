@@ -32,6 +32,8 @@
 
 `performance.target_data` 负责准备、检查和清理 BE-029 的大规模基准数据，不会构建、拉取或启动任何服务。它把 OpenSearch 文档和审计日志分成独立阶段，使用确定性 ID、专属 `be029-*` index、专属审计 action、批量 checkpoint 和原子 state JSON，进程中断后可从上一个批次继续。
 
+`performance.runner --scenario upload_complete` 会真实执行初始化、part presign、无 Cookie 的预签名 MinIO PUT、complete 和节点清理。测试环境请求带 `X-Drive-Benchmark: BE-029` 时，complete 响应增加 `Server-Timing` 的 `storage_complete`、`hash_validation` 和 `final_object` 分段；报告中的 `upload_complete_api_without_storage_merge` 为端到端响应时间扣除对象存储合并段后的指标。预签名数据面使用 `trust_env=false`，并把每个用户的首个连接 warm-up 单独记录，避免把冷启动误算为稳态传输。
+
 先用小批次验证连接和清理路径：
 
 ```powershell
@@ -65,6 +67,19 @@ uv run python -X utf8 -m performance.target_data `
 state 不保存数据库密码；清理只接受 state 中完全匹配的 `run_id`，只删除其专属 OpenSearch index 和带有精确 benchmark action 的审计行。完成数据生成后仍需执行真实 multipart complete 压测和 target profile，不能把“数据已准备”误报为完整性能验收。
 
 2026-08-01 已使用本地固定镜像和两个受限临时容器完成 `1,000/1,000` 小规模闭环：默认参数先生成 `100/100` 并保存 checkpoint，显式 `--max-batches 0` 后恢复到 `1,000/1,000`；清理后审计 action 真实剩余 `0`，专属 OpenSearch index 返回 `404`，本轮容器剩余 `0`。PostgreSQL 限制为 `0.75 CPU / 768 MiB / 128 PIDs`，OpenSearch 限制为 `1 CPU / 1536 MiB / 256 PIDs`，运行阶段均使用 `--pull never`。这只验证生成器的恢复和清理闭环，不代表目标规模性能验收。
+
+真实 Compose 的 `upload_complete` smoke 需要把 project 名传给 runner，以生成完整环境证据：
+
+```powershell
+uv run python -X utf8 -m performance.runner `
+  --base-url http://localhost:<gateway-port> `
+  --profile smoke `
+  --scenario upload_complete `
+  --docker-compose-project <compose-project> `
+  --output-dir tmp\performance\multipart-report
+```
+
+报告 `report.json` 使用 `BE-029/2`，包含 `summary`（请求/失败/错误率）、每个指标的平均值、最小值、最大值、p50/p95/p99，以及 `environment.host`、`environment.docker`、`environment.compose`、`environment.database`、`environment.opensearch` 和 `environment.target_data`。容器环境采集只读取 compose project 标签下的容器，不读取或写入容器环境变量中的密码。
 
 ## 运行步骤
 
@@ -170,6 +185,5 @@ uv run python -X utf8 -m performance.fixture cleanup `
 ## 当前缺口
 
 - 需要独立的数据生成器，直接准备 100 万 OpenSearch 文档和 1,000 万审计日志，并记录生成耗时、索引 refresh 和磁盘占用。
-- 需要补 multipart complete 的真实 MinIO 合并场景，区分 API 完成耗时与对象存储合并耗时。
-- 需要在 BE-029 基准报告中记录硬件、Docker Desktop 资源、镜像 digest、数据库索引、并发、数据量、错误率和 p50/p95/p99。
+- 已补真实 multipart complete 分段和 `BE-029/2` 报告字段；仍需在 100 万/1,000 万目标数据与完整 target profile 中填入最终并发、数据量、磁盘和 p50/p95/p99 证据。
 - 需要在 BE-035 接入持续失败阈值、Prometheus scrape 和治理看板；本工具只负责一次性可重复基准和工件输出。

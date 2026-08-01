@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Request, status
+from fastapi import APIRouter, Depends, Path, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -43,6 +43,7 @@ from app.modules.upload.schemas import (
     UploadSessionStatusResponse,
 )
 from app.modules.upload.service import UploadService
+from app.modules.upload.timing import UploadCompleteTimings
 
 router = APIRouter(dependencies=[Depends(ensure_supported_transfer_protocol)])
 
@@ -178,17 +179,26 @@ async def presign_upload_part(
 @router.post("/{session_id}/complete", response_model=CompleteUploadResponse)
 async def complete_upload(
     http_request: Request,
+    http_response: Response,
     session_id: UUID,
     request: CompleteUploadRequest,
     current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
     service: Annotated[UploadLifecycleService, Depends(get_upload_lifecycle_service)],
 ) -> CompleteUploadResponse:
+    timings = (
+        UploadCompleteTimings()
+        if settings.environment != "production"
+        and http_request.headers.get("X-Drive-Benchmark") == "BE-029"
+        else None
+    )
     try:
-        response = await service.complete_upload(
+        result = await service.complete_upload(
             current_user=current_user,
             session_id=session_id,
             parts=request.parts,
             audit_context=build_audit_context(http_request),
+            timings=timings,
         )
     except ApiError as exc:
         record_upload_failure(stage="complete", reason=exc.code)
@@ -196,8 +206,10 @@ async def complete_upload(
     except Exception:
         record_upload_failure(stage="complete", reason="internal_error")
         raise
+    if timings is not None:
+        http_response.headers["Server-Timing"] = timings.server_timing_header()
     record_upload_session(mode="multipart", outcome="completed")
-    return response
+    return result
 
 
 @router.post("/{session_id}/abort", response_model=AbortUploadResponse)

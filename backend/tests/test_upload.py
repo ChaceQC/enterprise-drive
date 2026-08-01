@@ -309,7 +309,11 @@ async def test_complete_multipart_upload_creates_file_version_and_is_idempotent(
 
     complete_response = await client.post(
         f"/api/v1/uploads/{session_id}/complete",
-        headers={"X-CSRF-Token": token, "X-Request-ID": "req_upload_complete"},
+        headers={
+            "X-CSRF-Token": token,
+            "X-Request-ID": "req_upload_complete",
+            "X-Drive-Benchmark": "BE-029",
+        },
         json=complete_payload,
     )
     duplicate_response = await client.post(
@@ -324,7 +328,11 @@ async def test_complete_multipart_upload_creates_file_version_and_is_idempotent(
 
     assert complete_response.status_code == 200
     assert complete_response.json()["protocol_version"] == "DTP/1"
+    assert "storage_complete;dur=" in complete_response.headers["server-timing"]
+    assert "hash_validation;dur=" in complete_response.headers["server-timing"]
+    assert "final_object;dur=" in complete_response.headers["server-timing"]
     assert duplicate_response.status_code == 200
+    assert "server-timing" not in duplicate_response.headers
     assert duplicate_response.json() == complete_response.json()
     assert status_response.json()["status"] == "completed"
     assert status_response.json()["uploaded_parts"] == [1, 2]
