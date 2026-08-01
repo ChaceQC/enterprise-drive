@@ -28,6 +28,42 @@
 
 `target` 只表示 API fixture 规模档位，不代表已经完成计划书中的 100 万索引或 1,000 万审计数据验收。运行前必须确认 Docker Desktop 资源、数据库容量、MinIO/OpenSearch 磁盘和清理窗口。
 
+## 目标规模数据生成器
+
+`performance.target_data` 负责准备、检查和清理 BE-029 的大规模基准数据，不会构建、拉取或启动任何服务。它把 OpenSearch 文档和审计日志分成独立阶段，使用确定性 ID、专属 `be029-*` index、专属审计 action、批量 checkpoint 和原子 state JSON，进程中断后可从上一个批次继续。
+
+先用小批次验证连接和清理路径：
+
+```powershell
+uv run python -X utf8 -m performance.target_data `
+  --state tmp\performance\target\state.json `
+  --opensearch-docs 1000 `
+  --audit-rows 1000 `
+  --max-batches 1 `
+  prepare
+uv run python -X utf8 -m performance.target_data `
+  --state tmp\performance\target\state.json status
+uv run python -X utf8 -m performance.target_data `
+  --state tmp\performance\target\state.json `
+  cleanup `
+  --confirm-run-id <state.run_id>
+```
+
+正式目标必须显式确认并分阶段执行；默认每次只推进有限批次，避免一次性占满 CPU、内存或磁盘：
+
+```powershell
+uv run python -X utf8 -m performance.target_data `
+  --state tmp\performance\target\state.json `
+  --opensearch-docs 1000000 `
+  --audit-rows 10000000 `
+  --confirm-large-target `
+  --max-batches 100 `
+  --throttle-seconds 0.05 `
+  prepare
+```
+
+state 不保存数据库密码；清理只接受 state 中完全匹配的 `run_id`，只删除其专属 OpenSearch index 和带有精确 benchmark action 的审计行。完成数据生成后仍需执行真实 multipart complete 压测和 target profile，不能把“数据已准备”误报为完整性能验收。
+
 ## 运行步骤
 
 ### 1. 启动已构建的真实环境

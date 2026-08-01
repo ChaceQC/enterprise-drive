@@ -24,6 +24,31 @@
 1. 进入 `BE-029 target`，先实现可恢复、分阶段、资源受限、可清理的目标数据生成器。
 2. 再执行真实 multipart complete 压测和完整 target profile，记录硬件、镜像 digest、数据量、p50/p95/p99、错误率、OpenSearch refresh/磁盘与审计写入耗时。
 
+## 2026-08-01 BE-029 target 数据生成器
+
+### 当前状态
+
+- 已实现 `backend/performance/target_state.py`、`target_opensearch.py`、`target_audit.py` 和 `target_data.py`，但尚未把 100 万 OpenSearch 文档和 1,000 万审计日志灌入真实环境。
+- 生成器把 OpenSearch 与审计分成独立阶段，使用确定性 ID、专属 `be029-*` index/action、原子 state checkpoint、批次上限和节流参数；大规模执行必须显式 `--confirm-large-target`。
+- 清理要求精确匹配 `run_id`，只删除当前 state 所属 index 和审计 action，不执行全库、全 index 或不受控 Docker 清理。
+
+### 已完成
+
+- OpenSearch 生成器支持单批/多批恢复，使用单 shard、零 replica、生成期间关闭 refresh，完成后恢复 refresh 并记录真实文档数与 index store bytes。
+- PostgreSQL 审计生成器使用临时 staging table + `COPY` + `ON CONFLICT DO NOTHING`，每批提交后保存 checkpoint；清理按批次删除并可中断恢复。
+- 单元与静态验证：target 相关测试 `13 passed`，Ruff、格式检查和 Mypy 全部通过。
+
+### 未完成
+
+- 尚未完成真实目标规模数据灌入、真实 multipart complete 50 RPS/延迟分解、100 RPS 初始化上传和完整 target profile。
+- 尚未把目标数据报告（硬件、镜像 digest、数据库索引、refresh、磁盘、p50/p95/p99、错误率）接入现有 `report.json`。
+
+### 下一步
+
+1. 用真实 Docker Compose 先执行 1,000/1,000 小批次生成、status、断点恢复和 cleanup。
+2. 再按资源预算分阶段推进 100 万/1,000 万数据，保留每批报告和可回滚 checkpoint。
+3. 实现真实 multipart complete 预热/压测及性能报告字段，再做完整 target profile。
+
 ## 2026-08-01 BE-030 路由、租户与网络安全矩阵
 
 ### 当前状态
