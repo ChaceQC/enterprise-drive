@@ -3,7 +3,8 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -249,6 +250,60 @@ async def create_download_url(
         raise
     record_download_request(channel="internal", outcome="allowed")
     return response
+
+
+@router.get(
+    "/{node_id}/content",
+    dependencies=[Depends(ensure_supported_transfer_protocol)],
+    response_class=StreamingResponse,
+    responses={
+        200: {"description": "完整代理下载"},
+        206: {"description": "单段 Range 代理下载"},
+        416: {"description": "Range 不合法、不可满足或超过单段上限"},
+    },
+)
+async def proxy_download_content(
+    http_request: Request,
+    node_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    service: Annotated[FileDownloadService, Depends(get_file_download_service)],
+    range_header: Annotated[str | None, Header(alias="Range")] = None,
+) -> StreamingResponse:
+    if not settings.download_proxy_enabled:
+        raise ApiError("DOWNLOAD_PROXY_DISABLED", "代理下载未启用", status_code=404)
+    try:
+        await enforce_rate_limit(
+            settings=settings,
+            rate_limiter=rate_limiter,
+            current_user=current_user,
+            action="file.download_proxy",
+            resource_key=f"node:{node_id}",
+            request=http_request,
+        )
+        download = await service.create_proxy_download(
+            current_user=current_user,
+            node_id=node_id,
+            range_header=range_header,
+            audit_context=build_audit_context(http_request),
+        )
+    except ApiError as exc:
+        record_download_request(
+            channel="internal_proxy",
+            outcome="denied" if exc.status_code < 500 else "error",
+        )
+        raise
+    except Exception:
+        record_download_request(channel="internal_proxy", outcome="error")
+        raise
+    record_download_request(channel="internal_proxy", outcome="allowed")
+    return StreamingResponse(
+        content=download.body,
+        status_code=download.status_code,
+        media_type=download.media_type,
+        headers=download.headers,
+    )
 
 
 @router.get("/{node_id}/preview", response_model=FilePreviewResponse)

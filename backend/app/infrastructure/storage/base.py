@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -128,6 +129,17 @@ class StorageAdapter(Protocol):
         max_bytes: int,
     ) -> bytes:
         """Read at most max_bytes from one private object."""
+
+    def stream_object(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        offset: int,
+        length: int,
+        chunk_size: int,
+    ) -> AsyncIterator[bytes]:
+        """Stream one bounded byte range from a private object."""
 
     async def put_object_bytes(
         self,

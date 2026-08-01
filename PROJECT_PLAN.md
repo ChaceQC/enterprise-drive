@@ -73,7 +73,7 @@
 - 对象复制到最终 `objects/{tenant_id}/{hash_prefix}/{content_hash}` 成功但数据库最终化失败后，可能出现孤儿最终对象。`file.cleanup_orphaned_objects` 反向扫描任务及 `BE-031/BE-032` 的真实 MinIO 主路径验收已完成；仍需由 `BE-035` 补生产失败告警、积压/吞吐看板和周期运行治理。
 - `BE-033` 已补齐空间、可选用户、可选租户和文件策略四类容量账户，上传初始化执行快速检查，版本创建通过原子条件更新和统一 ledger 扣减，彻底删除按版本流水释放全部维度。仍待 `BE-044` 提供账户/策略管理 API，并补部门额度、临时上传占用上限和多维通用校准。
 - Celery beat 已定时调度过期上传、回收站保留期、blob 清理、孤儿对象扫描和容量校准；后续需要补齐连续失败告警、积压/吞吐看板，以及过期分享和预览产物治理。
-- 下载当前仍以短期预签名直连为主。高密级文件、外链和审计敏感场景需要补充后端代理下载、HTTP Range、增强审计、水印导出或 DLP 策略；低风险大文件仍可保留预签名直连以降低 API 带宽压力。
+- `BE-034` 已在短期预签名直连之外补充内部受控代理下载、单段 HTTP Range、流式对象读取和范围审计；低风险大文件继续使用预签名直连。密级标签自动强制代理、外链代理、水印和内容 DLP 仍属后续治理策略。
 - 并发下同 hash 首次上传竞争当前主要依赖数据库唯一约束和补偿路径，已有基础处理，但还需要补更细的并发测试、对象归档幂等检查和失败恢复路径，确保不会产生错误引用、漏容量或孤儿最终对象。
 - 真实对象存储集成测试首组已在 CI 和本机真实 Docker 中通过，覆盖 multipart 私有方法封装、预签名 PUT/GET、copy、delete、list、hash 校验和孤儿最终对象扫描；后续仍需扩展异常恢复、SDK 升级兼容、并发竞争和更完整的失败补偿场景。
 
@@ -99,7 +99,7 @@
 - 用户、部门、用户组、空间、配额、统计、维护和导出等完整管理 API 按 Sprint 9 的 `BE-044`、`BE-045` 继续交付。
 - 生命周期治理、孤儿对象扫描和容量治理增强。（`BE-026` 已完成过期上传、无引用 blob 和回收站保留期清理；回收站任务按删除批次根节点加锁清理，释放容量、扣减 blob 引用并写入审计、搜索事件和指标；完整策略化治理继续由 `BE-047` 承担）
 - 多维配额核心运行时已完成；账户/策略管理 API 和容量治理看板继续由 `BE-044`、`BE-045` 提供。维护任务定时调度、失败告警和清理指标继续由 `BE-035` 完成。
-- 高密级下载治理：在预签名直连之外补充后端代理、HTTP Range、增强审计、水印或 DLP 策略能力。
+- 高密级下载治理：后端流式代理、单段 HTTP Range 和增强审计已完成；密级标签自动选路、外链代理、水印和 DLP 策略继续后续交付。
 - Windows 11 Docker Desktop 正式部署：多阶段 Dockerfile、根 `compose.windows.yml`、Compose 内 Nginx gateway、根 `.env.windows.example` 和 `deploy/windows/manage.ps1`。（已完成本机 HTTP 基线、公网 ACME/TLS 配置、续期命令及 `backup`、`backup-verify`、`restore` 自动化；真实 DNS/受信证书验收待生产环境执行）
 - API、migration、seed、MinIO 初始化、按队列隔离的 Worker、Celery beat、PostgreSQL、Redis、MinIO、OpenSearch 的完整编排；只有 gateway 发布宿主端口，默认 HTTP `18080/19000`，公网模式由 gateway 发布 `80/443` 并按 API/存储域名 Host 分流。（已完成）
 - S3 容器内端点和浏览器外部端点分离；默认本机 API 为 `http://localhost:18080`、S3 外部端点为 `http://localhost:19000`，均由 gateway 发布；生产支持 API/存储独立域名的 Host 分流并保留原始 Host。（已完成）
@@ -185,7 +185,9 @@
 
 2026-08-01 已按“实现优先、减少重复测试”的执行决策暂停 `BE-029` 目标规模灌入和完整 target profile。现有 Locust、真实 multipart、checkpoint、精确清理和 `BE-029/2` 报告成果保留，目标压测留到发布性能门禁恢复执行，不再阻塞编号靠后的工程功能。
 
-2026-08-01 `BE-033` 多维配额核心运行时已完成：新增 `quota_policies` 事实表；空间账户始终参与扣减，用户/租户默认额度大于 `0` 时启用对应账户，策略可按扩展名或 MIME 前缀限制累计额度和单文件大小；秒传和 multipart complete 在同一事务内按固定顺序执行原子扣减并写入各维度 ledger，彻底删除与回收站保留期清理按版本正向流水释放全部维度。当前默认用户/租户额度为 `0`，策略管理 HTTP API 与通用多维校准归 `BE-044`。下一项进入 `BE-034` 高密级下载代理与 HTTP Range。
+2026-08-01 `BE-034` 内部受控下载核心运行时已实现：新增 `GET /api/v1/files/{node_id}/content`，复用现有节点权限、版本和 blob 校验，通过对象存储适配器按 offset/length 分块流式读取，支持完整响应和单段 HTTP Range，并在审计中记录代理模式、范围和响应字节数。普通预签名入口保持不变；密级标签自动强制代理、外链代理、水印和内容 DLP 留给后续治理策略。下一项进入 `BE-035` 维护任务调度告警。
+
+2026-08-01 `BE-033` 多维配额核心运行时已完成：新增 `quota_policies` 事实表；空间账户始终参与扣减，用户/租户默认额度大于 `0` 时启用对应账户，策略可按扩展名或 MIME 前缀限制累计额度和单文件大小；秒传和 multipart complete 在同一事务内按固定顺序执行原子扣减并写入各维度 ledger，彻底删除与回收站保留期清理按版本正向流水释放全部维度。当前默认用户/租户额度为 `0`，策略管理 HTTP API 与通用多维校准归 `BE-044`。
 
 2026-08-01 `BE-029` multipart/report 收尾已通过真实隔离 Compose：`upload_complete` 执行 DTP/1 init、part presign、无 Cookie MinIO PUT、complete 和清理；Server-Timing 分段的 storage merge P95 为 `30 ms`，扣除 merge 的 complete API P95 为 `190 ms`，稳态 PUT P95 为 `120 ms`，0 失败。`report.json` 已升级为 `BE-029/2`，真实采集主机内存/磁盘、Docker server、9 个 compose 容器的 image ID/digest/限额、PostgreSQL `133` 个索引和 `10,361,879` bytes 数据库体量；该报告 smoke 的容器、卷和网络均清理为 `0`。100 万/1,000 万目标数据实际灌入和完整 target profile 尚未执行，现已作为非阻塞发布门禁待办保留。
 

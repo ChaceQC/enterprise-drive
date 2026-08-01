@@ -1,5 +1,63 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-01 BE-034 高密级下载代理
+
+### 当前状态
+
+- 已完成内部受控代理下载核心链路，普通文件预签名直连保持不变。
+- 下一项按编号进入 `BE-035` 维护任务调度告警；本轮只保留代理下载定向验证，不执行全量测试或性能压测。
+
+### 已完成
+
+- 新增 `GET /api/v1/files/{node_id}/content`，复用现有 Cookie Session、节点级 `download` 权限、租户边界、当前版本和 active blob 校验。
+- 扩展 `StorageAdapter.stream_object`，MinIO/S3 适配器按 offset、length 和固定 chunk 异步流式读取；内存测试适配器提供同契约实现。
+- 支持完整下载和标准单段 Range：`start-end`、`start-`、`-suffix`；合法部分请求返回 HTTP 206。
+- 多段、反向、不可满足或超过单段上限的请求返回 HTTP 416，并携带 `Accept-Ranges` 与 `Content-Range: bytes */{size}`。
+- 响应包含 `Content-Length`、ETag、UTF-8 `Content-Disposition`、`Cache-Control: private, no-store`、`X-Content-Type-Options` 和 DTP/1 响应头。
+- 代理下载使用独立限流配置；允许与拒绝均写入 `file.downloaded`，代理审计记录 `delivery_mode`、版本、Range 起止和响应字节数。
+- 把新增 route 同步到安全矩阵和跨租户 fixture 映射，运行时 OpenAPI 口径更新为 37 个 route。
+
+### 验证
+
+- 只运行一次变更文件 Ruff format check、Ruff lint 和 `uv run mypy app`，全部通过。
+- 只运行 `tests/test_download.py` 与安全矩阵/OpenAPI 精确对账单测，结果为 `6 passed`；未运行全量测试、Docker 集成、性能压测或旧模块重复回归。
+
+### 边界
+
+- 当前任何具备节点下载权限的客户端都可显式选择代理入口；服务端密级标签自动强制代理尚未建立。
+- 外链分享仍返回短期预签名 URL；外链代理、动态水印和内容 DLP 不在本轮核心链路内。
+- 单次部分 Range 默认上限为 64 MiB，完整无 Range 请求不受该部分范围上限限制；API 带宽和连接资源需要由部署层继续监控。
+
+### 下一步
+
+1. 只运行一次代理下载定向测试、Ruff 和 Mypy，确认最小闭环后提交推送。
+2. 进入 `BE-035`，为 maintenance 任务增加连续失败状态、Prometheus 指标和可配置告警阈值。
+3. 保留密级标签自动选路、外链代理、水印和 DLP 为后续治理能力，不阻塞当前工程顺序。
+
+### 涉及文件
+
+- `backend/app/modules/file/download.py`
+- `backend/app/modules/file/download_range.py`
+- `backend/app/modules/file/router.py`
+- `backend/app/infrastructure/storage/base.py`
+- `backend/app/infrastructure/storage/s3.py`
+- `backend/app/infrastructure/storage/testing.py`
+- `backend/app/api/errors.py`
+- `backend/app/api/deps.py`
+- `backend/app/core/config.py`
+- `backend/tests/test_download.py`
+- `backend/tests/security_route_matrix.py`
+- `backend/tests/test_route_security_matrix.py`
+- `backend/tests/test_route_security_cross_tenant.py`
+- `.env.windows.example`
+- `compose.windows.yml`
+- `docs/drive-transfer-protocol-v1.md`
+- `README.md`
+- `backend/README.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-08-01 BE-033 多维配额策略
 
 ### 当前状态

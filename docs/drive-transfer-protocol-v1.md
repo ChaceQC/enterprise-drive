@@ -17,7 +17,7 @@ Drive Transfer Protocol v1（DTP/1）是企业网盘在 HTTPS 之上的应用层
 - 预签名下载和 HTTP Range 使用方式。
 - 协议版本协商、错误码和兼容性规则。
 
-DTP/1 不定义新的 TCP、UDP、TLS、QUIC、加密算法或可靠传输实现。控制面继续使用 FastAPI HTTPS API，文件正文通过短期预签名 HTTPS URL 直接访问 MinIO/S3。
+DTP/1 不定义新的 TCP、UDP、TLS、QUIC、加密算法或可靠传输实现。控制面继续使用 FastAPI HTTPS API；普通文件正文通过短期预签名 HTTPS URL 直接访问 MinIO/S3，高密级或强审计场景由同一 HTTPS API 提供受控流式代理。
 
 ## 2. 规范用语
 
@@ -37,16 +37,18 @@ DTP/1 不定义新的 TCP、UDP、TLS、QUIC、加密算法或可靠传输实现
 | 完成上传 | `POST /api/v1/uploads/{session_id}/complete` |
 | 取消上传 | `POST /api/v1/uploads/{session_id}/abort` |
 | 获取文件下载签名 | `GET /api/v1/files/{node_id}/download` |
+| 受控代理下载 | `GET /api/v1/files/{node_id}/content` |
 | 获取外链下载签名 | `POST /api/v1/public/shares/download` |
 
 控制面请求不得携带大文件正文。
 
 ### 3.2 数据面
 
-数据面只使用服务端签发的短期 HTTPS URL：
+数据面使用以下两种 HTTPS 路径：
 
 - 上传：客户端对预签名 URL 执行分片 `PUT`。
-- 下载：客户端对预签名 URL 执行 `GET`，需要续传或并行读取时使用标准 `Range` 请求头。
+- 普通下载：客户端对预签名 URL 执行 `GET`，需要续传或并行读取时使用标准 `Range` 请求头。
+- 受控下载：客户端直接请求 `/api/v1/files/{node_id}/content`，服务端重新检查权限并代理单段 Range。
 - 客户端不得修改已签名的 bucket、object key、upload ID、part number 或签名查询参数。
 - 签名过期后必须重新向控制面申请，不得长期缓存。
 
@@ -66,6 +68,13 @@ X-Drive-Transfer-Protocol: DTP/1
 {
   "protocol_version": "DTP/1"
 }
+```
+
+代理下载返回二进制流，并通过响应头返回：
+
+```http
+X-Drive-Transfer-Protocol: DTP/1
+Accept-Ranges: bytes
 ```
 
 客户端声明未知版本时，服务端返回 HTTP `426`：
@@ -204,7 +213,7 @@ Rust 客户端必须：
 4. 校验成功后原子替换目标文件。
 5. 目标版本变化、权限撤销或签名过期时重新进入控制面，不继续使用旧 URL。
 
-普通文件使用预签名直连。高密级、外链审计、水印或 DLP 场景可以由后续策略切换到后端代理下载，但仍保持 DTP/1 控制面状态与错误语义。
+普通文件继续使用预签名直连。高密级或强审计场景可使用 `/api/v1/files/{node_id}/content`：无 Range 返回 HTTP 200，合法单段 Range 返回 HTTP 206，并返回 `Content-Range`、`Content-Length`、ETag 和 UTF-8 文件名。多段、不可满足或超过服务端单段上限的 Range 返回 HTTP 416；水印、密级标签自动强制代理和内容 DLP 仍由后续策略接入。
 
 ## 10. 错误处理
 
@@ -214,6 +223,9 @@ DTP/1 客户端至少识别：
 - `AUTH_REQUIRED`
 - `CSRF_INVALID`
 - `RATE_LIMITED`
+- `DOWNLOAD_PROXY_DISABLED`
+- `DOWNLOAD_RANGE_INVALID`
+- `DOWNLOAD_RANGE_TOO_LARGE`
 - `SPACE_NOT_FOUND`
 - `PARENT_NOT_FOUND`
 - `NODE_NOT_FOUND`
@@ -247,11 +259,12 @@ DTP/1 客户端至少识别：
 | 秒传、multipart、状态查询、单分片签名 | 已实现 |
 | 幂等 complete、abort、服务端 SHA-256 | 已实现 |
 | 预签名 HTTPS 下载 | 已实现 |
+| 受控流式代理与单段 HTTP Range | 已实现 |
 | 批量分片签名 | `DC-006` 实现 |
 | 服务端并发/带宽提示 | `DC-006` 实现 |
 | Rust 持久化传输队列 | `DC-006` 实现 |
 | HTTP/2、HTTP/3 透明承载与回退验证 | `BE-029` / `DC-006` 基准后决定 |
-| 高密级代理、增强 Range、水印或 DLP | `BE-034` 实现 |
+| 密级标签自动强制代理、水印或内容 DLP | 后续治理策略实现 |
 
 ## 13. 验收
 

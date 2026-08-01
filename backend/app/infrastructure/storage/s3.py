@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from collections.abc import AsyncIterator
 from datetime import timedelta
 from io import BytesIO
 from urllib.parse import quote, urlsplit
@@ -192,6 +193,36 @@ class S3StorageAdapter:
         max_bytes: int,
     ) -> bytes:
         return await asyncio.to_thread(self._read_object_bytes, bucket, storage_key, max_bytes)
+
+    async def stream_object(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        offset: int,
+        length: int,
+        chunk_size: int,
+    ) -> AsyncIterator[bytes]:
+        if length <= 0:
+            return
+        response = await asyncio.to_thread(
+            self._client.get_object,
+            bucket,
+            storage_key,
+            offset,
+            length,
+        )
+        remaining = length
+        try:
+            while remaining > 0:
+                chunk = await asyncio.to_thread(response.read, min(chunk_size, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield bytes(chunk)
+        finally:
+            await asyncio.to_thread(response.close)
+            await asyncio.to_thread(response.release_conn)
 
     async def put_object_bytes(
         self,

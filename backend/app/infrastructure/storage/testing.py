@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import AsyncIterator
 from datetime import timedelta
 from uuid import uuid4
 
@@ -152,6 +153,25 @@ class InMemoryStorageAdapter:
                 storage_key=storage_key,
             )
         return content[:max_bytes]
+
+    async def stream_object(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        offset: int,
+        length: int,
+        chunk_size: int,
+    ) -> AsyncIterator[bytes]:
+        content = self.object_contents.get((bucket, storage_key))
+        if content is None:
+            content = self._object_content_from_completed_parts(
+                bucket=bucket,
+                storage_key=storage_key,
+            )
+        end = min(offset + length, len(content))
+        for position in range(offset, end, chunk_size):
+            yield content[position : min(position + chunk_size, end)]
 
     async def put_object_bytes(
         self,

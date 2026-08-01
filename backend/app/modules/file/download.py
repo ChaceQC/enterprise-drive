@@ -1,20 +1,40 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from urllib.parse import quote
 from uuid import UUID
 
 from app.api.errors import ApiError
 from app.core.config import Settings
+from app.core.transfer_protocol import DRIVE_TRANSFER_PROTOCOL_HEADER, DRIVE_TRANSFER_PROTOCOL_V1
 from app.infrastructure.storage.base import StorageAdapter
 from app.modules.audit.schemas import AuditContext, AuditEvent
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
 from app.modules.file.audit import record_node_event
-from app.modules.file.models import Node
+from app.modules.file.download_range import resolve_download_range
+from app.modules.file.models import FileBlob, FileVersion, Node
 from app.modules.file.repository import FileRepository
 from app.modules.file.schemas import FileDownloadUrlResponse
 from app.modules.permission.actions import ACTION_DOWNLOAD
 from app.modules.permission.service import PermissionService
 from app.modules.space.repository import SpaceRepository
+
+
+@dataclass(frozen=True, slots=True)
+class DownloadSource:
+    node: Node
+    version: FileVersion
+    blob: FileBlob
+
+
+@dataclass(frozen=True, slots=True)
+class FileProxyDownload:
+    status_code: int
+    media_type: str
+    headers: dict[str, str]
+    body: AsyncIterator[bytes]
 
 
 class FileDownloadService:
@@ -42,6 +62,127 @@ class FileDownloadService:
         node_id: UUID,
         audit_context: AuditContext | None = None,
     ) -> FileDownloadUrlResponse:
+        source = await self._get_download_source(
+            current_user=current_user,
+            node_id=node_id,
+            audit_context=audit_context,
+        )
+
+        presigned = await self.storage.presign_download(
+            bucket=self.settings.s3_bucket,
+            storage_key=source.blob.storage_key,
+            filename=source.node.name,
+            expires_in_seconds=self.settings.download_presign_expires_seconds,
+        )
+        await record_node_event(
+            audit_service=self.audit_service,
+            current_user=current_user,
+            node=source.node,
+            action="file.downloaded",
+            audit_context=audit_context,
+            metadata={
+                "version_id": str(source.version.id),
+                "blob_id": str(source.blob.id),
+                "size_bytes": source.version.size_bytes,
+                "delivery_mode": "presigned",
+            },
+        )
+        await self.repository.commit()
+        return FileDownloadUrlResponse(
+            node_id=source.node.id,
+            version_id=source.version.id,
+            file_name=source.node.name,
+            size_bytes=source.version.size_bytes,
+            mime_type=source.version.mime_type or source.blob.mime_type,
+            download_url=presigned.download_url,
+            expires_at=presigned.expires_at,
+            headers=presigned.headers,
+        )
+
+    async def create_proxy_download(
+        self,
+        *,
+        current_user: User,
+        node_id: UUID,
+        range_header: str | None,
+        audit_context: AuditContext | None = None,
+    ) -> FileProxyDownload:
+        source = await self._get_download_source(
+            current_user=current_user,
+            node_id=node_id,
+            audit_context=audit_context,
+        )
+        try:
+            byte_range = resolve_download_range(
+                range_header,
+                size_bytes=source.version.size_bytes,
+                max_range_bytes=self.settings.download_proxy_max_range_bytes,
+            )
+        except ApiError as exc:
+            await self._record_denied_download(
+                current_user=current_user,
+                resource_id=source.node.id,
+                reason=exc.code.lower(),
+                audit_context=audit_context,
+                metadata={
+                    "space_id": str(source.node.space_id),
+                    "version_id": str(source.version.id),
+                    "delivery_mode": "proxy",
+                },
+            )
+            raise
+
+        media_type = source.version.mime_type or source.blob.mime_type or "application/octet-stream"
+        headers = {
+            "Accept-Ranges": "bytes",
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": _content_disposition(source.node.name),
+            "Content-Length": str(byte_range.length),
+            "ETag": f'"{source.blob.content_hash}"',
+            "X-Content-Type-Options": "nosniff",
+            DRIVE_TRANSFER_PROTOCOL_HEADER: DRIVE_TRANSFER_PROTOCOL_V1,
+        }
+        if byte_range.partial:
+            headers["Content-Range"] = byte_range.content_range
+
+        await record_node_event(
+            audit_service=self.audit_service,
+            current_user=current_user,
+            node=source.node,
+            action="file.downloaded",
+            audit_context=audit_context,
+            metadata={
+                "version_id": str(source.version.id),
+                "blob_id": str(source.blob.id),
+                "size_bytes": source.version.size_bytes,
+                "delivery_mode": "proxy",
+                "partial": byte_range.partial,
+                "range_start": byte_range.start,
+                "range_end": byte_range.end,
+                "response_bytes": byte_range.length,
+            },
+        )
+        await self.repository.commit()
+        return FileProxyDownload(
+            status_code=206 if byte_range.partial else 200,
+            media_type=media_type,
+            headers=headers,
+            body=self.storage.stream_object(
+                bucket=self.settings.s3_bucket,
+                storage_key=source.blob.storage_key,
+                offset=byte_range.start,
+                length=byte_range.length,
+                chunk_size=self.settings.download_proxy_chunk_size_bytes,
+            ),
+        )
+
+    async def _get_download_source(
+        self,
+        *,
+        current_user: User,
+        node_id: UUID,
+        audit_context: AuditContext | None,
+    ) -> DownloadSource:
         node = await self._get_owned_file_node(
             current_user=current_user,
             node_id=node_id,
@@ -75,36 +216,19 @@ class FileDownloadService:
             )
             raise ApiError("FILE_VERSION_NOT_FOUND", "文件当前版本不存在", status_code=404)
         version, blob = version_blob
-
-        presigned = await self.storage.presign_download(
-            bucket=self.settings.s3_bucket,
-            storage_key=blob.storage_key,
-            filename=node.name,
-            expires_in_seconds=self.settings.download_presign_expires_seconds,
-        )
-        await record_node_event(
-            audit_service=self.audit_service,
-            current_user=current_user,
-            node=node,
-            action="file.downloaded",
-            audit_context=audit_context,
-            metadata={
-                "version_id": str(version.id),
-                "blob_id": str(blob.id),
-                "size_bytes": version.size_bytes,
-            },
-        )
-        await self.repository.commit()
-        return FileDownloadUrlResponse(
-            node_id=node.id,
-            version_id=version.id,
-            file_name=node.name,
-            size_bytes=version.size_bytes,
-            mime_type=version.mime_type or blob.mime_type,
-            download_url=presigned.download_url,
-            expires_at=presigned.expires_at,
-            headers=presigned.headers,
-        )
+        if blob.status != "active":
+            await self._record_denied_download(
+                current_user=current_user,
+                resource_id=node.id,
+                reason="blob_not_active",
+                audit_context=audit_context,
+                metadata={
+                    "space_id": str(node.space_id),
+                    "version_id": str(version.id),
+                },
+            )
+            raise ApiError("FILE_CONTENT_NOT_AVAILABLE", "文件内容暂不可用", status_code=409)
+        return DownloadSource(node=node, version=version, blob=blob)
 
     async def _get_owned_file_node(
         self,
@@ -202,3 +326,12 @@ class FileDownloadService:
             context=audit_context or AuditContext(),
         )
         await self.repository.commit()
+
+
+def _content_disposition(filename: str) -> str:
+    safe_filename = filename.replace("/", "_").replace("\\", "_").replace('"', "_")
+    ascii_filename = safe_filename.encode("ascii", "ignore").decode() or "download"
+    return (
+        f'attachment; filename="{ascii_filename}"; '
+        f"filename*=UTF-8''{quote(safe_filename, safe='')}"
+    )

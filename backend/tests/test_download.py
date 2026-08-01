@@ -213,3 +213,85 @@ async def test_space_viewer_can_download_but_non_member_is_hidden(
     assert [audit.result for audit in audits] == ["denied", "allowed"]
     assert audits[0].resource_id == UUID(completed["node_id"])
     assert audits[0].metadata_json["reason"] == "permission_denied"
+
+
+@pytest.mark.asyncio
+async def test_proxy_download_streams_single_range_and_records_audit(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="proxy-download-space")
+    completed = await complete_small_file(
+        client,
+        token,
+        space_id=str(space["id"]),
+        parent_id=str(space["root_node_id"]),
+        file_name="受控下载.txt",
+    )
+
+    response = await client.get(
+        f"/api/v1/files/{completed['node_id']}/content",
+        headers={"Range": "bytes=10-19", "X-Request-ID": "req_proxy_download"},
+    )
+
+    assert response.status_code == 206
+    assert response.content == b"\x00" * 10
+    assert response.headers["accept-ranges"] == "bytes"
+    assert response.headers["content-range"] == "bytes 10-19/1024"
+    assert response.headers["content-length"] == "10"
+    assert response.headers["x-drive-transfer-protocol"] == "DTP/1"
+    assert "filename*=UTF-8''" in response.headers["content-disposition"]
+
+    async with session_factory() as session:
+        audit = (
+            await session.execute(select(AuditLog).where(AuditLog.action == "file.downloaded"))
+        ).scalar_one()
+
+    assert audit.result == "allowed"
+    assert audit.request_id == "req_proxy_download"
+    assert audit.metadata_json["delivery_mode"] == "proxy"
+    assert audit.metadata_json["partial"] is True
+    assert audit.metadata_json["range_start"] == 10
+    assert audit.metadata_json["range_end"] == 19
+    assert audit.metadata_json["response_bytes"] == 10
+
+
+@pytest.mark.asyncio
+async def test_proxy_download_rejects_unsatisfied_range_with_audit(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="proxy-range-invalid")
+    completed = await complete_small_file(
+        client,
+        token,
+        space_id=str(space["id"]),
+        parent_id=str(space["root_node_id"]),
+        file_name="range.bin",
+    )
+
+    response = await client.get(
+        f"/api/v1/files/{completed['node_id']}/content",
+        headers={"Range": "bytes=2048-4095", "X-Request-ID": "req_proxy_range_invalid"},
+    )
+
+    assert response.status_code == 416
+    assert response.json()["code"] == "DOWNLOAD_RANGE_INVALID"
+    assert response.headers["accept-ranges"] == "bytes"
+    assert response.headers["content-range"] == "bytes */1024"
+
+    async with session_factory() as session:
+        audit = (
+            await session.execute(select(AuditLog).where(AuditLog.action == "file.downloaded"))
+        ).scalar_one()
+
+    assert audit.result == "denied"
+    assert audit.request_id == "req_proxy_range_invalid"
+    assert audit.metadata_json["reason"] == "download_range_invalid"
+    assert audit.metadata_json["delivery_mode"] == "proxy"

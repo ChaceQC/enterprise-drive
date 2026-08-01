@@ -343,6 +343,11 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - `DRIVE_UPLOAD_PART_SIZE_BYTES`
 - `DRIVE_UPLOAD_PRESIGN_EXPIRES_SECONDS`
 - `DRIVE_DOWNLOAD_PRESIGN_EXPIRES_SECONDS`
+- `DRIVE_DOWNLOAD_PROXY_ENABLED`
+- `DRIVE_DOWNLOAD_PROXY_MAX_RANGE_BYTES`
+- `DRIVE_DOWNLOAD_PROXY_CHUNK_SIZE_BYTES`
+- `DRIVE_DOWNLOAD_PROXY_RATE_LIMIT_COUNT`
+- `DRIVE_DOWNLOAD_PROXY_RATE_LIMIT_WINDOW_SECONDS`
 - `DRIVE_DEFAULT_SPACE_QUOTA_BYTES`
 - `DRIVE_DEFAULT_USER_QUOTA_BYTES`
 - `DRIVE_DEFAULT_TENANT_QUOTA_BYTES`
@@ -392,9 +397,12 @@ uv run pytest tests/test_storage_minio_integration.py -q
 ## 下载接口
 
 - `GET /api/v1/files/{node_id}/download`
+- `GET /api/v1/files/{node_id}/content`
 
 下载接口基于 `nodes.current_version_id` 查询当前版本和 blob，返回 `download_url`、`expires_at`、`file_name`、`version_id`、`size_bytes`、`mime_type` 和额外 `headers`。S3/MinIO 适配器会使用 `ResponseContentDisposition` 设置下载文件名，并同时提供 ASCII `filename` 和 UTF-8 `filename*`。
 
 下载预签名已接入基础限流，按 `tenant + user + node + IP` 维度计数。触发限流时返回 HTTP 429，错误码为 `RATE_LIMITED`。
 
-当前下载接口已通过 `PermissionService` 校验节点级 `download` 权限：非空间成员、空间角色不足或节点 ACL deny 均返回统一的 `NODE_NOT_FOUND`，目录节点返回 `NODE_NOT_FILE`，缺失当前版本返回 `FILE_VERSION_NOT_FOUND`。下载成功与拒绝都会写入 `file.downloaded` 审计事件；后续会把搜索 ACL 更新接入同一权限事实。
+`BE-034` 的 `/content` 入口复用完全相同的权限、当前版本和 active blob 判断，由 `StorageAdapter.stream_object` 从私有对象存储按 offset/length 分块读取，不把整文件载入 API 内存。无 `Range` 时返回 HTTP 200 完整流；单段 `Range` 支持 `bytes=start-end`、`bytes=start-` 和 `bytes=-suffix` 并返回 HTTP 206。多段、反向、越界或超过 `DRIVE_DOWNLOAD_PROXY_MAX_RANGE_BYTES` 的部分请求返回 HTTP 416 和 `Content-Range: bytes */{size}`。响应包含 `Accept-Ranges`、`Content-Length`、ETag、UTF-8 `Content-Disposition`、`Cache-Control: private, no-store` 和 DTP/1 响应头。
+
+预签名和代理下载分别使用 `file.download_presign`、`file.download_proxy` 限流；两者都按 `tenant + user + node + IP` 计数。当前下载入口已通过 `PermissionService` 校验节点级 `download` 权限：非空间成员、空间角色不足或节点 ACL deny 均返回统一的 `NODE_NOT_FOUND`，目录节点返回 `NODE_NOT_FILE`，缺失当前版本返回 `FILE_VERSION_NOT_FOUND`，非 active blob 返回 `FILE_CONTENT_NOT_AVAILABLE`。下载成功与拒绝都会写入 `file.downloaded`；代理审计额外记录 delivery mode、Range 起止位置和响应字节数。当前任何具备下载权限的客户端都可显式选择代理入口；由密级标签自动强制代理、水印和内容 DLP 仍需后续策略模型。

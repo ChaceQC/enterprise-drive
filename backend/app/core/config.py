@@ -177,6 +177,13 @@ class Settings(BaseSettings):
     upload_part_size_bytes: int = 8 * 1024 * 1024
     upload_presign_expires_seconds: int = 900
     download_presign_expires_seconds: int = 300
+    download_proxy_enabled: bool = True
+    download_proxy_max_range_bytes: int = Field(default=64 * 1024 * 1024, ge=1)
+    download_proxy_chunk_size_bytes: int = Field(
+        default=256 * 1024,
+        ge=64 * 1024,
+        le=4 * 1024 * 1024,
+    )
     default_space_quota_bytes: int = 1024 * 1024 * 1024 * 1024
     default_user_quota_bytes: int = Field(default=0, ge=0)
     default_tenant_quota_bytes: int = Field(default=0, ge=0)
@@ -191,6 +198,8 @@ class Settings(BaseSettings):
     upload_part_presign_rate_limit_window_seconds: int = 60
     download_presign_rate_limit_count: int = 120
     download_presign_rate_limit_window_seconds: int = 60
+    download_proxy_rate_limit_count: int = 60
+    download_proxy_rate_limit_window_seconds: int = 60
     search_query_rate_limit_count: int = 60
     search_query_rate_limit_window_seconds: int = 60
     share_external_access_rate_limit_count: int = 60

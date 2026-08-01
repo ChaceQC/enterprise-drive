@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from typing import Any, cast
 
 from fastapi import FastAPI, Request
@@ -28,11 +29,13 @@ class ApiError(Exception):
         *,
         status_code: int = 400,
         details: Any | None = None,
+        headers: Mapping[str, str] | None = None,
     ) -> None:
         self.code = code
         self.message = message
         self.status_code = status_code
         self.details = details
+        self.headers = dict(headers or {})
 
 
 def register_exception_handlers(app: FastAPI) -> None:
@@ -56,6 +59,7 @@ def _response(
     message: str,
     request_id: str,
     details: Any | None = None,
+    headers: Mapping[str, str] | None = None,
 ) -> JSONResponse:
     payload = ErrorResponse(
         code=code,
@@ -63,10 +67,12 @@ def _response(
         request_id=request_id,
         details=details,
     )
+    response_headers = {"X-Request-ID": request_id}
+    response_headers.update(headers or {})
     return JSONResponse(
         status_code=status_code,
         content=payload.model_dump(exclude_none=True),
-        headers={"X-Request-ID": request_id},
+        headers=response_headers,
     )
 
 
@@ -78,6 +84,7 @@ async def api_error_handler(request: Request, exc: Exception) -> JSONResponse:
         message=api_error.message,
         request_id=_request_id(request),
         details=api_error.details,
+        headers=api_error.headers,
     )
 
 

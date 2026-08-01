@@ -285,6 +285,16 @@ ROUTE_SECURITY_MATRIX: tuple[SecurityRouteCase, ...] = (
     ),
     SecurityRouteCase(
         method="GET",
+        template_path="/api/v1/files/{node_id}/content",
+        request_path=f"/api/v1/files/{_NODE_ID}/content",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="none",
+        authorization="node_download",
+        headers={"Range": "bytes=0-0"},
+    ),
+    SecurityRouteCase(
+        method="GET",
         template_path="/api/v1/files/{node_id}/preview",
         request_path=f"/api/v1/files/{_NODE_ID}/preview",
         access_mode="session",

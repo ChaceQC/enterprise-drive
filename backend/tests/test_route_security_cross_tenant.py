@@ -337,6 +337,10 @@ async def test_internal_routes_hide_foreign_tenant_resources(
             f"/api/v1/files/{fixture.file_node_id}/download",
             None,
         ),
+        ("GET", "/api/v1/files/{node_id}/content"): (
+            f"/api/v1/files/{fixture.file_node_id}/content",
+            None,
+        ),
         ("GET", "/api/v1/files/{node_id}/preview"): (
             f"/api/v1/files/{fixture.file_node_id}/preview",
             None,
