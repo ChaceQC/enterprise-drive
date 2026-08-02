@@ -10,6 +10,7 @@ AuthorizationPolicy = Literal[
     "anonymous",
     "authenticated",
     "external_share",
+    "file_tree_operation_owner",
     "node_delete",
     "node_download",
     "node_grant",
@@ -34,6 +35,7 @@ _ACL_ENTRY_ID = "00000000-0000-4000-8000-000000000005"
 _SHARE_ID = "00000000-0000-4000-8000-000000000006"
 _UPLOAD_SESSION_ID = "00000000-0000-4000-8000-000000000007"
 _VERSION_ID = "00000000-0000-4000-8000-000000000008"
+_FILE_TREE_OPERATION_ID = "00000000-0000-4000-8000-000000000009"
 _RAW_SHARE_TOKEN = "0" * 32
 _CONTENT_HASH = "0" * 64
 
@@ -320,6 +322,24 @@ ROUTE_SECURITY_MATRIX: tuple[SecurityRouteCase, ...] = (
         authorization="node_delete",
         headers={"Idempotency-Key": "matrix-batch-purge"},
         json_body={"node_ids": [_NODE_ID, _TARGET_NODE_ID]},
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/files/operations/{operation_id}",
+        request_path=f"/api/v1/files/operations/{_FILE_TREE_OPERATION_ID}",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="none",
+        authorization="file_tree_operation_owner",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/files/operations/{operation_id}/retry",
+        request_path=f"/api/v1/files/operations/{_FILE_TREE_OPERATION_ID}/retry",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="file_tree_operation_owner",
     ),
     SecurityRouteCase(
         method="DELETE",

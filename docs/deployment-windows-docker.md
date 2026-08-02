@@ -363,6 +363,7 @@ Preview Worker 不能和 audit/permission 队列混跑。
 
 - `upload.expire_sessions`
 - `file.cleanup_expired_trash`
+- `file.process_tree_operations`
 - `file.cleanup_unreferenced_blobs`
 - `file.cleanup_orphaned_objects`
 - `quota.reconcile_space_usage`
@@ -370,7 +371,7 @@ Preview Worker 不能和 audit/permission 队列混跑。
 
 Beat 使用 UTC。当前 schedule 文件位于容器临时目录，可由静态配置重建；任务事实和执行结果仍以数据库、审计和任务自身状态为准。每个维护任务必须幂等，不能仅依赖 beat 单实例保证。
 
-`BE-035` 使用 Celery signal 统一记录上述五个周期维护任务的连续失败状态，Redis key 为 `maintenance_health:{task_name}`。达到配置阈值时 Worker 写结构化错误日志并设置 Prometheus alert Gauge；主进程定时刷新 stale 和时间戳指标。规则文件位于 `deploy/monitoring/maintenance-alerts.yml`，详细指标、配置和排障流程见 `docs/maintenance-monitoring.md`。Redis 只保存监控状态，不替代 PostgreSQL 与审计事实。
+Celery signal 统一记录上述六个周期维护任务的连续失败状态，Redis key 为 `maintenance_health:{task_name}`。达到配置阈值时 Worker 写结构化错误日志并设置 Prometheus alert Gauge；主进程定时刷新 stale 和时间戳指标。规则文件位于 `deploy/monitoring/maintenance-alerts.yml`，详细指标、配置和排障流程见 `docs/maintenance-monitoring.md`。Redis 只保存监控状态，不替代 PostgreSQL 与审计事实。
 
 ## 8. Preview Worker
 

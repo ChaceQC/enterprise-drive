@@ -6,6 +6,7 @@
 
 - `upload.expire_sessions`
 - `file.cleanup_expired_trash`
+- `file.process_tree_operations`
 - `file.cleanup_unreferenced_blobs`
 - `file.cleanup_orphaned_objects`
 - `quota.reconcile_space_usage`
@@ -14,7 +15,7 @@ Beat 只负责按 UTC 周期投递，任务业务事实仍以 PostgreSQL、审�
 
 ## 2. 连续失败状态
 
-maintenance Worker 在 Celery `task_postrun` signal 中记录最终状态，不修改五个任务的业务函数。状态写入 Redis：
+maintenance Worker 在 Celery `task_postrun` signal 中记录最终状态，不修改六个任务的业务函数。状态写入 Redis：
 
 ```text
 maintenance_health:{task_name}
@@ -34,6 +35,8 @@ maintenance_health:{task_name}
 1. 写入结构化 `maintenance.alert` 错误日志。
 2. 把 `maintenance_task_alert_active{task}` 设置为 `1`。
 3. 由 `deploy/monitoring/maintenance-alerts.yml` 触发 Prometheus 告警。
+
+`file.process_tree_operations` 的 Celery task 本身可以成功结束但报告个别 operation 失败，因此规则还会单独监控 `maintenance_task_result_total{task="file.process_tree_operations",metric="failed"}`；排障后通过 operation retry API 恢复。
 
 Redis 状态只用于运行监控，不替代数据库和审计事实。Redis 暂时不可用时，维护任务原结果不被反向判定为失败；Worker 会记录状态写入错误，后续执行继续尝试。
 

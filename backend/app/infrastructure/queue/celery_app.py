@@ -47,6 +47,7 @@ celery_app.conf.update(
         "file.cleanup_expired_trash": {"queue": "maintenance"},
         "file.cleanup_unreferenced_blobs": {"queue": "maintenance"},
         "file.cleanup_orphaned_objects": {"queue": "maintenance"},
+        "file.process_tree_operations": {"queue": "maintenance"},
         "upload.expire_sessions": {"queue": "maintenance"},
         "quota.reconcile_space_usage": {"queue": "maintenance"},
     },

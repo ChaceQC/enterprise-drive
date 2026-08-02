@@ -8,11 +8,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.transfer_protocol import DriveTransferProtocolResponse
 
+ConflictPolicy = Literal["fail", "keep_both", "replace"]
+TreeOperationType = Literal["delete", "restore", "purge"]
+TreeOperationStatus = Literal["pending", "running", "completed", "failed"]
+
 
 class CreateFolderRequest(BaseModel):
     space_id: UUID
     parent_id: UUID | None = None
     name: str = Field(min_length=1, max_length=255)
+    conflict_policy: ConflictPolicy = "fail"
 
 
 class RenameNodeRequest(BaseModel):
@@ -22,11 +27,13 @@ class RenameNodeRequest(BaseModel):
 class MoveNodeRequest(BaseModel):
     target_parent_id: UUID
     new_name: str | None = Field(default=None, min_length=1, max_length=255)
+    conflict_policy: ConflictPolicy = "fail"
 
 
 class RestoreNodeRequest(BaseModel):
     target_parent_id: UUID | None = None
     new_name: str | None = Field(default=None, min_length=1, max_length=255)
+    conflict_policy: ConflictPolicy = "fail"
 
 
 class BatchDeleteRequest(BaseModel):
@@ -38,12 +45,14 @@ class BatchMoveRequest(BaseModel):
     node_ids: list[UUID] = Field(min_length=1, max_length=100)
     target_parent_id: UUID
     new_name: str | None = Field(default=None, min_length=1, max_length=255)
+    conflict_policy: ConflictPolicy = "fail"
 
 
 class BatchRestoreRequest(BaseModel):
     node_ids: list[UUID] = Field(min_length=1, max_length=100)
     target_parent_id: UUID | None = None
     new_name: str | None = Field(default=None, min_length=1, max_length=255)
+    conflict_policy: ConflictPolicy = "fail"
 
 
 class BatchPurgeRequest(BaseModel):
@@ -101,10 +110,25 @@ class BatchNodeResult(BaseModel):
     node_id: UUID
     status: Literal["success", "failed"]
     code: str | None = None
+    operation_id: UUID | None = None
 
 
 class BatchOperationResponse(BaseModel):
     results: list[BatchNodeResult]
+
+
+class FileTreeOperationResponse(BaseModel):
+    operation_id: UUID
+    node_id: UUID
+    operation: TreeOperationType
+    status: TreeOperationStatus
+    total_count: int
+    processed_count: int
+    released_bytes: int
+    error_code: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    completed_at: datetime | None = None
 
 
 class DeleteNodeResponse(BaseModel):

@@ -167,6 +167,9 @@ class Settings(BaseSettings):
     outbox_max_retries: int = 8
     outbox_dispatch_interval_seconds: int = Field(default=5, ge=1)
     maintenance_task_batch_size: int = Field(default=100, ge=1)
+    file_tree_async_threshold: int = Field(default=1000, ge=2)
+    file_tree_operation_batch_size: int = Field(default=500, ge=1)
+    file_tree_operation_interval_seconds: int = Field(default=5, ge=1)
     upload_cleanup_interval_seconds: int = Field(default=300, ge=1)
     trash_retention_days: int = Field(default=30, ge=1)
     trash_cleanup_interval_seconds: int = Field(default=3600, ge=1)

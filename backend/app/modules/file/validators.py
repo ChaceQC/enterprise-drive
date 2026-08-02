@@ -22,3 +22,19 @@ def normalize_node_name(name: str) -> str:
     if len(normalized_name) > 255:
         raise ApiError("NODE_NAME_INVALID", "文件名不能超过 255 个字符", status_code=422)
     return normalized_name
+
+
+def build_keep_both_name(*, name: str, node_type: str, index: int) -> str:
+    suffix = f" ({index})"
+    stem = name
+    extension = ""
+    if node_type == "file":
+        dot_index = name.rfind(".")
+        if dot_index > 0:
+            stem = name[:dot_index]
+            extension = name[dot_index:]
+
+    available_stem_length = 255 - len(suffix) - len(extension)
+    if available_stem_length < 1:
+        raise ApiError("NODE_NAME_INVALID", "文件名过长，无法生成保留副本名称", status_code=422)
+    return normalize_node_name(f"{stem[:available_stem_length]}{suffix}{extension}")

@@ -3,14 +3,21 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import and_, delete, func, literal, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, AsyncSessionTransaction
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
+from sqlalchemy.sql.selectable import CTE
 
 from app.core.pagination import PageCursor
 from app.core.security import utc_now
-from app.modules.file.models import FileBatchOperation, FileBlob, FileVersion, Node
+from app.modules.file.models import (
+    FileBatchOperation,
+    FileBlob,
+    FileTreeOperation,
+    FileVersion,
+    Node,
+)
 
 
 class FileRepository:
@@ -245,6 +252,71 @@ class FileRepository:
             .where(*conditions)
             .order_by(Node.deleted_at.desc(), Node.id.desc())
             .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def count_subtree_nodes(
+        self,
+        *,
+        tenant_id: UUID,
+        space_id: UUID,
+        node_id: UUID,
+        is_deleted: bool | None = None,
+        deleted_root_id: UUID | None = None,
+    ) -> int:
+        subtree = _node_subtree_cte(
+            tenant_id=tenant_id,
+            space_id=space_id,
+            node_id=node_id,
+        )
+        conditions = [
+            Node.tenant_id == tenant_id,
+            Node.space_id == space_id,
+        ]
+        if is_deleted is not None:
+            conditions.append(Node.is_deleted.is_(is_deleted))
+        if deleted_root_id is not None:
+            conditions.append(Node.deleted_root_id == deleted_root_id)
+        result = await self.session.execute(
+            select(func.count())
+            .select_from(Node)
+            .join(subtree, subtree.c.id == Node.id)
+            .where(*conditions)
+        )
+        return int(result.scalar_one())
+
+    async def list_subtree_nodes_for_update(
+        self,
+        *,
+        tenant_id: UUID,
+        space_id: UUID,
+        node_id: UUID,
+        limit: int,
+        is_deleted: bool | None,
+        deepest_first: bool,
+        deleted_root_id: UUID | None = None,
+    ) -> list[Node]:
+        subtree = _node_subtree_cte(
+            tenant_id=tenant_id,
+            space_id=space_id,
+            node_id=node_id,
+        )
+        conditions = [
+            Node.tenant_id == tenant_id,
+            Node.space_id == space_id,
+        ]
+        if is_deleted is not None:
+            conditions.append(Node.is_deleted.is_(is_deleted))
+        if deleted_root_id is not None:
+            conditions.append(Node.deleted_root_id == deleted_root_id)
+        depth_order = subtree.c.depth.desc() if deepest_first else subtree.c.depth.asc()
+        result = await self.session.execute(
+            select(Node)
+            .join(subtree, subtree.c.id == Node.id)
+            .where(*conditions)
+            .order_by(depth_order, Node.id)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
         )
         return list(result.scalars().all())
 
@@ -646,6 +718,84 @@ class FileRepository:
         await self.session.flush()
         return record
 
+    async def create_tree_operation(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        space_id: UUID,
+        node_id: UUID,
+        operation: str,
+        total_count: int,
+        processed_count: int,
+        target_parent_id: UUID | None,
+        target_name: str | None,
+        request_id: str | None,
+    ) -> FileTreeOperation:
+        record = FileTreeOperation(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            space_id=space_id,
+            node_id=node_id,
+            operation=operation,
+            total_count=total_count,
+            processed_count=processed_count,
+            target_parent_id=target_parent_id,
+            target_name=target_name,
+            request_id=request_id,
+        )
+        self.session.add(record)
+        await self.session.flush()
+        return record
+
+    async def get_tree_operation(
+        self,
+        *,
+        tenant_id: UUID,
+        operation_id: UUID,
+    ) -> FileTreeOperation | None:
+        result = await self.session.execute(
+            select(FileTreeOperation).where(
+                FileTreeOperation.tenant_id == tenant_id,
+                FileTreeOperation.id == operation_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_tree_operation_for_update(
+        self,
+        *,
+        operation_id: UUID,
+    ) -> FileTreeOperation | None:
+        result = await self.session.execute(
+            select(FileTreeOperation).where(FileTreeOperation.id == operation_id).with_for_update()
+        )
+        return result.scalar_one_or_none()
+
+    async def get_active_tree_operation(
+        self,
+        *,
+        tenant_id: UUID,
+        node_id: UUID,
+    ) -> FileTreeOperation | None:
+        result = await self.session.execute(
+            select(FileTreeOperation).where(
+                FileTreeOperation.tenant_id == tenant_id,
+                FileTreeOperation.node_id == node_id,
+                FileTreeOperation.status.in_(["pending", "running"]),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_runnable_tree_operation_ids(self, *, limit: int) -> list[UUID]:
+        result = await self.session.execute(
+            select(FileTreeOperation.id)
+            .where(FileTreeOperation.status.in_(["pending", "running"]))
+            .order_by(FileTreeOperation.created_at, FileTreeOperation.id)
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
     async def commit(self) -> None:
         await self.session.commit()
 
@@ -680,4 +830,35 @@ def _node_is_trash_batch_root() -> ColumnElement[bool]:
             same_deleted_by,
         )
         .exists()
+    )
+
+
+def _node_subtree_cte(
+    *,
+    tenant_id: UUID,
+    space_id: UUID,
+    node_id: UUID,
+) -> CTE:
+    subtree = (
+        select(
+            Node.id.label("id"),
+            literal(0).label("depth"),
+        )
+        .where(
+            Node.tenant_id == tenant_id,
+            Node.space_id == space_id,
+            Node.id == node_id,
+        )
+        .cte(name="node_subtree", recursive=True)
+    )
+    child = aliased(Node)
+    return subtree.union_all(
+        select(
+            child.id,
+            (subtree.c.depth + 1).label("depth"),
+        ).where(
+            child.tenant_id == tenant_id,
+            child.space_id == space_id,
+            child.parent_id == subtree.c.id,
+        )
     )

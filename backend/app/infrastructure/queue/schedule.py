@@ -40,6 +40,12 @@ def build_beat_schedule(settings: Settings) -> dict[str, dict[str, object]]:
             "kwargs": {"limit": batch_size},
             "options": {"queue": "maintenance"},
         },
+        "process-file-tree-operations": {
+            "task": "file.process_tree_operations",
+            "schedule": float(settings.file_tree_operation_interval_seconds),
+            "kwargs": {"limit": batch_size},
+            "options": {"queue": "maintenance"},
+        },
         "cleanup-unreferenced-blobs": {
             "task": "file.cleanup_unreferenced_blobs",
             "schedule": float(settings.blob_cleanup_interval_seconds),

@@ -31,6 +31,7 @@ def test_beat_schedule_keeps_destructive_maintenance_in_safe_modes() -> None:
             upload_cleanup_interval_seconds=60,
             trash_cleanup_interval_seconds=120,
             blob_cleanup_interval_seconds=180,
+            file_tree_operation_interval_seconds=210,
             orphan_object_scan_interval_seconds=240,
             quota_reconciliation_interval_seconds=300,
         )
@@ -39,11 +40,13 @@ def test_beat_schedule_keeps_destructive_maintenance_in_safe_modes() -> None:
     assert schedule["expire-upload-sessions"]["schedule"] == 60.0
     assert schedule["cleanup-expired-trash"]["schedule"] == 120.0
     assert schedule["cleanup-unreferenced-blobs"]["schedule"] == 180.0
+    assert schedule["process-file-tree-operations"]["schedule"] == 210.0
     assert schedule["scan-orphaned-objects"]["schedule"] == 240.0
     assert schedule["report-quota-drift"]["schedule"] == 300.0
     assert schedule["expire-upload-sessions"]["kwargs"] == {"limit": 23}
     assert schedule["cleanup-expired-trash"]["kwargs"] == {"limit": 23}
     assert schedule["cleanup-unreferenced-blobs"]["kwargs"] == {"limit": 23}
+    assert schedule["process-file-tree-operations"]["kwargs"] == {"limit": 23}
     assert schedule["scan-orphaned-objects"]["kwargs"] == {
         "limit": 23,
         "dry_run": True,

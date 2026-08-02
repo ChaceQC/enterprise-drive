@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import cast
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
@@ -12,15 +13,18 @@ from app.modules.audit.schemas import AuditContext
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
 from app.modules.file.audit import record_folder_created, record_node_event
-from app.modules.file.models import FileVersion, Node
+from app.modules.file.models import FileTreeOperation, FileVersion, Node
 from app.modules.file.repository import FileRepository
 from app.modules.file.schemas import (
     DeleteNodeResponse,
     FileListResponse,
     FileNodeResponse,
+    FileTreeOperationResponse,
     PurgeNodeResponse,
     TrashListResponse,
     TrashNodeResponse,
+    TreeOperationStatus,
+    TreeOperationType,
 )
 from app.modules.file.tree import (
     collect_deleted_subtree,
@@ -29,7 +33,11 @@ from app.modules.file.tree import (
     ensure_not_moving_into_self,
     touch_node,
 )
-from app.modules.file.validators import node_name_conflict_error, normalize_node_name
+from app.modules.file.validators import (
+    build_keep_both_name,
+    node_name_conflict_error,
+    normalize_node_name,
+)
 from app.modules.permission.actions import (
     ACTION_DELETE,
     ACTION_LIST,
@@ -69,6 +77,7 @@ class FileService:
         space_id: UUID,
         parent_id: UUID | None,
         name: str,
+        conflict_policy: str = "fail",
         audit_context: AuditContext | None = None,
     ) -> FileNodeResponse:
         space = await self._get_active_space(current_user=current_user, space_id=space_id)
@@ -85,24 +94,25 @@ class FileService:
         )
         normalized_name = normalize_node_name(name)
 
-        existing_sibling = await self.repository.get_sibling_by_name(
-            tenant_id=current_user.tenant_id,
-            space_id=space.id,
-            parent_id=parent_node.id,
-            normalized_name=normalized_name,
-        )
-        if existing_sibling is not None:
-            raise node_name_conflict_error()
-
         try:
+            resolved_name = await self._resolve_conflict_name(
+                current_user=current_user,
+                space_id=space.id,
+                parent_id=parent_node.id,
+                normalized_name=normalized_name,
+                node_type="folder",
+                conflict_policy=conflict_policy,
+                exclude_node_id=None,
+                audit_context=audit_context,
+            )
             folder = await self.repository.create_node(
                 tenant_id=current_user.tenant_id,
                 space_id=space.id,
                 parent_id=parent_node.id,
                 owner_id=current_user.id,
                 node_type="folder",
-                name=normalized_name,
-                normalized_name=normalized_name,
+                name=resolved_name,
+                normalized_name=resolved_name,
             )
             await record_folder_created(
                 audit_service=self.audit_service,
@@ -114,6 +124,9 @@ class FileService:
         except IntegrityError as exc:
             await self.repository.rollback()
             raise node_name_conflict_error() from exc
+        except Exception:
+            await self.repository.rollback()
+            raise
 
         return FileNodeResponse.model_validate(folder)
 
@@ -295,6 +308,7 @@ class FileService:
         node_id: UUID,
         target_parent_id: UUID,
         new_name: str | None,
+        conflict_policy: str = "fail",
         audit_context: AuditContext | None = None,
     ) -> FileNodeResponse:
         try:
@@ -303,6 +317,7 @@ class FileService:
                 node_id=node_id,
                 target_parent_id=target_parent_id,
                 new_name=new_name,
+                conflict_policy=conflict_policy,
                 audit_context=audit_context,
             )
             await self.repository.commit()
@@ -320,7 +335,7 @@ class FileService:
         current_user: User,
         node_id: UUID,
         audit_context: AuditContext | None = None,
-    ) -> DeleteNodeResponse:
+    ) -> DeleteNodeResponse | FileTreeOperationResponse:
         try:
             response = await self.delete_node_in_transaction(
                 current_user=current_user,
@@ -339,7 +354,7 @@ class FileService:
         current_user: User,
         node_id: UUID,
         audit_context: AuditContext | None = None,
-    ) -> PurgeNodeResponse:
+    ) -> PurgeNodeResponse | FileTreeOperationResponse:
         try:
             response = await self.purge_node_in_transaction(
                 current_user=current_user,
@@ -359,14 +374,16 @@ class FileService:
         node_id: UUID,
         target_parent_id: UUID | None,
         new_name: str | None,
+        conflict_policy: str = "fail",
         audit_context: AuditContext | None = None,
-    ) -> FileNodeResponse:
+    ) -> FileNodeResponse | FileTreeOperationResponse:
         try:
             response = await self.restore_node_in_transaction(
                 current_user=current_user,
                 node_id=node_id,
                 target_parent_id=target_parent_id,
                 new_name=new_name,
+                conflict_policy=conflict_policy,
                 audit_context=audit_context,
             )
             await self.repository.commit()
@@ -385,6 +402,7 @@ class FileService:
         node_id: UUID,
         target_parent_id: UUID,
         new_name: str | None,
+        conflict_policy: str,
         audit_context: AuditContext | None,
     ) -> FileNodeResponse:
         node = await self._get_accessible_node(
@@ -406,12 +424,15 @@ class FileService:
         normalized_name = (
             normalize_node_name(new_name) if new_name is not None else node.normalized_name
         )
-        await self._ensure_name_available(
-            tenant_id=current_user.tenant_id,
+        normalized_name = await self._resolve_conflict_name(
+            current_user=current_user,
             space_id=node.space_id,
             parent_id=target_parent.id,
             normalized_name=normalized_name,
+            node_type=node.node_type,
+            conflict_policy=conflict_policy,
             exclude_node_id=node.id,
+            audit_context=audit_context,
         )
         affected_nodes = await self._collect_active_subtree(node=node)
         old_parent_id = node.parent_id
@@ -451,19 +472,44 @@ class FileService:
         current_user: User,
         node_id: UUID,
         audit_context: AuditContext | None,
-    ) -> DeleteNodeResponse:
+    ) -> DeleteNodeResponse | FileTreeOperationResponse:
         node = await self._get_accessible_node(
             current_user=current_user,
             node_id=node_id,
             action=ACTION_DELETE,
         )
         ensure_mutable_node(node)
+        subtree_count = await self.repository.count_subtree_nodes(
+            tenant_id=current_user.tenant_id,
+            space_id=node.space_id,
+            node_id=node.id,
+            is_deleted=False,
+        )
+        if subtree_count > self.settings.file_tree_async_threshold:
+            now = utc_now()
+            node.is_deleted = True
+            node.deleted_at = now
+            node.deleted_by = current_user.id
+            node.deleted_root_id = node.id
+            touch_node(node)
+            await self.repository.flush()
+            return await self._queue_tree_operation(
+                current_user=current_user,
+                node=node,
+                operation="delete",
+                total_count=subtree_count,
+                processed_count=1,
+                target_parent_id=None,
+                target_name=None,
+                audit_context=audit_context,
+            )
         subtree_nodes = await self._collect_active_subtree(node=node)
         now = utc_now()
         for subtree_node in subtree_nodes:
             subtree_node.is_deleted = True
             subtree_node.deleted_at = now
             subtree_node.deleted_by = current_user.id
+            subtree_node.deleted_root_id = node.id
             touch_node(subtree_node)
         await self.repository.flush()
         await record_node_event(
@@ -487,7 +533,7 @@ class FileService:
         current_user: User,
         node_id: UUID,
         audit_context: AuditContext | None,
-    ) -> PurgeNodeResponse:
+    ) -> PurgeNodeResponse | FileTreeOperationResponse:
         node = await self._get_accessible_node(
             current_user=current_user,
             node_id=node_id,
@@ -497,6 +543,31 @@ class FileService:
         ensure_mutable_node(node)
         if not node.is_deleted:
             raise ApiError("NODE_NOT_DELETED", "节点不在回收站中", status_code=400)
+
+        all_count = await self.repository.count_subtree_nodes(
+            tenant_id=current_user.tenant_id,
+            space_id=node.space_id,
+            node_id=node.id,
+        )
+        deleted_count = await self.repository.count_subtree_nodes(
+            tenant_id=current_user.tenant_id,
+            space_id=node.space_id,
+            node_id=node.id,
+            is_deleted=True,
+        )
+        if all_count != deleted_count:
+            raise ApiError("NODE_PURGE_CONFLICT", "节点包含未删除子节点", status_code=409)
+        if deleted_count > self.settings.file_tree_async_threshold:
+            return await self._queue_tree_operation(
+                current_user=current_user,
+                node=node,
+                operation="purge",
+                total_count=deleted_count,
+                processed_count=0,
+                target_parent_id=None,
+                target_name=None,
+                audit_context=audit_context,
+            )
 
         subtree_nodes = await collect_deleted_subtree(repository=self.repository, node=node)
         node_ids = [subtree_node.id for subtree_node in subtree_nodes]
@@ -558,8 +629,9 @@ class FileService:
         node_id: UUID,
         target_parent_id: UUID | None,
         new_name: str | None,
+        conflict_policy: str,
         audit_context: AuditContext | None = None,
-    ) -> FileNodeResponse:
+    ) -> FileNodeResponse | FileTreeOperationResponse:
         node = await self._get_accessible_node(
             current_user=current_user,
             node_id=node_id,
@@ -578,13 +650,49 @@ class FileService:
         normalized_name = (
             normalize_node_name(new_name) if new_name is not None else node.normalized_name
         )
-        await self._ensure_name_available(
-            tenant_id=current_user.tenant_id,
+        normalized_name = await self._resolve_conflict_name(
+            current_user=current_user,
             space_id=node.space_id,
             parent_id=restore_parent.id,
             normalized_name=normalized_name,
+            node_type=node.node_type,
+            conflict_policy=conflict_policy,
             exclude_node_id=node.id,
+            audit_context=audit_context,
         )
+
+        deleted_root_id = node.deleted_root_id
+        subtree_count = (
+            await self.repository.count_subtree_nodes(
+                tenant_id=current_user.tenant_id,
+                space_id=node.space_id,
+                node_id=node.id,
+                is_deleted=True,
+                deleted_root_id=node.id,
+            )
+            if deleted_root_id == node.id
+            else 0
+        )
+        if subtree_count > self.settings.file_tree_async_threshold:
+            node.parent_id = restore_parent.id
+            node.name = normalized_name
+            node.normalized_name = normalized_name
+            node.is_deleted = False
+            node.deleted_at = None
+            node.deleted_by = None
+            node.deleted_root_id = None
+            touch_node(node)
+            await self.repository.flush()
+            return await self._queue_tree_operation(
+                current_user=current_user,
+                node=node,
+                operation="restore",
+                total_count=subtree_count,
+                processed_count=1,
+                target_parent_id=restore_parent.id,
+                target_name=normalized_name,
+                audit_context=audit_context,
+            )
 
         subtree_nodes = await collect_restore_subtree(repository=self.repository, node=node)
         node.parent_id = restore_parent.id
@@ -594,6 +702,7 @@ class FileService:
             subtree_node.is_deleted = False
             subtree_node.deleted_at = None
             subtree_node.deleted_by = None
+            subtree_node.deleted_root_id = None
             touch_node(subtree_node)
         await self.repository.flush()
         await record_node_event(
@@ -613,6 +722,129 @@ class FileService:
             metadata={"root_node_id": str(node.id)},
         )
         return FileNodeResponse.model_validate(node)
+
+    async def get_tree_operation(
+        self,
+        *,
+        current_user: User,
+        operation_id: UUID,
+    ) -> FileTreeOperationResponse:
+        operation = await self.repository.get_tree_operation(
+            tenant_id=current_user.tenant_id,
+            operation_id=operation_id,
+        )
+        if operation is None or (
+            operation.user_id != current_user.id and not current_user.is_super_admin
+        ):
+            raise ApiError(
+                "FILE_TREE_OPERATION_NOT_FOUND",
+                "文件树操作不存在或无权访问",
+                status_code=404,
+            )
+        return self._tree_operation_response(operation)
+
+    async def retry_tree_operation(
+        self,
+        *,
+        current_user: User,
+        operation_id: UUID,
+    ) -> FileTreeOperationResponse:
+        operation = await self.repository.get_tree_operation(
+            tenant_id=current_user.tenant_id,
+            operation_id=operation_id,
+        )
+        if operation is None or (
+            operation.user_id != current_user.id and not current_user.is_super_admin
+        ):
+            raise ApiError(
+                "FILE_TREE_OPERATION_NOT_FOUND",
+                "文件树操作不存在或无权访问",
+                status_code=404,
+            )
+        if operation.status != "failed":
+            raise ApiError(
+                "FILE_TREE_OPERATION_NOT_RETRYABLE",
+                "文件树操作当前状态不可重试",
+                status_code=409,
+            )
+        active_operation = await self.repository.get_active_tree_operation(
+            tenant_id=current_user.tenant_id,
+            node_id=operation.node_id,
+        )
+        if active_operation is not None and active_operation.id != operation.id:
+            raise ApiError(
+                "FILE_TREE_OPERATION_CONFLICT",
+                "该节点已有进行中的文件树操作",
+                status_code=409,
+            )
+        operation.status = "pending"
+        operation.error_code = None
+        operation.completed_at = None
+        operation.updated_at = utc_now()
+        await self.repository.commit()
+        return self._tree_operation_response(operation)
+
+    async def _queue_tree_operation(
+        self,
+        *,
+        current_user: User,
+        node: Node,
+        operation: str,
+        total_count: int,
+        processed_count: int,
+        target_parent_id: UUID | None,
+        target_name: str | None,
+        audit_context: AuditContext | None,
+    ) -> FileTreeOperationResponse:
+        existing = await self.repository.get_active_tree_operation(
+            tenant_id=current_user.tenant_id,
+            node_id=node.id,
+        )
+        if existing is not None:
+            return self._tree_operation_response(existing)
+        record = await self.repository.create_tree_operation(
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+            space_id=node.space_id,
+            node_id=node.id,
+            operation=operation,
+            total_count=total_count,
+            processed_count=processed_count,
+            target_parent_id=target_parent_id,
+            target_name=target_name,
+            request_id=audit_context.request_id if audit_context else None,
+        )
+        await record_node_event(
+            audit_service=self.audit_service,
+            current_user=current_user,
+            node=node,
+            action="file.tree_operation.queued",
+            audit_context=audit_context,
+            metadata={
+                "operation_id": str(record.id),
+                "operation": operation,
+                "total_count": total_count,
+            },
+        )
+        return self._tree_operation_response(record)
+
+    def _tree_operation_response(
+        self,
+        operation: FileTreeOperation,
+    ) -> FileTreeOperationResponse:
+        return FileTreeOperationResponse(
+            operation_id=operation.id,
+            node_id=operation.node_id,
+            operation=cast(TreeOperationType, operation.operation),
+            status=cast(TreeOperationStatus, operation.status),
+            total_count=operation.total_count,
+            processed_count=operation.processed_count,
+            released_bytes=operation.released_bytes,
+            error_code=operation.error_code,
+            created_at=operation.created_at,
+            updated_at=operation.updated_at,
+            completed_at=operation.completed_at,
+        )
 
     async def _get_active_space(
         self,
@@ -770,6 +1002,55 @@ class FileService:
         )
         if existing_sibling is not None:
             raise node_name_conflict_error()
+
+    async def _resolve_conflict_name(
+        self,
+        *,
+        current_user: User,
+        space_id: UUID,
+        parent_id: UUID | None,
+        normalized_name: str,
+        node_type: str,
+        conflict_policy: str,
+        exclude_node_id: UUID | None,
+        audit_context: AuditContext | None,
+    ) -> str:
+        existing_sibling = await self.repository.get_sibling_by_name(
+            tenant_id=current_user.tenant_id,
+            space_id=space_id,
+            parent_id=parent_id,
+            normalized_name=normalized_name,
+            exclude_node_id=exclude_node_id,
+        )
+        if existing_sibling is None:
+            return normalized_name
+        if conflict_policy == "fail":
+            raise node_name_conflict_error()
+        if conflict_policy == "replace":
+            await self.delete_node_in_transaction(
+                current_user=current_user,
+                node_id=existing_sibling.id,
+                audit_context=audit_context,
+            )
+            return normalized_name
+        if conflict_policy == "keep_both":
+            for index in range(1, 10_000):
+                candidate = build_keep_both_name(
+                    name=normalized_name,
+                    node_type=node_type,
+                    index=index,
+                )
+                candidate_sibling = await self.repository.get_sibling_by_name(
+                    tenant_id=current_user.tenant_id,
+                    space_id=space_id,
+                    parent_id=parent_id,
+                    normalized_name=candidate,
+                    exclude_node_id=exclude_node_id,
+                )
+                if candidate_sibling is None:
+                    return candidate
+            raise ApiError("NODE_NAME_EXHAUSTED", "同名副本数量过多", status_code=409)
+        raise ApiError("CONFLICT_POLICY_INVALID", "冲突策略不合法", status_code=422)
 
     async def _collect_active_subtree(self, *, node: Node) -> list[Node]:
         collected = [node]

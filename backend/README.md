@@ -139,7 +139,7 @@ uv run pytest tests/test_route_security_matrix.py `
   tests/test_security_adversarial.py -q
 ```
 
-矩阵与运行时 OpenAPI 的 45 个 `/api/v1` route 完全对账，覆盖匿名、CSRF、管理员、真实跨租户资源和活跃会话撤权；对抗输入覆盖损坏/超大图片、文档路径与扩展名注入、Range 权限、预签名 URL、不同 token 外链穷举、Trusted Host 和 CORS。
+矩阵与运行时 OpenAPI 的 47 个 `/api/v1` route 完全对账，覆盖匿名、CSRF、管理员、真实跨租户资源和活跃会话撤权；对抗输入覆盖损坏/超大图片、文档路径与扩展名注入、Range 权限、预签名 URL、不同 token 外链穷举、Trusted Host 和 CORS。
 
 真实 Nginx 原始 HTTP 安全 smoke：
 
@@ -293,6 +293,8 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - `POST /api/v1/files/batch-move`
 - `POST /api/v1/files/batch-restore`
 - `POST /api/v1/files/batch-purge`
+- `GET /api/v1/files/operations/{operation_id}`
+- `POST /api/v1/files/operations/{operation_id}/retry`
 - `PATCH /api/v1/files/{node_id}`
 - `POST /api/v1/files/{node_id}/move`
 - `DELETE /api/v1/files/{node_id}`
@@ -308,7 +310,7 @@ uv run pytest tests/test_storage_minio_integration.py -q
 
 文件夹名称会进行 Unicode NFC 归一化并去除首尾空白，禁止 `/`、`\`、NUL、控制字符和路径穿越片段。同一目录下未删除节点的名称由数据库唯一索引兜底，根目录由 `tenant_id + space_id` 唯一索引兜底。
 
-根目录不允许重命名、移动、删除或彻底删除。删除到回收站会同步标记当前活跃子树，不释放容量；恢复只恢复同一批删除的子树，避免误恢复更早单独删除的节点。彻底删除只允许作用于已在回收站的节点，会删除该节点下全部已删除后代的节点元数据和文件版本，扣减相关 blob 引用计数，按版本大小合计释放空间容量并写入 `file.purged` 审计。回收站列表只显示删除批次根节点；四个批量入口在外层事务内为每项建立 savepoint，复用单项权限、审计、搜索、容量和引用语义。`file_batch_operations` 按 `tenant_id + user_id + operation + idempotency_key_hash` 唯一保存请求 hash 和最终响应，同 key 同请求直接重放，同 key 不同请求返回 `IDEMPOTENCY_KEY_REUSED`。当前目录删除、恢复和彻底删除仍是同步遍历，适合普通目录验证；大目录后台分片继续归 `BE-046`。
+根目录不允许重命名、移动、删除或彻底删除。删除到回收站会标记同一删除批次，不释放容量；恢复只恢复同一 `deleted_root_id` 子树，避免误恢复更早单独删除的节点。彻底删除只允许作用于已在回收站的节点，会删除后代元数据和版本、扣减 blob 引用、按版本流水释放容量并写入审计。创建文件夹、移动、恢复和对应批量入口支持 `fail`、`keep_both`、`replace`；保留副本使用 `名称 (n)`，替换会把原同名节点送入回收站。回收站列表只显示删除批次根节点；四个批量入口为每项建立 savepoint。`file_batch_operations` 按 `tenant_id + user_id + operation + idempotency_key_hash` 唯一保存请求 hash 和最终响应。子树数量超过 `DRIVE_FILE_TREE_ASYNC_THRESHOLD` 时，删除/恢复/彻底删除返回 HTTP 202；`file_tree_operations` 保存状态和计数，maintenance Worker 使用 `DRIVE_FILE_TREE_OPERATION_BATCH_SIZE` 分段提交，`file.process_tree_operations` 定时恢复 pending/running 任务。状态接口和失败重试入口均按租户与创建者隔离。
 
 ## 分享接口
 
@@ -350,6 +352,9 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - `DRIVE_UPLOAD_SESSION_TTL_MINUTES`
 - `DRIVE_TRASH_RETENTION_DAYS`
 - `DRIVE_TRASH_CLEANUP_INTERVAL_SECONDS`
+- `DRIVE_FILE_TREE_ASYNC_THRESHOLD`
+- `DRIVE_FILE_TREE_OPERATION_BATCH_SIZE`
+- `DRIVE_FILE_TREE_OPERATION_INTERVAL_SECONDS`
 - `DRIVE_UPLOAD_PART_SIZE_BYTES`
 - `DRIVE_UPLOAD_PRESIGN_EXPIRES_SECONDS`
 - `DRIVE_DOWNLOAD_PRESIGN_EXPIRES_SECONDS`
@@ -394,7 +399,7 @@ uv run pytest tests/test_storage_minio_integration.py -q
 
 当前上传接口已通过 `PermissionService` 校验父目录节点级 `upload` 权限；初始化和 multipart complete 都会重新检查，避免会话创建后权限收紧仍可完成上传。`BE-033` 已把容量服务扩展为多维账本：空间账户始终启用，`DRIVE_DEFAULT_TENANT_QUOTA_BYTES` 和 `DRIVE_DEFAULT_USER_QUOTA_BYTES` 大于 `0` 时分别启用租户、用户账户，`DRIVE_QUOTA_POLICY_ENABLED=true` 时按 `quota_policies` 的优先级匹配扩展名或 MIME 前缀，并执行累计额度和单文件上限。上传初始化执行快速检查；秒传和 multipart complete 创建文件版本时在同一事务内按固定维度顺序执行条件 update，任一维度不足都会回滚整次创建。删除到回收站不释放容量；彻底删除时按版本关联的正向流水原子释放全部账户，并写入 `reason=file_purged`、`ref_type=node` 的负向流水。现有账户额度是数据库事实，不会因环境默认值变化自动覆盖；策略及账户管理 HTTP API 归 `BE-044`。容量校准任务 `quota.reconcile_space_usage` 仍以 PostgreSQL 文件版本为事实来源，仅报告和修复空间账户；多维通用校准也归后续管理/治理任务。彻底删除接口不在用户请求事务中同步删除最终对象；`file.cleanup_unreferenced_blobs` 会扫描 active、`ref_count=0` 且无 `file_versions` 引用的 blob，先标记为 `deleting`，再删除对象存储内容和 DB 元数据。对象存储删除失败会恢复为 `active` 并计入 `storage_errors`。`file.cleanup_orphaned_objects` 用于对象复制成功但 DB 最终化失败后的反向治理，只扫描受控 `objects/{tenant_id}/{hash_prefix}/{sha256}` key，跳过非受控 key，默认 dry-run，显式 `dry_run=False` 才删除对象；删除成功、失败和 dry-run 计划均写入系统审计，审计 metadata 不保存原始 storage key，并通过 `orphan_object_cleanup_total{status}` 暴露扫描、计划、清理、失败和跳过计数。
 
-回收站自动清理由 `file.cleanup_expired_trash` 承担，默认使用 `DRIVE_TRASH_RETENTION_DAYS=30` 和 `DRIVE_TRASH_CLEANUP_INTERVAL_SECONDS=3600`。查询使用 `idx_nodes_trash_cleanup(tenant_id, is_deleted, deleted_at, id)`，只把没有“同删除时间、同删除人父节点”的过期节点视为删除批次根节点，避免一个目录子树被重复领取。任务锁定根节点和子树，删除全部版本与节点，按版本流水释放空间、租户、用户和策略账户并写 `file_purged` 账本，扣减 blob 引用，发送 `reason=trash_retention_expired` 的搜索事件，记录 `file.trash.retention_purged` 系统审计，并通过 `trash_cleanup_total{status}`、`trash_cleanup_released_bytes_total` 暴露结果。普通目录仍在单个事务内处理；超大目录后台分片属于 `BE-046`。
+回收站自动清理由 `file.cleanup_expired_trash` 承担，默认使用 `DRIVE_TRASH_RETENTION_DAYS=30` 和 `DRIVE_TRASH_CLEANUP_INTERVAL_SECONDS=3600`。查询使用 `idx_nodes_trash_cleanup(tenant_id, is_deleted, deleted_at, id)`，只把没有“同删除时间、同删除人父节点”的过期节点视为删除批次根节点，避免一个目录子树被重复领取。用户发起的大目录删除、恢复和彻底删除由 `file.process_tree_operations` 按 `deleted_root_id` 和递归 CTE 分批处理；保留期自动清理仍使用独立治理任务。
 
 维护任务可通过 Celery 任务调用：
 
@@ -404,7 +409,7 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - `file.cleanup_orphaned_objects(tenant_id=None, limit=100, after_storage_key=None, dry_run=True, request_id=None, scan_all=True)`
 - `permission.invalidate_cache(batch_size=None)`
 
-`BE-035` 已把上述五个周期维护任务接入统一健康状态。Celery signal 在任务结束后把连续失败次数和最近成功/失败时间原子写入 Redis，达到阈值时输出结构化告警日志；maintenance Worker 的 `9100/metrics` 暴露连续失败、告警状态、stale、最近完成时间和任务返回计数。Redis 状态写入失败不会改变任务原结果。配置项包括：
+当前六个周期维护任务（含 `file.process_tree_operations`）接入统一健康状态。Celery signal 在任务结束后把连续失败次数和最近成功/失败时间原子写入 Redis，达到阈值时输出结构化告警日志；maintenance Worker 的 `9100/metrics` 暴露连续失败、告警状态、stale、最近完成时间和任务返回计数。Redis 状态写入失败不会改变任务原结果。配置项包括：
 
 - `DRIVE_MAINTENANCE_ALERT_CONSECUTIVE_FAILURES`
 - `DRIVE_MAINTENANCE_ALERT_STALE_INTERVALS`

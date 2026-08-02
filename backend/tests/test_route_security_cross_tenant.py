@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.core.config import Settings
 from app.core.security import hash_password
 from app.modules.auth.models import Tenant, User
+from app.modules.file.models import FileTreeOperation
 from tests.helpers import (
     add_space_member,
     create_folder,
@@ -45,6 +46,7 @@ class ForeignFixture:
     deleted_folder_id: UUID
     file_node_id: UUID
     file_version_id: UUID
+    tree_operation_id: UUID
     share_id: UUID
     raw_token: str
     acl_entry_id: UUID
@@ -204,6 +206,21 @@ async def _prepare_foreign_fixture(
     assert upload_response.status_code == 201
     assert upload_response.json()["mode"] == "multipart"
 
+    async with session_factory() as session:
+        tree_operation = FileTreeOperation(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            space_id=space_id,
+            node_id=UUID(str(deleted_folder["id"])),
+            operation="delete",
+            status="failed",
+            total_count=1,
+            processed_count=1,
+            error_code="TEST_FAILURE",
+        )
+        session.add(tree_operation)
+        await session.commit()
+
     return ForeignFixture(
         tenant_id=tenant_id,
         tenant_slug=tenant_slug,
@@ -214,6 +231,7 @@ async def _prepare_foreign_fixture(
         deleted_folder_id=UUID(str(deleted_folder["id"])),
         file_node_id=file_node_id,
         file_version_id=file_version_id,
+        tree_operation_id=tree_operation.id,
         share_id=UUID(str(share_payload["id"])),
         raw_token=str(share_payload["raw_token"]),
         acl_entry_id=UUID(str(acl_response.json()["id"])),
@@ -357,6 +375,14 @@ async def test_internal_routes_hide_foreign_tenant_resources(
         ("POST", "/api/v1/files/batch-purge"): (
             "/api/v1/files/batch-purge",
             {"node_ids": [str(fixture.deleted_folder_id)]},
+        ),
+        ("GET", "/api/v1/files/operations/{operation_id}"): (
+            f"/api/v1/files/operations/{fixture.tree_operation_id}",
+            None,
+        ),
+        ("POST", "/api/v1/files/operations/{operation_id}/retry"): (
+            f"/api/v1/files/operations/{fixture.tree_operation_id}/retry",
+            None,
         ),
         ("DELETE", "/api/v1/files/{node_id}/purge"): (
             f"/api/v1/files/{fixture.deleted_folder_id}/purge",

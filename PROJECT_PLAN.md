@@ -52,6 +52,8 @@
 - 同目录重名策略和 cursor pagination。（已完成基础约束和签名游标）
 - 基础审计日志。（已完成空间和文件树操作审计）
 - 回收站分页和批量文件操作。（`BE-037` 已完成删除批次根节点签名 cursor 列表、批量删除/移动/恢复/彻底删除、逐项结果和持久化幂等重放）
+- 同名冲突策略。（创建文件夹、移动、恢复及批量入口已支持 `fail`、`keep_both`、`replace`；replace 把原节点移入回收站）
+- 大目录操作。（删除、恢复、彻底删除超过阈值后进入 `file_tree_operations`，由 maintenance Worker 使用 `deleted_root_id`、递归 CTE 和固定批次可恢复执行）
 
 ### Sprint 3：上传下载
 
@@ -73,7 +75,7 @@
 - MinIO Python SDK multipart 当前在 `infrastructure` 适配层使用 `_create_multipart_upload`、`_complete_multipart_upload`、`_abort_multipart_upload` 私有方法。这不属于业务层随意自研，但 SDK 升级稳定性不够企业级；后续要评估公开 API、稳定开源 S3 兼容客户端、标准 HTTP/SigV4 适配，或至少补齐版本探测、窄封装和真实对象存储集成测试。
 - 对象复制到最终 `objects/{tenant_id}/{hash_prefix}/{content_hash}` 成功但数据库最终化失败后，可能出现孤儿最终对象。`file.cleanup_orphaned_objects` 反向扫描任务及 `BE-031/BE-032` 的真实 MinIO 主路径验收已完成；仍需由 `BE-035` 补生产失败告警、积压/吞吐看板和周期运行治理。
 - `BE-033` 已补齐空间、可选用户、可选租户和文件策略四类容量账户，上传初始化执行快速检查，版本创建通过原子条件更新和统一 ledger 扣减，彻底删除按版本流水释放全部维度。仍待 `BE-044` 提供账户/策略管理 API，并补部门额度、临时上传占用上限和多维通用校准。
-- `BE-035` 已在 Celery beat 既有调度上补齐五个维护任务的 Redis 连续失败状态、结构化阈值告警、stale/时间戳 Gauge、通用任务结果计数和 Prometheus 规则文件。外部 Alertmanager 路由、完整看板、过期分享和预览产物治理继续后续交付。
+- `BE-035` 已在 Celery beat 既有调度上补齐原五个维护任务的 Redis 连续失败状态、结构化阈值告警、stale/时间戳 Gauge、通用任务结果计数和 Prometheus 规则文件；本轮新增的 `file.process_tree_operations` 已接入同一健康状态。外部 Alertmanager 路由、完整看板、过期分享和预览产物治理继续后续交付。
 - `BE-034` 已在短期预签名直连之外补充内部受控代理下载、单段 HTTP Range、流式对象读取和范围审计；低风险大文件继续使用预签名直连。密级标签自动强制代理、外链代理、水印和内容 DLP 仍属后续治理策略。
 - 并发下同 hash 首次上传竞争当前主要依赖数据库唯一约束和补偿路径，已有基础处理，但还需要补更细的并发测试、对象归档幂等检查和失败恢复路径，确保不会产生错误引用、漏容量或孤儿最终对象。
 - 真实对象存储集成测试首组已在 CI 和本机真实 Docker 中通过，覆盖 multipart 私有方法封装、预签名 PUT/GET、copy、delete、list、hash 校验和孤儿最终对象扫描；后续仍需扩展异常恢复、SDK 升级兼容、并发竞争和更完整的失败补偿场景。
@@ -154,7 +156,7 @@
 
 ### Sprint 12：规模化治理与内容能力（目标版本 `0.9.0`）
 
-- 大目录删除、恢复、彻底删除和权限重算迁移到后台批处理；引入 `deleted_root_id` 或等价冗余状态，并为 closure table 设置规模触发条件。
+- 大目录删除、恢复和彻底删除已迁移到可恢复后台批处理并引入 `deleted_root_id`；大目录权限重算、管理页面和 closure table 规模触发条件继续后续治理。
 - 生命周期覆盖过期分享、预览产物、回收站保留期、临时上传、无引用 blob 和孤儿对象，具备 dry-run、审计、指标、告警和失败重试。
 - 搜索增加图片 OCR、扫描 PDF 和复杂格式抽取适配，限制页数、像素、CPU、内存、临时磁盘和正文体量。
 - 审计增加月分区自动创建、保留与归档、外部日志投递、导出签名；Outbox 增加错误分类、jitter、dead-letter 查询与重放。
@@ -187,6 +189,8 @@
 2026-08-01 已按“实现优先、减少重复测试”的执行决策暂停 `BE-029` 目标规模灌入和完整 target profile。现有 Locust、真实 multipart、checkpoint、精确清理和 `BE-029/2` 报告成果保留，目标压测留到发布性能门禁恢复执行，不再阻塞编号靠后的工程功能。
 
 2026-08-02 `BE-037` 回收站与批量文件操作已实现：回收站按 `deleted_at/id` 签名 cursor 仅列删除批次根节点；批量删除、移动、恢复和彻底删除最多处理 100 项，每项使用 savepoint 并逐项返回结果。新增 `file_batch_operations` 与 `20260801_0015` migration，按租户、用户、操作和 key hash 保存请求 hash/最终响应；同请求重放、异请求冲突。下一项进入 `BE-038` 内部分享接收端。
+
+2026-08-02 Sprint 2 剩余增强已完成：文件树同名冲突支持 `fail/keep_both/replace`；大目录删除、恢复和彻底删除使用 `20260802_0016`、`file_tree_operations`、`deleted_root_id`、状态/重试 API 和 `file.process_tree_operations` 分批执行，任务中断后可从 PostgreSQL 状态继续。下一项仍为 `BE-038`。
 
 2026-08-01 `BE-036` 文件版本核心 API 已实现：版本列表按 `created_at/id` 使用服务端签名 cursor 分页并标记当前版本；指定历史版本下载复用 DTP/1、下载权限和预签名限流；回滚在节点行锁内校验可选 `expected_current_version_id`，复用原 blob 创建递增新版本，原子增加引用、扣减多维配额、更新当前版本，并写入审计、搜索索引/抽取和预览事件。后续已进入并完成 `BE-037`。
 

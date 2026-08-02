@@ -31,6 +31,16 @@ groups:
           summary: "企业网盘维护任务出现对象存储错误"
           description: "任务 {{ $labels.task }} 在最近 15 分钟报告了对象存储错误。"
 
+      - alert: EnterpriseDriveFileTreeOperationFailed
+        expr: increase(maintenance_task_result_total{task="file.process_tree_operations",metric="failed"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: enterprise-drive
+        annotations:
+          summary: "企业网盘大目录后台操作失败"
+          description: "最近 15 分钟有大目录删除、恢复或彻底删除任务进入 failed，请查询 operation 状态并在排障后重试。"
+
       - alert: EnterpriseDriveQuotaDriftDetected
         expr: increase(maintenance_task_result_total{task="quota.reconcile_space_usage",metric=~"snapshot_drifts|ledger_drifts"}[1h]) > 0
         for: 0m

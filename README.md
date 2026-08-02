@@ -49,7 +49,7 @@
 - Sprint 9 / `0.6.0`：文件版本与回收站/批量文件操作核心 API 已完成，继续交付内部分享接收端和完整管理 API。
 - Sprint 10 / `0.7.0`：TypeScript + React + Vite Web 用户端与管理后台，覆盖批量操作、分享通知，使用生成的 OpenAPI client 和 Playwright E2E。
 - Sprint 11 / `0.8.0`：登录失败防护、账号锁定、密码与会话管理、OIDC/OAuth 2.1 + PKCE、LDAP 同步及对应用户端/管理端身份页面。
-- Sprint 12 / `0.9.0`：大目录后台化、完整生命周期、OCR、审计分区、Outbox dead-letter、治理页面、备份签名与离线恢复治理。
+- Sprint 12 / `0.9.0`：继续完成大目录权限重算和治理页面、完整生命周期、OCR、审计分区、Outbox dead-letter、备份签名与离线恢复治理。
 - Sprint 13 / `1.0.0`：后端、Web、桌面端统一 UAT、性能、安全、升级回滚和正式发布。
 
 虚拟盘、macOS/Linux 文件提供器、WebDAV、SMB、移动端、在线协同、复杂 DLP、跨地域双活和计费已进入带编号与入口条件的远期 Backlog。
@@ -70,9 +70,11 @@ Sprint 3 已落地上传会话基础：`upload_sessions`、`upload_parts` 迁移
 
 `BE-037` 已完成回收站与批量操作核心 API：`GET /api/v1/files/trash` 按 `deleted_at/id` 使用签名 cursor，仅返回删除批次根节点；`POST /api/v1/files/batch-delete`、`batch-move`、`batch-restore`、`batch-purge` 每次最多处理 100 个节点，逐项返回成功或错误码。四个写入口强制使用 `Idempotency-Key`，数据库按租户、用户、操作和 key hash 唯一保存请求 hash 与最终响应；相同请求重放原响应，不同请求复用同 key 返回冲突。每个节点在独立 savepoint 中复用单项权限、审计、搜索、容量和 blob 引用语义，单项失败不会回滚其他成功项。
 
+Sprint 2 剩余增强已闭环：创建文件夹、移动、恢复和对应批量入口支持 `fail`、`keep_both`、`replace`。`keep_both` 自动生成 `名称 (n)`，文件名工具会保留扩展名；`replace` 把当前同名节点移入回收站后再完成新操作，不执行不可恢复覆盖。删除、恢复或彻底删除的子树超过 `DRIVE_FILE_TREE_ASYNC_THRESHOLD` 时返回 HTTP 202 和 operation ID，根节点先进入目标状态，maintenance Worker 通过 `file.process_tree_operations` 使用递归 CTE、`deleted_root_id` 和固定批次分段提交后代状态或容量/blob 清理。`GET /api/v1/files/operations/{operation_id}` 查询进度，失败任务可用 `POST .../retry` 恢复；每个批次可重入，Worker 中断后从 PostgreSQL 事实继续。
+
 `BE-027` 可观测性已完成：API `/metrics` 暴露路由模板维度的请求数/延迟、上传下载、权限、Outbox 和搜索延迟指标，正式 2-worker Uvicorn 使用 Prometheus multiprocess 聚合；5 个 Celery Worker 分别在 Compose 内部 `9100` 暴露 task 数量、状态、耗时及本进程业务指标。JSON 日志自动关联 `service`、`env`、`request_id`、`task_id`、`trace_id` 和 `span_id`；OpenTelemetry exporter 默认 `none`，可配置 Console 或 OTLP/HTTP。
 
-`BE-030` 已完成 API 与网络安全矩阵；加入回收站列表和四个批量入口后运行时 OpenAPI 为 45 个 route，其中排除 ping/login 后的 43 个受保护或业务入口均继续纳入矩阵。损坏/超大图片、文档路径与扩展名注入、Range 权限、预签名 URL 和轮换 token 外链穷举也已覆盖。Trusted Host/CORS 已通过动态测试，真实 Nginx raw HTTP smoke 已验证 CL/TE 冲突、重复 Content-Length、API 请求体 413 与 storage 流式入口，并固化进 CI。
+`BE-030` 已完成 API 与网络安全矩阵；加入文件树后台操作状态与重试入口后运行时 OpenAPI 为 47 个 route，其中排除 ping/login 后的 45 个受保护或业务入口均继续纳入矩阵。损坏/超大图片、文档路径与扩展名注入、Range 权限、预签名 URL 和轮换 token 外链穷举也已覆盖。Trusted Host/CORS 已通过动态测试，真实 Nginx raw HTTP smoke 已验证 CL/TE 冲突、重复 Content-Length、API 请求体 413 与 storage 流式入口，并固化进 CI。
 
 Sprint 4 权限系统已新增 `space_members` 基础表，创建空间时会自动写入当前用户的 `owner` 角色成员关系。空间列表、文件树、上传初始化、multipart complete 和下载已通过 `PermissionService` 做空间级成员角色检查：`viewer` 可列表和下载，`editor` 可上传与修改，`owner/admin` 可执行全部空间级动作。空间成员管理 API 已接入，支持 owner/admin 添加、调整和移除成员，权限变更会递增空间权限版本并写入审计。节点 ACL 已支持 `user`、`department`、`group` 三类主体，基于 org 事实表展开用户部门和用户组，支持 allow/deny、继承开关和 deny 优先，并已覆盖文件列表、创建文件夹、上传初始化、multipart complete 和下载入口；文件列表响应会通过批量权限评估返回每个子节点的常用动作权限，避免列表页逐项查询。空间成员和节点 ACL 变更都会写入 `permission.changed` outbox event，`permission.invalidate_cache` 会消费该事件并删除匹配的 Redis 权限缓存 key；部门/用户组 ACL 变更当前保守失效租户内节点权限缓存。搜索 ACL 已新增 token builder 和 `search.acl_rebuild_requested` outbox event；秒传、multipart complete、重命名、移动、删除、恢复和彻底删除会写入 `search.index_requested`，上传完成还会写入 `search.extract_requested`。`search.dispatch_outbox` 会从 PostgreSQL 重新构建文件索引文档写入 OpenSearch，不再活跃或已彻底删除的文件会删除索引文档，并在 ACL 变更后按 space 或 node 子树保守重建索引 token；搜索抽取入口当前支持安全的小型 UTF-8 文本类文件、PDF 可复制正文、DOCX 段落/表格、PPTX 文本框/表格和 XLSX 单元格抽取，PDF 使用成熟开源库 `pypdf`，DOCX 使用成熟开源库 `python-docx`，PPTX 使用成熟开源库 `python-pptx`，XLSX 使用成熟开源库 `openpyxl`，抽取结果写入 `file_versions.search_text` 并刷新索引 `content` 字段，解码或解析失败标记为 `failed`，归档或正文超限标记为 `skipped`，对象存储读取失败交给 outbox 重试。预览基础链路已接入 `preview.render_requested` outbox event 和 `preview` 队列，当前使用成熟开源库 Pillow 将图片生成私有 WebP 预览产物，通过 Poppler `pdftoppm` 将 PDF 首页渲染为图片后复用同一 WebP 产物链路，并通过 LibreOffice headless 将 Office 文档先转换为 PDF 再复用 PDF/图片链路；`preview.dispatch_outbox` 已配置 Celery 软/硬超时、速率限制、结构化失败日志和 `preview_failures_total` 指标；`GET /api/v1/files/{node_id}/preview` 会通过 `preview` 权限校验后返回短期私有预览 URL。`GET /api/v1/search` 已接入查询层 `acl_tokens` allow 过滤、`deny_acl_tokens` 排除过滤、签名 cursor 分页、HTML 编码的 `<mark>` 高亮片段、`search.query` 限流和 `read_meta` 二次权限校验。最终对象的 DB 驱动清理由 `file.cleanup_unreferenced_blobs` 承担；对象存储中没有 DB 元数据的孤儿最终对象由 `file.cleanup_orphaned_objects` 承担。
 

@@ -14,6 +14,7 @@ from app.modules.auth.repository import AuthRepository
 from app.modules.file.blob_cleanup import BlobCleanupService
 from app.modules.file.repository import FileRepository
 from app.modules.file.trash_cleanup import TrashCleanupService
+from app.modules.file.tree_operations import FileTreeOperationProcessor
 from app.modules.quota.repository import QuotaRepository
 from app.modules.quota.service import QuotaService
 
@@ -102,6 +103,31 @@ def cleanup_orphaned_objects(
 
 
 celery_app.task(name="file.cleanup_orphaned_objects")(cleanup_orphaned_objects)
+
+
+def process_tree_operations(limit: int = 100) -> dict[str, int]:
+    return asyncio.run(_process_tree_operations(limit=limit))
+
+
+celery_app.task(name="file.process_tree_operations")(process_tree_operations)
+
+
+async def _process_tree_operations(*, limit: int) -> dict[str, int]:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    async with session_factory() as session:
+        return await FileTreeOperationProcessor(
+            repository=FileRepository(session),
+            quota_service=QuotaService(
+                repository=QuotaRepository(session),
+                default_space_limit_bytes=settings.default_space_quota_bytes,
+                default_user_limit_bytes=settings.default_user_quota_bytes,
+                default_tenant_limit_bytes=settings.default_tenant_quota_bytes,
+                policy_enabled=settings.quota_policy_enabled,
+            ),
+            batch_size=settings.file_tree_operation_batch_size,
+            audit_service=AuditService(repository=AuditRepository(session)),
+        ).process_pending(limit=limit)
 
 
 async def _cleanup_expired_trash(

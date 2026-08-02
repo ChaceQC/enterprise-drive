@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, Query, Request, status
+from fastapi import APIRouter, Depends, Header, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,6 +38,7 @@ from app.modules.file.schemas import (
     FileDownloadUrlResponse,
     FileListResponse,
     FileNodeResponse,
+    FileTreeOperationResponse,
     FileVersionListResponse,
     FileVersionRollbackRequest,
     FileVersionRollbackResponse,
@@ -178,6 +179,7 @@ async def create_folder(
         space_id=request.space_id,
         parent_id=request.parent_id,
         name=request.name,
+        conflict_policy=request.conflict_policy,
         audit_context=build_audit_context(http_request),
     )
 
@@ -245,6 +247,7 @@ async def move_node(
         node_id=node_id,
         target_parent_id=request.target_parent_id,
         new_name=request.new_name,
+        conflict_policy=request.conflict_policy,
         audit_context=build_audit_context(http_request),
     )
 
@@ -284,6 +287,7 @@ async def batch_move(
         node_ids=request.node_ids,
         target_parent_id=request.target_parent_id,
         new_name=request.new_name,
+        conflict_policy=request.conflict_policy,
         idempotency_key=idempotency_key,
         audit_context=build_audit_context(http_request),
     )
@@ -305,6 +309,7 @@ async def batch_restore(
         node_ids=request.node_ids,
         target_parent_id=request.target_parent_id,
         new_name=request.new_name,
+        conflict_policy=request.conflict_policy,
         idempotency_key=idempotency_key,
         audit_context=build_audit_context(http_request),
     )
@@ -329,32 +334,70 @@ async def batch_purge(
     )
 
 
-@router.delete("/{node_id}", response_model=DeleteNodeResponse)
+@router.get("/operations/{operation_id}", response_model=FileTreeOperationResponse)
+async def get_file_tree_operation(
+    operation_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[FileService, Depends(get_file_service)],
+) -> FileTreeOperationResponse:
+    return await service.get_tree_operation(
+        current_user=current_user,
+        operation_id=operation_id,
+    )
+
+
+@router.post("/operations/{operation_id}/retry", response_model=FileTreeOperationResponse)
+async def retry_file_tree_operation(
+    operation_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[FileService, Depends(get_file_service)],
+) -> FileTreeOperationResponse:
+    return await service.retry_tree_operation(
+        current_user=current_user,
+        operation_id=operation_id,
+    )
+
+
+@router.delete(
+    "/{node_id}",
+    response_model=DeleteNodeResponse | FileTreeOperationResponse,
+)
 async def delete_node(
     http_request: Request,
+    response: Response,
     node_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
     service: Annotated[FileService, Depends(get_file_service)],
-) -> DeleteNodeResponse:
-    return await service.delete_node(
+) -> DeleteNodeResponse | FileTreeOperationResponse:
+    result = await service.delete_node(
         current_user=current_user,
         node_id=node_id,
         audit_context=build_audit_context(http_request),
     )
+    if isinstance(result, FileTreeOperationResponse):
+        response.status_code = status.HTTP_202_ACCEPTED
+    return result
 
 
-@router.delete("/{node_id}/purge", response_model=PurgeNodeResponse)
+@router.delete(
+    "/{node_id}/purge",
+    response_model=PurgeNodeResponse | FileTreeOperationResponse,
+)
 async def purge_node(
     http_request: Request,
+    response: Response,
     node_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
     service: Annotated[FileService, Depends(get_file_service)],
-) -> PurgeNodeResponse:
-    return await service.purge_node(
+) -> PurgeNodeResponse | FileTreeOperationResponse:
+    result = await service.purge_node(
         current_user=current_user,
         node_id=node_id,
         audit_context=build_audit_context(http_request),
     )
+    if isinstance(result, FileTreeOperationResponse):
+        response.status_code = status.HTTP_202_ACCEPTED
+    return result
 
 
 @router.get("/{node_id}/versions", response_model=FileVersionListResponse)
@@ -541,18 +584,26 @@ async def create_preview_url(
     return await service.create_preview_url(current_user=current_user, node_id=node_id)
 
 
-@router.post("/{node_id}/restore", response_model=FileNodeResponse)
+@router.post(
+    "/{node_id}/restore",
+    response_model=FileNodeResponse | FileTreeOperationResponse,
+)
 async def restore_node(
     http_request: Request,
+    response: Response,
     node_id: UUID,
     request: RestoreNodeRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     service: Annotated[FileService, Depends(get_file_service)],
-) -> FileNodeResponse:
-    return await service.restore_node(
+) -> FileNodeResponse | FileTreeOperationResponse:
+    result = await service.restore_node(
         current_user=current_user,
         node_id=node_id,
         target_parent_id=request.target_parent_id,
         new_name=request.new_name,
+        conflict_policy=request.conflict_policy,
         audit_context=build_audit_context(http_request),
     )
+    if isinstance(result, FileTreeOperationResponse):
+        response.status_code = status.HTTP_202_ACCEPTED
+    return result

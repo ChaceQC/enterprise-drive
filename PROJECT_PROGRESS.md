@@ -1,5 +1,82 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-02 Sprint 2 剩余增强闭环
+
+### 当前状态
+
+- `PROJECT_STAGE_STATUS.md` 中 Sprint 2 剩余的 `keep_both/replace` 冲突策略和大目录后台化已完成。
+- 运行时 OpenAPI 从 45 个操作增加到 47 个；新增后台操作状态查询和失败重试入口。
+- migration head 更新为 `20260802_0016`。
+
+### 已完成
+
+- 创建文件夹、移动、恢复和对应批量入口支持 `conflict_policy=fail|keep_both|replace`。
+- `keep_both` 使用确定性的 `名称 (n)`，文件名生成器保留扩展名并遵守 255 字符限制。
+- `replace` 先复用现有删除语义把当前同名节点移入回收站，再创建、移动或恢复目标节点；删除权限不足时仍按资源隐藏规则拒绝，不做静默覆盖或彻底删除。
+- `nodes` 新增 `deleted_root_id`，`file_tree_operations` 保存删除、恢复、彻底删除的任务状态、总量、已处理量、释放容量、尝试次数和失败码。
+- 子树规模超过 `DRIVE_FILE_TREE_ASYNC_THRESHOLD` 时，根节点在请求事务中先进入目标状态并返回 HTTP 202；普通目录继续同步完成，不改变既有响应。
+- 新增 `GET /api/v1/files/operations/{operation_id}` 和 `POST /api/v1/files/operations/{operation_id}/retry`，按租户和任务创建者隔离。
+- maintenance Worker 新增 `file.process_tree_operations`，使用递归 CTE 按深度选择节点，并以 `DRIVE_FILE_TREE_OPERATION_BATCH_SIZE` 分段提交；删除/恢复按父子顺序推进，彻底删除按叶到根处理版本、容量和 blob 引用。
+- pending/running 任务由 Celery beat 周期领取；每批以 PostgreSQL 剩余状态为游标，Worker 中断或进程重启后可继续，失败任务保留错误码并支持显式重试。
+- 批量文件操作检测到大目录任务时在逐项结果中返回对应 `operation_id`，并继续受原 `Idempotency-Key` 响应重放保护。
+- 新任务已接入 maintenance 健康状态、Compose 环境变量和 Windows/本地环境模板。
+
+### 验证
+
+- 新增 `tests/test_file_conflict_policies.py`：`3 passed`，覆盖创建、移动和恢复的 `keep_both/replace`。
+- 新增 `tests/test_large_tree_operations.py`：`2 passed`，覆盖 1 节点批次下的中断续跑、删除、恢复、彻底删除、容量/blob 引用释放、状态查询和失败重试。
+- 合并运行冲突策略、大目录、Celery schedule、安全矩阵和真实跨租户定向用例，结果为 `61 passed`。
+- 20 个受影响 Python 文件 Ruff format check 和 Ruff lint 通过。
+- `uv run mypy app` 结果为 155 个源码文件全部通过。
+- `uv run alembic heads` 返回 `20260802_0016 (head)`。
+- maintenance 告警 YAML 解析通过；根 `compose.windows.yml` 使用 `.env.windows.example` 静态配置解析通过；`git diff --check` 通过。
+- 未运行旧 `BE-036/037` 测试、全量回归、Docker 容器启动、备份恢复或性能压测。
+
+### 边界
+
+- 上传初始化的 `conflict_policy` 仍是 fail-only；若未来把 replace 映射为现有文件的新版本，必须进入上传/版本事务并重新验证容量、幂等和审计。
+- 本轮完成文件树删除、恢复和彻底删除后台化；大目录权限重算、管理后台任务页面和 closure table 规模触发条件继续后续治理。
+- periodic Worker 当前按配置间隔领取任务；生产应继续抓取 maintenance Worker 指标并加载现有连续失败/stale 告警规则。
+
+### 下一步
+
+1. 提交并推送 Sprint 2 剩余增强。
+2. 按工程顺序进入 `BE-038` 内部分享接收端。
+
+### 涉及文件
+
+- `backend/app/core/config.py`
+- `backend/app/core/maintenance_health.py`
+- `backend/app/infrastructure/queue/celery_app.py`
+- `backend/app/infrastructure/queue/schedule.py`
+- `backend/app/modules/file/batch_service.py`
+- `backend/app/modules/file/models.py`
+- `backend/app/modules/file/repository.py`
+- `backend/app/modules/file/router.py`
+- `backend/app/modules/file/schemas.py`
+- `backend/app/modules/file/service.py`
+- `backend/app/modules/file/tree_operations.py`
+- `backend/app/modules/file/validators.py`
+- `backend/app/workers/file_tasks.py`
+- `backend/migrations/versions/20260802_0016_large_tree_operations.py`
+- `backend/tests/test_file_conflict_policies.py`
+- `backend/tests/test_large_tree_operations.py`
+- `backend/tests/test_celery_schedule.py`
+- `backend/tests/security_route_matrix.py`
+- `backend/tests/test_route_security_matrix.py`
+- `backend/tests/test_route_security_cross_tenant.py`
+- `.env.windows.example`
+- `backend/.env.example`
+- `compose.windows.yml`
+- `README.md`
+- `backend/README.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `PROJECT_STAGE_STATUS.md`
+- `docs/deployment-windows-docker.md`
+- `docs/maintenance-monitoring.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-08-02 BE-037 回收站列表与批量文件操作
 
 ### 当前状态

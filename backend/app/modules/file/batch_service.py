@@ -12,7 +12,11 @@ from app.modules.audit.schemas import AuditContext
 from app.modules.auth.models import User
 from app.modules.file.models import FileBatchOperation
 from app.modules.file.repository import FileRepository
-from app.modules.file.schemas import BatchNodeResult, BatchOperationResponse
+from app.modules.file.schemas import (
+    BatchNodeResult,
+    BatchOperationResponse,
+    FileTreeOperationResponse,
+)
 from app.modules.file.service import FileService
 
 
@@ -54,6 +58,7 @@ class FileBatchService:
         node_ids: list[UUID],
         target_parent_id: UUID,
         new_name: str | None,
+        conflict_policy: str,
         idempotency_key: str,
         audit_context: AuditContext | None = None,
     ) -> BatchOperationResponse:
@@ -66,12 +71,14 @@ class FileBatchService:
                 "node_ids": [str(node_id) for node_id in node_ids],
                 "target_parent_id": str(target_parent_id),
                 "new_name": new_name,
+                "conflict_policy": conflict_policy,
             },
             handler=lambda node_id: self.file_service.move_node_in_transaction(
                 current_user=current_user,
                 node_id=node_id,
                 target_parent_id=target_parent_id,
                 new_name=new_name,
+                conflict_policy=conflict_policy,
                 audit_context=audit_context,
             ),
         )
@@ -83,6 +90,7 @@ class FileBatchService:
         node_ids: list[UUID],
         target_parent_id: UUID | None,
         new_name: str | None,
+        conflict_policy: str,
         idempotency_key: str,
         audit_context: AuditContext | None = None,
     ) -> BatchOperationResponse:
@@ -95,12 +103,14 @@ class FileBatchService:
                 "node_ids": [str(node_id) for node_id in node_ids],
                 "target_parent_id": str(target_parent_id) if target_parent_id else None,
                 "new_name": new_name,
+                "conflict_policy": conflict_policy,
             },
             handler=lambda node_id: self.file_service.restore_node_in_transaction(
                 current_user=current_user,
                 node_id=node_id,
                 target_parent_id=target_parent_id,
                 new_name=new_name,
+                conflict_policy=conflict_policy,
                 audit_context=audit_context,
             ),
         )
@@ -150,7 +160,7 @@ class FileBatchService:
         for node_id in node_ids:
             try:
                 async with self.repository.begin_nested():
-                    await handler(node_id)
+                    item_response = await handler(node_id)
             except ApiError as exc:
                 results.append(BatchNodeResult(node_id=node_id, status="failed", code=exc.code))
             except IntegrityError:
@@ -158,7 +168,17 @@ class FileBatchService:
                     BatchNodeResult(node_id=node_id, status="failed", code="NODE_NAME_EXISTS")
                 )
             else:
-                results.append(BatchNodeResult(node_id=node_id, status="success"))
+                results.append(
+                    BatchNodeResult(
+                        node_id=node_id,
+                        status="success",
+                        operation_id=(
+                            item_response.operation_id
+                            if isinstance(item_response, FileTreeOperationResponse)
+                            else None
+                        ),
+                    )
+                )
 
         response = BatchOperationResponse(results=results)
         operation_record.response_json = response.model_dump(mode="json")
