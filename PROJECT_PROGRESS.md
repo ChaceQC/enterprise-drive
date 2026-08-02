@@ -1,5 +1,99 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-02 BE-037 回收站列表与批量文件操作
+
+### 当前状态
+
+- 已从 2026-08-01 暂停检查点恢复并完成 `BE-037`，未重复执行 `BE-036`、全量回归、Docker 集成、备份恢复或性能压测。
+- 运行时 OpenAPI 由 40 个 route 增加到 45 个；安全矩阵同步为 25 个 CSRF 写入口和 15 个登录态读取入口。
+- 数据库 migration head 更新为 `20260801_0015`。
+
+### 已完成
+
+- 新增 `GET /api/v1/files/trash`，按 `deleted_at DESC, id DESC` 使用服务端签名 cursor 分页，只返回没有同删除时间/删除人父节点的删除批次根节点，并返回当前用户的 `delete`/`restore` 权限。
+- 新增 `POST /api/v1/files/batch-delete`、`batch-move`、`batch-restore`、`batch-purge`，请求最多包含 100 个节点，响应按输入顺序逐项返回 `success` 或失败错误码。
+- 把单项移动、删除、恢复和彻底删除整理为不自行提交的事务单元；单项接口仍保持原有提交/回滚行为，批量接口为每个节点建立 savepoint，业务失败不回滚其他成功项。
+- 新增 `file_batch_operations` 和 `20260801_0015_file_batch_idempotency.py`，以 `tenant_id + user_id + operation + idempotency_key_hash` 唯一约束保存请求 hash 和最终响应。
+- 四个批量写入口强制接收 `Idempotency-Key`：同 key 同请求直接重放已保存响应，同 key 不同请求返回 `IDEMPOTENCY_KEY_REUSED`，并发唯一键竞争返回明确冲突。
+- 批量操作继续复用现有节点权限、审计、搜索 outbox、多维配额释放和 blob 引用计数逻辑，没有建立第二套文件操作语义。
+- 将批量幂等编排拆分到 `file/batch_service.py`，避免继续扩大既有 `file/service.py`。
+- 安全路由矩阵、CSRF 计数、登录态读取计数和真实跨租户资源用例已同步；跨租户批量请求只逐项返回 `NODE_NOT_FOUND`，不泄露资源存在性。
+
+### 验证
+
+- 变更文件 Ruff format check 和 Ruff lint 已通过。
+- `uv run mypy app` 结果为 154 个源码文件全部通过。
+- 新增集中定向测试 `tests/test_file_batch_operations.py` 最终结果为 `3 passed`，覆盖回收站两页 cursor、批量删除/恢复、批量移动部分失败、批量彻底删除、持久化重放和同 key 异请求冲突。
+- `tests/test_route_security_matrix.py` 结果为 `51 passed`，运行时 OpenAPI 与 45 个 route 精确一致；新增写入口缺少 CSRF 时仍统一拒绝。
+- `tests/test_route_security_cross_tenant.py::test_internal_routes_hide_foreign_tenant_resources` 结果为 `1 passed`。
+- `uv run alembic heads` 返回 `20260801_0015 (head)`；`git diff --check` 通过。
+- 本轮没有执行全量测试、Docker、真实 MinIO、备份恢复、性能压测或 `BE-036` 既有测试。
+
+### 边界与风险
+
+- 普通目录的删除、恢复和彻底删除仍同步遍历子树；超大目录的任务状态、游标分片和长事务拆分继续归 `BE-046`。
+- 创建/移动的 `keep_both`、`replace` 冲突策略仍未进入本轮 `BE-037`，当前保持 fail-only，避免提前改变上传和版本覆盖语义。
+- 幂等记录当前随业务数据长期保留；保留期、归档和治理指标应与后续生命周期管理统一设计。
+
+### 下一步
+
+1. 提交并推送 `BE-037` 的代码、迁移、测试和文档。
+2. 按工程顺序进入 `BE-038`，实现“分享给我的”、创建者分享列表、接收人详情与受控下载。
+3. `BE-029` 目标规模压测继续保留到发布性能门禁，不回到当前功能开发路径重复执行。
+
+### 涉及文件
+
+- `backend/app/modules/file/batch_service.py`
+- `backend/app/modules/file/models.py`
+- `backend/app/modules/file/repository.py`
+- `backend/app/modules/file/router.py`
+- `backend/app/modules/file/schemas.py`
+- `backend/app/modules/file/service.py`
+- `backend/migrations/versions/20260801_0015_file_batch_idempotency.py`
+- `backend/tests/test_file_batch_operations.py`
+- `backend/tests/security_route_matrix.py`
+- `backend/tests/test_route_security_matrix.py`
+- `backend/tests/test_route_security_cross_tenant.py`
+- `README.md`
+- `backend/README.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `PROJECT_STAGE_STATUS.md`
+- `企业网盘开发者技术计划书.md`
+
+## 2026-08-01 暂停检查点：BE-037 回收站列表与批量文件操作
+
+### Git 与工作区
+
+- 当前分支：`dev`。
+- 当前 HEAD：`d7a05b4daf2e359ec0022a51e290929bfaf7ff85`（`feat: 完成文件版本列表下载与回滚`）。
+- `d7a05b4` 已成功推送到 `origin/dev`。
+- 暂停前工作树干净；本次只修改 `PROJECT_PROGRESS.md` 保存检查点，未提交、未 stash，也未改动 `BE-037` 业务代码。
+
+### 最新确认结果
+
+- `BE-036` 代码、文档和安全矩阵已提交推送；其唯一一次最小验证结果仍为 Ruff、Mypy 通过和 `3 passed`，恢复时不要重复运行。
+- `BE-037` 已完成开工前审查：读取了 `AGENT.md`、`PROJECT_PLAN.md`、技术计划书中的接口契约，以及现有 file router/service/repository/schema、删除/移动/恢复/彻底删除测试和安全路由矩阵。
+- 当前仓库没有通用 `Idempotency-Key` 持久化实现，也没有回收站用户分页接口或四个批量文件接口；最新 migration head 为 `20260801_0014`。
+- 本轮未启动 Docker、API、Worker、性能工具或测试进程。
+
+### 已确认的 BE-037 实现方向
+
+- 新增 `GET /api/v1/files/trash?space_id=...&cursor=...&page_size=...`，按 `deleted_at DESC, id DESC` 使用服务端签名 cursor，只列出删除批次根节点，避免目录子树中的每个后代重复出现在回收站顶层。
+- 新增 `POST /api/v1/files/batch-delete`、`batch-move`、`batch-restore`、`batch-purge`；每个请求最多处理有限数量节点，响应逐项返回成功或错误码，单项业务失败不吞掉其他项结果。
+- 四个批量写入口强制接收 `Idempotency-Key`。计划新增持久化批量操作记录和 `20260801_0015` migration，以 `tenant + user + operation + key hash` 唯一约束，并保存请求 hash 与最终响应；同 key 不同请求返回冲突，相同请求直接重放已保存结果。
+- 为保证幂等记录与成功项同时提交，同时支持部分失败，计划把现有单项删除、移动、恢复和彻底删除逻辑拆成“不自行 commit”的内部事务单元；批量服务在外层事务内为每项使用 savepoint，最后原子写入批量响应。
+- 继续复用现有节点权限、容量释放、blob 引用、审计和搜索 outbox 逻辑，不另写一套文件操作语义。
+- 新增 5 个 route 后，安全矩阵预期从 40 调整到 45；CSRF 写入口预期从 21 调整到 25，登录态读取入口预期从 14 调整到 15，并同步真实跨租户 fixture。
+
+### 精确恢复步骤
+
+1. 从本检查点直接实现 `BE-037`，不要重新审查 `BE-036`，不要运行其既有测试。
+2. 先修改 `backend/app/modules/file/models.py`、`repository.py`、`schemas.py`、`service.py`、`router.py`，并新增 `backend/migrations/versions/20260801_0015_file_batch_idempotency.py`。
+3. 再同步 `backend/tests/security_route_matrix.py`、`test_route_security_matrix.py` 和 `test_route_security_cross_tenant.py`，新增一个集中覆盖回收站分页、四类批量操作、部分失败与幂等重放的定向测试文件。
+4. 只执行一次变更文件 Ruff、`uv run mypy app`、新增定向测试和 OpenAPI 精确对账；不执行全量测试、Docker 集成、备份恢复或性能压测。
+5. 验证通过后同步 README、计划书和本进度文件，执行一次 `git diff --check`，提交并推送 `BE-037`，然后按编号进入 `BE-038`。
+
 ## 2026-08-01 BE-036 文件版本列表、指定版本下载与回滚
 
 ### 当前状态

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -28,6 +29,27 @@ class RestoreNodeRequest(BaseModel):
     new_name: str | None = Field(default=None, min_length=1, max_length=255)
 
 
+class BatchDeleteRequest(BaseModel):
+    node_ids: list[UUID] = Field(min_length=1, max_length=100)
+    mode: Literal["trash"] = "trash"
+
+
+class BatchMoveRequest(BaseModel):
+    node_ids: list[UUID] = Field(min_length=1, max_length=100)
+    target_parent_id: UUID
+    new_name: str | None = Field(default=None, min_length=1, max_length=255)
+
+
+class BatchRestoreRequest(BaseModel):
+    node_ids: list[UUID] = Field(min_length=1, max_length=100)
+    target_parent_id: UUID | None = None
+    new_name: str | None = Field(default=None, min_length=1, max_length=255)
+
+
+class BatchPurgeRequest(BaseModel):
+    node_ids: list[UUID] = Field(min_length=1, max_length=100)
+
+
 class FileNodeResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -49,6 +71,40 @@ class FileListResponse(BaseModel):
     parent_id: UUID
     items: list[FileNodeResponse]
     next_cursor: str | None = None
+
+
+class TrashNodeResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    tenant_id: UUID
+    space_id: UUID
+    parent_id: UUID | None
+    node_type: str
+    name: str
+    current_version_id: UUID | None
+    permission_version: int
+    deleted_at: datetime
+    deleted_by: UUID | None
+    permissions: dict[str, bool] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class TrashListResponse(BaseModel):
+    space_id: UUID
+    items: list[TrashNodeResponse]
+    next_cursor: str | None = None
+
+
+class BatchNodeResult(BaseModel):
+    node_id: UUID
+    status: Literal["success", "failed"]
+    code: str | None = None
+
+
+class BatchOperationResponse(BaseModel):
+    results: list[BatchNodeResult]
 
 
 class DeleteNodeResponse(BaseModel):

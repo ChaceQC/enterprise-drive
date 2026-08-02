@@ -19,6 +19,8 @@ from app.modules.file.schemas import (
     FileListResponse,
     FileNodeResponse,
     PurgeNodeResponse,
+    TrashListResponse,
+    TrashNodeResponse,
 )
 from app.modules.file.tree import (
     collect_deleted_subtree,
@@ -172,6 +174,70 @@ class FileService:
             next_cursor=next_cursor,
         )
 
+    async def list_trash(
+        self,
+        *,
+        current_user: User,
+        space_id: UUID,
+        cursor: str | None,
+        page_size: int,
+    ) -> TrashListResponse:
+        space = await self._get_active_space(current_user=current_user, space_id=space_id)
+        decoded_cursor = decode_page_cursor(self.settings, cursor)
+        nodes = await self.repository.list_trash_roots(
+            tenant_id=current_user.tenant_id,
+            space_id=space.id,
+            limit=page_size + 1,
+            cursor=decoded_cursor,
+        )
+        paths = {
+            node.id: path
+            for node in nodes
+            if (
+                path := await self.repository.get_node_path_ids(
+                    tenant_id=current_user.tenant_id,
+                    space_id=space.id,
+                    node_id=node.id,
+                    include_deleted=True,
+                )
+            )
+            is not None
+        }
+        permissions = await self.permission_service.batch_check_nodes(
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+            space_id=space.id,
+            node_paths=paths,
+            actions=[ACTION_DELETE, ACTION_RESTORE],
+        )
+        visible_nodes = [
+            node
+            for node in nodes
+            if permissions.get(node.id, {}).get(ACTION_DELETE, False)
+            or permissions.get(node.id, {}).get(ACTION_RESTORE, False)
+        ]
+        items = visible_nodes[:page_size]
+        next_cursor = None
+        if len(visible_nodes) > page_size and items:
+            last_item = items[-1]
+            if last_item.deleted_at is not None:
+                next_cursor = encode_page_cursor(
+                    self.settings,
+                    created_at=last_item.deleted_at,
+                    item_id=last_item.id,
+                )
+
+        return TrashListResponse(
+            space_id=space.id,
+            items=[
+                TrashNodeResponse.model_validate(node).model_copy(
+                    update={"permissions": permissions.get(node.id, {})}
+                )
+                for node in items
+            ],
+            next_cursor=next_cursor,
+        )
+
     async def rename_node(
         self,
         *,
@@ -231,6 +297,96 @@ class FileService:
         new_name: str | None,
         audit_context: AuditContext | None = None,
     ) -> FileNodeResponse:
+        try:
+            response = await self.move_node_in_transaction(
+                current_user=current_user,
+                node_id=node_id,
+                target_parent_id=target_parent_id,
+                new_name=new_name,
+                audit_context=audit_context,
+            )
+            await self.repository.commit()
+        except IntegrityError as exc:
+            await self.repository.rollback()
+            raise node_name_conflict_error() from exc
+        except Exception:
+            await self.repository.rollback()
+            raise
+        return response
+
+    async def delete_node(
+        self,
+        *,
+        current_user: User,
+        node_id: UUID,
+        audit_context: AuditContext | None = None,
+    ) -> DeleteNodeResponse:
+        try:
+            response = await self.delete_node_in_transaction(
+                current_user=current_user,
+                node_id=node_id,
+                audit_context=audit_context,
+            )
+            await self.repository.commit()
+        except Exception:
+            await self.repository.rollback()
+            raise
+        return response
+
+    async def purge_node(
+        self,
+        *,
+        current_user: User,
+        node_id: UUID,
+        audit_context: AuditContext | None = None,
+    ) -> PurgeNodeResponse:
+        try:
+            response = await self.purge_node_in_transaction(
+                current_user=current_user,
+                node_id=node_id,
+                audit_context=audit_context,
+            )
+            await self.repository.commit()
+        except Exception:
+            await self.repository.rollback()
+            raise
+        return response
+
+    async def restore_node(
+        self,
+        *,
+        current_user: User,
+        node_id: UUID,
+        target_parent_id: UUID | None,
+        new_name: str | None,
+        audit_context: AuditContext | None = None,
+    ) -> FileNodeResponse:
+        try:
+            response = await self.restore_node_in_transaction(
+                current_user=current_user,
+                node_id=node_id,
+                target_parent_id=target_parent_id,
+                new_name=new_name,
+                audit_context=audit_context,
+            )
+            await self.repository.commit()
+        except IntegrityError as exc:
+            await self.repository.rollback()
+            raise node_name_conflict_error() from exc
+        except Exception:
+            await self.repository.rollback()
+            raise
+        return response
+
+    async def move_node_in_transaction(
+        self,
+        *,
+        current_user: User,
+        node_id: UUID,
+        target_parent_id: UUID,
+        new_name: str | None,
+        audit_context: AuditContext | None,
+    ) -> FileNodeResponse:
         node = await self._get_accessible_node(
             current_user=current_user,
             node_id=node_id,
@@ -258,50 +414,43 @@ class FileService:
             exclude_node_id=node.id,
         )
         affected_nodes = await self._collect_active_subtree(node=node)
-
         old_parent_id = node.parent_id
         old_name = node.name
-        try:
-            node.parent_id = target_parent.id
-            node.name = normalized_name
-            node.normalized_name = normalized_name
-            touch_node(node)
-            await self.repository.flush()
-            await record_node_event(
-                audit_service=self.audit_service,
-                current_user=current_user,
-                node=node,
-                action="file.moved",
-                audit_context=audit_context,
-                metadata={
-                    "old_parent_id": str(old_parent_id) if old_parent_id else None,
-                    "new_parent_id": str(target_parent.id),
-                    "old_name": old_name,
-                    "new_name": normalized_name,
-                },
-            )
-            await self._emit_search_index_requests(
-                nodes=affected_nodes,
-                reason="file_moved",
-                metadata={
-                    "root_node_id": str(node.id),
-                    "old_parent_id": str(old_parent_id) if old_parent_id else None,
-                    "new_parent_id": str(target_parent.id),
-                },
-            )
-            await self.repository.commit()
-        except IntegrityError as exc:
-            await self.repository.rollback()
-            raise node_name_conflict_error() from exc
-
+        node.parent_id = target_parent.id
+        node.name = normalized_name
+        node.normalized_name = normalized_name
+        touch_node(node)
+        await self.repository.flush()
+        await record_node_event(
+            audit_service=self.audit_service,
+            current_user=current_user,
+            node=node,
+            action="file.moved",
+            audit_context=audit_context,
+            metadata={
+                "old_parent_id": str(old_parent_id) if old_parent_id else None,
+                "new_parent_id": str(target_parent.id),
+                "old_name": old_name,
+                "new_name": normalized_name,
+            },
+        )
+        await self._emit_search_index_requests(
+            nodes=affected_nodes,
+            reason="file_moved",
+            metadata={
+                "root_node_id": str(node.id),
+                "old_parent_id": str(old_parent_id) if old_parent_id else None,
+                "new_parent_id": str(target_parent.id),
+            },
+        )
         return FileNodeResponse.model_validate(node)
 
-    async def delete_node(
+    async def delete_node_in_transaction(
         self,
         *,
         current_user: User,
         node_id: UUID,
-        audit_context: AuditContext | None = None,
+        audit_context: AuditContext | None,
     ) -> DeleteNodeResponse:
         node = await self._get_accessible_node(
             current_user=current_user,
@@ -311,13 +460,11 @@ class FileService:
         ensure_mutable_node(node)
         subtree_nodes = await self._collect_active_subtree(node=node)
         now = utc_now()
-
         for subtree_node in subtree_nodes:
             subtree_node.is_deleted = True
             subtree_node.deleted_at = now
             subtree_node.deleted_by = current_user.id
             touch_node(subtree_node)
-
         await self.repository.flush()
         await record_node_event(
             audit_service=self.audit_service,
@@ -332,15 +479,14 @@ class FileService:
             reason="file_deleted",
             metadata={"root_node_id": str(node.id)},
         )
-        await self.repository.commit()
         return DeleteNodeResponse(node_id=node.id, deleted_count=len(subtree_nodes))
 
-    async def purge_node(
+    async def purge_node_in_transaction(
         self,
         *,
         current_user: User,
         node_id: UUID,
-        audit_context: AuditContext | None = None,
+        audit_context: AuditContext | None,
     ) -> PurgeNodeResponse:
         node = await self._get_accessible_node(
             current_user=current_user,
@@ -361,57 +507,51 @@ class FileService:
         released_bytes = sum(version.size_bytes for version in versions)
         blob_counts = self._blob_ref_counts(versions=versions)
 
-        try:
-            await self.quota_service.release_file_usage(
+        await self.quota_service.release_file_usage(
+            tenant_id=current_user.tenant_id,
+            space_id=node.space_id,
+            ref_id=node.id,
+            size_bytes=released_bytes,
+            version_ids=[version.id for version in versions],
+        )
+        blob_refs_updated = await self.repository.decrement_blob_ref_counts(
+            tenant_id=current_user.tenant_id,
+            blob_counts=blob_counts,
+        )
+        if not blob_refs_updated:
+            raise ApiError("BLOB_REFCOUNT_INVALID", "文件引用计数异常", status_code=500)
+        await record_node_event(
+            audit_service=self.audit_service,
+            current_user=current_user,
+            node=node,
+            action="file.purged",
+            audit_context=audit_context,
+            metadata={
+                "purged_count": len(subtree_nodes),
+                "released_bytes": released_bytes,
+            },
+        )
+        await self._emit_search_index_requests(
+            nodes=subtree_nodes,
+            reason="file_purged",
+            metadata={"root_node_id": str(node.id)},
+        )
+        await self.repository.delete_versions_for_nodes(
+            tenant_id=current_user.tenant_id,
+            node_ids=node_ids,
+        )
+        for subtree_node in reversed(subtree_nodes):
+            await self.repository.delete_node(
                 tenant_id=current_user.tenant_id,
-                space_id=node.space_id,
-                ref_id=node.id,
-                size_bytes=released_bytes,
-                version_ids=[version.id for version in versions],
+                node_id=subtree_node.id,
             )
-            blob_refs_updated = await self.repository.decrement_blob_ref_counts(
-                tenant_id=current_user.tenant_id,
-                blob_counts=blob_counts,
-            )
-            if not blob_refs_updated:
-                raise ApiError("BLOB_REFCOUNT_INVALID", "文件引用计数异常", status_code=500)
-            await record_node_event(
-                audit_service=self.audit_service,
-                current_user=current_user,
-                node=node,
-                action="file.purged",
-                audit_context=audit_context,
-                metadata={
-                    "purged_count": len(subtree_nodes),
-                    "released_bytes": released_bytes,
-                },
-            )
-            await self._emit_search_index_requests(
-                nodes=subtree_nodes,
-                reason="file_purged",
-                metadata={"root_node_id": str(node.id)},
-            )
-            await self.repository.delete_versions_for_nodes(
-                tenant_id=current_user.tenant_id,
-                node_ids=node_ids,
-            )
-            for subtree_node in reversed(subtree_nodes):
-                await self.repository.delete_node(
-                    tenant_id=current_user.tenant_id,
-                    node_id=subtree_node.id,
-                )
-            await self.repository.commit()
-        except Exception:
-            await self.repository.rollback()
-            raise
-
         return PurgeNodeResponse(
             node_id=node.id,
             purged_count=len(subtree_nodes),
             released_bytes=released_bytes,
         )
 
-    async def restore_node(
+    async def restore_node_in_transaction(
         self,
         *,
         current_user: User,
@@ -447,37 +587,31 @@ class FileService:
         )
 
         subtree_nodes = await collect_restore_subtree(repository=self.repository, node=node)
-        try:
-            node.parent_id = restore_parent.id
-            node.name = normalized_name
-            node.normalized_name = normalized_name
-            for subtree_node in subtree_nodes:
-                subtree_node.is_deleted = False
-                subtree_node.deleted_at = None
-                subtree_node.deleted_by = None
-                touch_node(subtree_node)
-            await self.repository.flush()
-            await record_node_event(
-                audit_service=self.audit_service,
-                current_user=current_user,
-                node=node,
-                action="file.restored",
-                audit_context=audit_context,
-                metadata={
-                    "restore_parent_id": str(restore_parent.id),
-                    "restored_count": len(subtree_nodes),
-                },
-            )
-            await self._emit_search_index_requests(
-                nodes=subtree_nodes,
-                reason="file_restored",
-                metadata={"root_node_id": str(node.id)},
-            )
-            await self.repository.commit()
-        except IntegrityError as exc:
-            await self.repository.rollback()
-            raise node_name_conflict_error() from exc
-
+        node.parent_id = restore_parent.id
+        node.name = normalized_name
+        node.normalized_name = normalized_name
+        for subtree_node in subtree_nodes:
+            subtree_node.is_deleted = False
+            subtree_node.deleted_at = None
+            subtree_node.deleted_by = None
+            touch_node(subtree_node)
+        await self.repository.flush()
+        await record_node_event(
+            audit_service=self.audit_service,
+            current_user=current_user,
+            node=node,
+            action="file.restored",
+            audit_context=audit_context,
+            metadata={
+                "restore_parent_id": str(restore_parent.id),
+                "restored_count": len(subtree_nodes),
+            },
+        )
+        await self._emit_search_index_requests(
+            nodes=subtree_nodes,
+            reason="file_restored",
+            metadata={"root_node_id": str(node.id)},
+        )
         return FileNodeResponse.model_validate(node)
 
     async def _get_active_space(

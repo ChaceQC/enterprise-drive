@@ -24,9 +24,15 @@ from app.infrastructure.storage.base import StorageAdapter
 from app.modules.audit.repository import AuditRepository
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
+from app.modules.file.batch_service import FileBatchService
 from app.modules.file.download import FileDownloadService
 from app.modules.file.repository import FileRepository
 from app.modules.file.schemas import (
+    BatchDeleteRequest,
+    BatchMoveRequest,
+    BatchOperationResponse,
+    BatchPurgeRequest,
+    BatchRestoreRequest,
     CreateFolderRequest,
     DeleteNodeResponse,
     FileDownloadUrlResponse,
@@ -39,6 +45,7 @@ from app.modules.file.schemas import (
     PurgeNodeResponse,
     RenameNodeRequest,
     RestoreNodeRequest,
+    TrashListResponse,
 )
 from app.modules.file.service import FileService
 from app.modules.file.version_service import FileVersionService
@@ -78,6 +85,17 @@ def get_file_service(
         ),
         settings=settings,
         audit_service=AuditService(repository=AuditRepository(session)),
+    )
+
+
+def get_file_batch_service(
+    session: Annotated[AsyncSession, Depends(get_db_session)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> FileBatchService:
+    file_service = get_file_service(session, settings)
+    return FileBatchService(
+        repository=file_service.repository,
+        file_service=file_service,
     )
 
 
@@ -182,6 +200,22 @@ async def list_files(
     )
 
 
+@router.get("/trash", response_model=TrashListResponse)
+async def list_trash(
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[FileService, Depends(get_file_service)],
+    space_id: Annotated[UUID, Query()],
+    cursor: Annotated[str | None, Query(min_length=1)] = None,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> TrashListResponse:
+    return await service.list_trash(
+        current_user=current_user,
+        space_id=space_id,
+        cursor=cursor,
+        page_size=page_size,
+    )
+
+
 @router.patch("/{node_id}", response_model=FileNodeResponse)
 async def rename_node(
     http_request: Request,
@@ -211,6 +245,86 @@ async def move_node(
         node_id=node_id,
         target_parent_id=request.target_parent_id,
         new_name=request.new_name,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.post("/batch-delete", response_model=BatchOperationResponse)
+async def batch_delete(
+    http_request: Request,
+    request: BatchDeleteRequest,
+    idempotency_key: Annotated[
+        str,
+        Header(alias="Idempotency-Key", min_length=1, max_length=255),
+    ],
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[FileBatchService, Depends(get_file_batch_service)],
+) -> BatchOperationResponse:
+    return await service.batch_delete(
+        current_user=current_user,
+        node_ids=request.node_ids,
+        idempotency_key=idempotency_key,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.post("/batch-move", response_model=BatchOperationResponse)
+async def batch_move(
+    http_request: Request,
+    request: BatchMoveRequest,
+    idempotency_key: Annotated[
+        str,
+        Header(alias="Idempotency-Key", min_length=1, max_length=255),
+    ],
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[FileBatchService, Depends(get_file_batch_service)],
+) -> BatchOperationResponse:
+    return await service.batch_move(
+        current_user=current_user,
+        node_ids=request.node_ids,
+        target_parent_id=request.target_parent_id,
+        new_name=request.new_name,
+        idempotency_key=idempotency_key,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.post("/batch-restore", response_model=BatchOperationResponse)
+async def batch_restore(
+    http_request: Request,
+    request: BatchRestoreRequest,
+    idempotency_key: Annotated[
+        str,
+        Header(alias="Idempotency-Key", min_length=1, max_length=255),
+    ],
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[FileBatchService, Depends(get_file_batch_service)],
+) -> BatchOperationResponse:
+    return await service.batch_restore(
+        current_user=current_user,
+        node_ids=request.node_ids,
+        target_parent_id=request.target_parent_id,
+        new_name=request.new_name,
+        idempotency_key=idempotency_key,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.post("/batch-purge", response_model=BatchOperationResponse)
+async def batch_purge(
+    http_request: Request,
+    request: BatchPurgeRequest,
+    idempotency_key: Annotated[
+        str,
+        Header(alias="Idempotency-Key", min_length=1, max_length=255),
+    ],
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[FileBatchService, Depends(get_file_batch_service)],
+) -> BatchOperationResponse:
+    return await service.batch_purge(
+        current_user=current_user,
+        node_ids=request.node_ids,
+        idempotency_key=idempotency_key,
         audit_context=build_audit_context(http_request),
     )
 

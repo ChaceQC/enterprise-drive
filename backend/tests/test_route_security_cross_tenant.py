@@ -320,6 +320,10 @@ async def test_internal_routes_hide_foreign_tenant_resources(
             "/api/v1/files",
             None,
         ),
+        ("GET", "/api/v1/files/trash"): (
+            "/api/v1/files/trash",
+            None,
+        ),
         ("PATCH", "/api/v1/files/{node_id}"): (
             f"/api/v1/files/{fixture.folder_id}",
             {"name": "renamed-foreign"},
@@ -331,6 +335,28 @@ async def test_internal_routes_hide_foreign_tenant_resources(
         ("POST", "/api/v1/files/{node_id}/move"): (
             f"/api/v1/files/{fixture.folder_id}/move",
             {"target_parent_id": str(fixture.root_node_id)},
+        ),
+        ("POST", "/api/v1/files/batch-delete"): (
+            "/api/v1/files/batch-delete",
+            {"node_ids": [str(fixture.file_node_id)], "mode": "trash"},
+        ),
+        ("POST", "/api/v1/files/batch-move"): (
+            "/api/v1/files/batch-move",
+            {
+                "node_ids": [str(fixture.file_node_id)],
+                "target_parent_id": str(fixture.root_node_id),
+            },
+        ),
+        ("POST", "/api/v1/files/batch-restore"): (
+            "/api/v1/files/batch-restore",
+            {
+                "node_ids": [str(fixture.deleted_folder_id)],
+                "target_parent_id": str(fixture.root_node_id),
+            },
+        ),
+        ("POST", "/api/v1/files/batch-purge"): (
+            "/api/v1/files/batch-purge",
+            {"node_ids": [str(fixture.deleted_folder_id)]},
         ),
         ("DELETE", "/api/v1/files/{node_id}/purge"): (
             f"/api/v1/files/{fixture.deleted_folder_id}/purge",
@@ -412,8 +438,14 @@ async def test_internal_routes_hide_foreign_tenant_resources(
     for method, template_path in cases:
         case = _matrix_case(method, template_path)
         request_path, body = cases[(method, template_path)]
-        query = {"space_id": str(fixture.space_id)} if template_path == "/api/v1/files" else None
-        headers = {"X-CSRF-Token": default_csrf} if case.csrf_mode == "required" else {}
+        query = (
+            {"space_id": str(fixture.space_id)}
+            if template_path in {"/api/v1/files", "/api/v1/files/trash"}
+            else None
+        )
+        headers = dict(case.headers)
+        if case.csrf_mode == "required":
+            headers["X-CSRF-Token"] = default_csrf
         response = await client.request(
             method,
             request_path,
@@ -421,8 +453,13 @@ async def test_internal_routes_hide_foreign_tenant_resources(
             headers=headers,
             json=body,
         )
-        assert response.status_code == 404, case.id
-        assert response.json()["code"] != "INTERNAL_ERROR", case.id
+        if template_path.startswith("/api/v1/files/batch-"):
+            assert response.status_code == 200, case.id
+            assert response.json()["results"][0]["status"] == "failed", case.id
+            assert response.json()["results"][0]["code"] == "NODE_NOT_FOUND", case.id
+        else:
+            assert response.status_code == 404, case.id
+            assert response.json()["code"] != "INTERNAL_ERROR", case.id
 
     spaces_response = await client.get("/api/v1/spaces")
     audit_response = await client.get("/api/v1/admin/audit-logs")

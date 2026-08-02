@@ -4,13 +4,13 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import and_, delete, func, or_, select, update
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, AsyncSessionTransaction
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.pagination import PageCursor
 from app.core.security import utc_now
-from app.modules.file.models import FileBlob, FileVersion, Node
+from app.modules.file.models import FileBatchOperation, FileBlob, FileVersion, Node
 
 
 class FileRepository:
@@ -212,6 +212,38 @@ class FileRepository:
             select(Node)
             .where(*conditions)
             .order_by(Node.created_at.desc(), Node.id.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def list_trash_roots(
+        self,
+        *,
+        tenant_id: UUID,
+        space_id: UUID,
+        limit: int,
+        cursor: PageCursor | None,
+    ) -> list[Node]:
+        conditions = [
+            Node.tenant_id == tenant_id,
+            Node.space_id == space_id,
+            Node.is_deleted.is_(True),
+            Node.deleted_at.is_not(None),
+            Node.parent_id.is_not(None),
+            _node_is_trash_batch_root(),
+        ]
+        if cursor is not None:
+            conditions.append(
+                or_(
+                    Node.deleted_at < cursor.created_at,
+                    and_(Node.deleted_at == cursor.created_at, Node.id < cursor.item_id),
+                )
+            )
+
+        result = await self.session.execute(
+            select(Node)
+            .where(*conditions)
+            .order_by(Node.deleted_at.desc(), Node.id.desc())
             .limit(limit)
         )
         return list(result.scalars().all())
@@ -570,6 +602,49 @@ class FileRepository:
 
     async def flush(self) -> None:
         await self.session.flush()
+
+    def begin_nested(self) -> AsyncSessionTransaction:
+        return self.session.begin_nested()
+
+    async def get_batch_operation(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        operation: str,
+        idempotency_key_hash: str,
+    ) -> FileBatchOperation | None:
+        result = await self.session.execute(
+            select(FileBatchOperation).where(
+                FileBatchOperation.tenant_id == tenant_id,
+                FileBatchOperation.user_id == user_id,
+                FileBatchOperation.operation == operation,
+                FileBatchOperation.idempotency_key_hash == idempotency_key_hash,
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def create_batch_operation(
+        self,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        operation: str,
+        idempotency_key_hash: str,
+        request_hash: str,
+        response_json: dict[str, object],
+    ) -> FileBatchOperation:
+        record = FileBatchOperation(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            operation=operation,
+            idempotency_key_hash=idempotency_key_hash,
+            request_hash=request_hash,
+            response_json=response_json,
+        )
+        self.session.add(record)
+        await self.session.flush()
+        return record
 
     async def commit(self) -> None:
         await self.session.commit()

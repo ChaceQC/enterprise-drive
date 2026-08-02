@@ -139,7 +139,7 @@ uv run pytest tests/test_route_security_matrix.py `
   tests/test_security_adversarial.py -q
 ```
 
-矩阵与运行时 OpenAPI 的 40 个 `/api/v1` route 完全对账，覆盖匿名、CSRF、管理员、真实跨租户资源和活跃会话撤权；对抗输入覆盖损坏/超大图片、文档路径与扩展名注入、Range 权限、预签名 URL、不同 token 外链穷举、Trusted Host 和 CORS。
+矩阵与运行时 OpenAPI 的 45 个 `/api/v1` route 完全对账，覆盖匿名、CSRF、管理员、真实跨租户资源和活跃会话撤权；对抗输入覆盖损坏/超大图片、文档路径与扩展名注入、Range 权限、预签名 URL、不同 token 外链穷举、Trusted Host 和 CORS。
 
 真实 Nginx 原始 HTTP 安全 smoke：
 
@@ -224,6 +224,7 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - `acl_entries` 基础表和迁移，支持 `user`、`department`、`group` 三类节点 ACL 主体、allow/deny、继承开关和 deny 优先。
 - 文件夹创建、目录子节点列表和签名 cursor pagination。
 - 文件树节点重命名、移动、删除到回收站、恢复和彻底删除。
+- 回收站删除批次根节点签名 cursor 分页，以及批量删除、移动、恢复、彻底删除；批量请求最多 100 项，逐项返回结果并使用数据库持久化 `Idempotency-Key` 重放。
 - 文件版本签名 cursor 列表、指定历史版本 DTP/1 预签名下载，以及把历史内容回滚为递增新版本；回滚支持可选当前版本前置条件，复用 blob 并同步容量、审计、搜索和预览事件。
 - 空间创建、文件夹创建、重命名、移动、删除、恢复和彻底删除审计事件。
 - `upload_sessions`、`upload_parts` 基础表和迁移。
@@ -287,6 +288,11 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - `DELETE /api/v1/files/{node_id}/acl/{entry_id}`
 - `POST /api/v1/files/folders`
 - `GET /api/v1/files?space_id=...&parent_id=...`
+- `GET /api/v1/files/trash?space_id=...&cursor=...`
+- `POST /api/v1/files/batch-delete`
+- `POST /api/v1/files/batch-move`
+- `POST /api/v1/files/batch-restore`
+- `POST /api/v1/files/batch-purge`
 - `PATCH /api/v1/files/{node_id}`
 - `POST /api/v1/files/{node_id}/move`
 - `DELETE /api/v1/files/{node_id}`
@@ -302,7 +308,7 @@ uv run pytest tests/test_storage_minio_integration.py -q
 
 文件夹名称会进行 Unicode NFC 归一化并去除首尾空白，禁止 `/`、`\`、NUL、控制字符和路径穿越片段。同一目录下未删除节点的名称由数据库唯一索引兜底，根目录由 `tenant_id + space_id` 唯一索引兜底。
 
-根目录不允许重命名、移动、删除或彻底删除。删除到回收站会同步标记当前活跃子树，不释放容量；恢复只恢复同一批删除的子树，避免误恢复更早单独删除的节点。彻底删除只允许作用于已在回收站的节点，会删除该节点下全部已删除后代的节点元数据和文件版本，扣减相关 blob 引用计数，按版本大小合计释放空间容量并写入 `file.purged` 审计。当前目录删除、恢复和彻底删除仍是同步遍历，适合 Sprint 2/3 骨架和普通目录验证；大目录后续需要改为后台任务或引入 `deleted_root_id` 等冗余状态来避免长事务。
+根目录不允许重命名、移动、删除或彻底删除。删除到回收站会同步标记当前活跃子树，不释放容量；恢复只恢复同一批删除的子树，避免误恢复更早单独删除的节点。彻底删除只允许作用于已在回收站的节点，会删除该节点下全部已删除后代的节点元数据和文件版本，扣减相关 blob 引用计数，按版本大小合计释放空间容量并写入 `file.purged` 审计。回收站列表只显示删除批次根节点；四个批量入口在外层事务内为每项建立 savepoint，复用单项权限、审计、搜索、容量和引用语义。`file_batch_operations` 按 `tenant_id + user_id + operation + idempotency_key_hash` 唯一保存请求 hash 和最终响应，同 key 同请求直接重放，同 key 不同请求返回 `IDEMPOTENCY_KEY_REUSED`。当前目录删除、恢复和彻底删除仍是同步遍历，适合普通目录验证；大目录后台分片继续归 `BE-046`。
 
 ## 分享接口
 
