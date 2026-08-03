@@ -432,33 +432,16 @@ jobs:
             $pfxPath,
             [Convert]::FromBase64String($env:DRIVE_WINDOWS_SIGNING_PFX_BASE64)
           )
-          $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
-            $pfxPath,
-            $env:DRIVE_WINDOWS_SIGNING_PFX_PASSWORD,
-            [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
-          )
-          if (-not $certificate.HasPrivateKey) {
-            throw "Desktop signing PFX does not contain a private key."
-          }
+          $pem = Get-Content `
+            -Raw `
+            -LiteralPath desktop/signing/desktop-code-signing.pem
+          $certificateBase64 = $pem `
+            -replace "-----BEGIN CERTIFICATE-----", "" `
+            -replace "-----END CERTIFICATE-----", "" `
+            -replace "\s", ""
           $publicCertificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
-            $certificate.Export(
-              [Security.Cryptography.X509Certificates.X509ContentType]::Cert
-            )
+            [Convert]::FromBase64String($certificateBase64)
           )
-          foreach ($storeName in @("Root", "TrustedPublisher")) {
-            $store = [Security.Cryptography.X509Certificates.X509Store]::new(
-              $storeName,
-              [Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-            )
-            try {
-              $store.Open(
-                [Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite
-              )
-              $store.Add($publicCertificate)
-            } finally {
-              $store.Close()
-            }
-          }
           $certificateSha256 = [Convert]::ToHexString(
             [Security.Cryptography.SHA256]::HashData(
               $publicCertificate.Export(
@@ -546,8 +529,28 @@ jobs:
             throw "Authenticode signing failed."
           }
           $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
+          if (
+            $signature.SignatureType -ne "Authenticode" -or
+            $null -eq $signature.SignerCertificate
+          ) {
+            throw "Authenticode signature or signer certificate is missing."
+          }
           if ($signature.Status -ne "Valid") {
-            throw "Authenticode verification failed: $($signature.Status)"
+            $expectedUntrustedStatus = (
+              $signature.Status -eq "NotTrusted" -or
+              (
+                $signature.Status -eq "UnknownError" -and
+                $signature.StatusMessage -match (
+                  "0x800B0109|root certificate|not trusted"
+                )
+              )
+            )
+            if (-not $expectedUntrustedStatus) {
+              throw (
+                "Authenticode integrity verification failed: " +
+                "$($signature.Status) $($signature.StatusMessage)"
+              )
+            }
           }
           $signerSha256 = [Convert]::ToHexString(
             [Security.Cryptography.SHA256]::HashData(
@@ -559,6 +562,10 @@ jobs:
           if ($signerSha256 -ne $env:DRIVE_SIGNING_CERT_SHA256) {
             throw "Signed installer certificate fingerprint mismatch."
           }
+          Write-Host (
+            "Authenticode integrity and pinned signer fingerprint verified " +
+            "(system trust is intentionally not required for the self-signed CI certificate)."
+          )
 
           $artifactDir = Join-Path $PWD "desktop/dist/windows"
           New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
