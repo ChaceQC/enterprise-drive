@@ -410,6 +410,7 @@ jobs:
       - name: Prepare desktop signing material
         if: github.event_name == 'push'
         shell: pwsh
+        timeout-minutes: 5
         env:
           DRIVE_WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.DRIVE_WINDOWS_SIGNING_PFX_BASE64 }}
           DRIVE_WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.DRIVE_WINDOWS_SIGNING_PFX_PASSWORD }}
@@ -431,29 +432,36 @@ jobs:
             $pfxPath,
             [Convert]::FromBase64String($env:DRIVE_WINDOWS_SIGNING_PFX_BASE64)
           )
-          $password = ConvertTo-SecureString `
-            $env:DRIVE_WINDOWS_SIGNING_PFX_PASSWORD `
-            -AsPlainText `
-            -Force
-          $certificate = Import-PfxCertificate `
-            -FilePath $pfxPath `
-            -CertStoreLocation Cert:\CurrentUser\My `
-            -Password $password `
-            -Exportable
-          if ($null -eq $certificate) {
-            throw "Desktop signing certificate import failed."
+          $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+            $pfxPath,
+            $env:DRIVE_WINDOWS_SIGNING_PFX_PASSWORD,
+            [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+          )
+          if (-not $certificate.HasPrivateKey) {
+            throw "Desktop signing PFX does not contain a private key."
           }
-          $cerPath = Join-Path $env:RUNNER_TEMP "enterprise-drive-signing.cer"
-          Export-Certificate -Cert $certificate -FilePath $cerPath -Force | Out-Null
-          Import-Certificate `
-            -FilePath $cerPath `
-            -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
-          Import-Certificate `
-            -FilePath $cerPath `
-            -CertStoreLocation Cert:\CurrentUser\TrustedPublisher | Out-Null
+          $publicCertificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new(
+            $certificate.Export(
+              [Security.Cryptography.X509Certificates.X509ContentType]::Cert
+            )
+          )
+          foreach ($storeName in @("Root", "TrustedPublisher")) {
+            $store = [Security.Cryptography.X509Certificates.X509Store]::new(
+              $storeName,
+              [Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
+            )
+            try {
+              $store.Open(
+                [Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite
+              )
+              $store.Add($publicCertificate)
+            } finally {
+              $store.Close()
+            }
+          }
           $certificateSha256 = [Convert]::ToHexString(
             [Security.Cryptography.SHA256]::HashData(
-              $certificate.Export(
+              $publicCertificate.Export(
                 [Security.Cryptography.X509Certificates.X509ContentType]::Cert
               )
             )
