@@ -1,5 +1,60 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-03 Sprint 4 用户、部门与用户组管理闭环
+
+### 当前状态
+
+- `PROJECT_STAGE_STATUS.md` 中 Sprint 4 原剩余的完整用户、部门和用户组管理 API 已完成，Sprint 4 尚未完成项现为空。
+- 运行时 OpenAPI 为 58 个路径、79 个操作；安全矩阵同步为 79 项，数据库 migration head 为 `20260803_0019`。
+- `BE-044` 当前为部分完成：用户、部门、用户组和配额管理子集已落地，空间管理继续后续交付；统计、维护和导出仍属于 `BE-045`。
+
+### 已完成
+
+- 新增 `/api/v1/admin/users` 管理接口：支持筛选与签名 cursor 分页、详情、创建、更新和停用；临时密码使用 Argon2id 哈希，停用用户会吊销其有效会话，并保护最后一个有效系统管理员。
+- 新增 `/api/v1/admin/departments` 管理接口：支持筛选与签名 cursor 分页、详情、创建、重命名、移动、停用和成员增删；重命名或移动会在同一事务中更新完整子树路径，并拒绝环路、停用父部门和仍有有效子部门时的停用操作。
+- 新增 `/api/v1/admin/groups` 管理接口：支持筛选与签名 cursor 分页、详情、创建、更新、停用和成员增删。
+- 三类管理入口均仅允许系统管理员访问并按当前租户隔离；所有读取、写入和拒绝路径均写入管理审计。
+- 用户、部门和用户组写操作使用实体 `version` 乐观前置条件；部门/用户组成员或状态变化递增 `tenants.permission_version`，写入 `scope=tenant` 的 `permission.changed`，并按受影响用户或整个租户失效权限缓存。
+- 搜索索引继续保存部门/用户组 ACL token，查询时从 PostgreSQL 获取当前成员关系，因此组织成员变化不触发无必要的全租户搜索重建。
+- 新增 `20260803_0019_org_admin_versions.py`，以 nullable、回填、not null 三步为 `users`、`departments`、`user_groups` 增加 `version`，并增加三类管理列表索引。
+
+### 验证
+
+- 集中定向测试首轮结果为 `92 passed, 1 skipped, 1 failed`；唯一失败是唯一约束回滚后 actor ORM 实例过期，修复后只重跑该失败用例，结果 `1 passed`。
+- 临时真实 PostgreSQL 从空库完整升级到 `20260803_0019` 通过；双会话用户组版本竞争和双管理员并发停用保护定向用例分别 `1 passed`，临时容器均已删除。
+- `uv run mypy app`：171 个源码文件通过；`uv run ruff check .` 通过；本轮新增和修改的 Python 文件格式检查通过。
+- OpenAPI 对账为 58 个路径、79 个操作；排除 ping/login 后 77 个业务操作全部进入安全矩阵，其中 46 个写操作要求 CSRF，28 个登录态或管理员读取入口通过身份门禁。
+- 未重复运行全量 pytest、旧 Sprint 测试、真实 MinIO、备份恢复或性能压测；Windows 全目录格式检查仍只命中两个未修改历史文件的混合换行，本轮未扩大范围修改。
+
+### 后续边界
+
+- 本轮完成 Sprint 4 所列用户、部门和用户组管理，不包含 `BE-038` 内部分享接收端。
+- `BE-044` 仍需空间管理接口；`BE-045` 仍需统计、维护和导出管理接口。
+- 部门/用户组成员关系在查询权限时以 PostgreSQL 为事实来源；后续若改变搜索 ACL token 模型，再单独设计有界重建策略。
+
+### 涉及文件
+
+- `backend/app/api/v1/router.py`
+- `backend/app/modules/admin/organization.py`
+- `backend/app/modules/admin/organization_repository.py`
+- `backend/app/modules/admin/organization_router.py`
+- `backend/app/modules/admin/organization_schemas.py`
+- `backend/app/modules/auth/models.py`
+- `backend/app/modules/org/models.py`
+- `backend/app/modules/permission/cache.py`
+- `backend/migrations/versions/20260803_0019_org_admin_versions.py`
+- `backend/tests/security_route_matrix.py`
+- `backend/tests/test_admin_organization.py`
+- `backend/tests/test_admin_organization_postgres.py`
+- `backend/tests/test_permission_cache.py`
+- `backend/tests/test_route_security_matrix.py`
+- `README.md`
+- `backend/README.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `PROJECT_STAGE_STATUS.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-08-03 Sprint 3 配额、安全与目标性能收尾
 
 ### 当前状态

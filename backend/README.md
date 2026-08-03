@@ -139,7 +139,7 @@ uv run pytest tests/test_route_security_matrix.py `
   tests/test_security_adversarial.py -q
 ```
 
-矩阵与运行时 OpenAPI 的 48 个路径、58 个操作完全对账，覆盖匿名、CSRF、管理员、真实跨租户资源和活跃会话撤权；排除 ping/login 后的 56 个受保护或业务操作均在矩阵内。对抗输入覆盖损坏/超大图片、文档路径与扩展名注入、Range 权限、预签名 URL、配额/安全策略管理、不同 token 外链穷举、Trusted Host 和 CORS。
+矩阵与运行时 OpenAPI 的 58 个路径、79 个操作完全对账，覆盖匿名、CSRF、管理员、真实跨租户资源和活跃会话撤权；排除 ping/login 后的 77 个受保护或业务操作均在矩阵内。对抗输入覆盖损坏/超大图片、文档路径与扩展名注入、Range 权限、预签名 URL、用户/组织/配额/安全策略管理、不同 token 外链穷举、Trusted Host 和 CORS。
 
 真实 Nginx 原始 HTTP 安全 smoke：
 
@@ -212,6 +212,10 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - `/api/v1/ping` 基础 API 连通性检查。
 - `tenants`、`users`、`auth_sessions` 基础表和 Alembic 初始迁移。
 - `departments`、`department_members`、`user_groups`、`user_group_members` 组织基础表和迁移。
+- `/api/v1/admin/users` 用户管理：cursor 分页、筛选、详情、创建、更新和停用；临时密码使用 Argon2id 哈希，停用会吊销有效会话，并保护最后一个有效系统管理员。
+- `/api/v1/admin/departments` 部门管理：cursor 分页、筛选、详情、创建、重命名、移动、停用和成员增删；路径变更原子更新完整子树并拒绝环路或停用父部门。
+- `/api/v1/admin/groups` 用户组管理：cursor 分页、筛选、详情、创建、更新、停用和成员增删。
+- 用户、部门和用户组写操作使用实体 `version` 前置条件，全部按租户隔离并写入管理审计；成员或组织状态变化递增租户权限版本并触发租户级权限缓存失效。
 - 本地账号登录、BFF + HttpOnly Cookie Session、CSRF 校验和会话轮换。
 - 旧 session 复用检测与 session family 吊销。
 - `audit_logs`、`outbox_events` 基础表和迁移。

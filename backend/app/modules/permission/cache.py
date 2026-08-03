@@ -99,6 +99,8 @@ def build_permission_cache_invalidation_patterns(*, event: OutboxEvent) -> list[
         affected_user_id = "*"
 
     user_part = f"user:{affected_user_id}"
+    if scope == "tenant":
+        return [f"{PERMISSION_CACHE_KEY_PREFIX}:{event.tenant_id}:{user_part}:*"]
     if scope == "space":
         return [
             f"{PERMISSION_CACHE_KEY_PREFIX}:{event.tenant_id}:{user_part}:space:{resource_id}:*"

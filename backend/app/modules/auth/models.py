@@ -47,6 +47,7 @@ class User(Base):
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_super_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -69,6 +70,7 @@ class User(Base):
             postgresql_where=email.is_not(None),
             sqlite_where=email.is_not(None),
         ),
+        Index("idx_users_admin_list", "tenant_id", "created_at", "id"),
     )
 
 

@@ -16,6 +16,7 @@ class Department(Base):
         CheckConstraint("status in ('active', 'disabled')", name="ck_departments_status"),
         Index("idx_departments_parent", "tenant_id", "parent_id", "sort_order", "id"),
         Index("idx_departments_path", "tenant_id", "path", unique=True),
+        Index("idx_departments_admin_list", "tenant_id", "created_at", "id"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
@@ -35,6 +36,7 @@ class Department(Base):
     path: Mapped[str] = mapped_column(String(2048), nullable=False)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -54,6 +56,7 @@ class UserGroup(Base):
         CheckConstraint("status in ('active', 'disabled')", name="ck_user_groups_status"),
         Index("uq_user_groups_slug", "tenant_id", "slug", unique=True),
         Index("idx_user_groups_status", "tenant_id", "status"),
+        Index("idx_user_groups_admin_list", "tenant_id", "created_at", "id"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
@@ -66,6 +69,7 @@ class UserGroup(Base):
     slug: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 
 from app.modules.admin.file_security_router import router as admin_file_security_router
+from app.modules.admin.organization_router import router as admin_organization_router
 from app.modules.admin.quota_router import router as admin_quota_router
 from app.modules.admin.router import router as admin_router
 from app.modules.auth.router import router as auth_router
@@ -16,6 +17,11 @@ from app.modules.upload.router import router as upload_router
 
 router = APIRouter()
 router.include_router(admin_router, prefix="/admin", tags=["admin"])
+router.include_router(
+    admin_organization_router,
+    prefix="/admin",
+    tags=["admin-organization"],
+)
 router.include_router(admin_quota_router, prefix="/admin/quotas", tags=["admin-quotas"])
 router.include_router(
     admin_file_security_router,

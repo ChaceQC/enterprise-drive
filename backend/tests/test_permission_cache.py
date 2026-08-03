@@ -120,6 +120,63 @@ async def test_permission_cache_invalidator_removes_space_and_node_patterns() ->
 
 
 @pytest.mark.asyncio
+async def test_permission_cache_invalidator_supports_tenant_wide_and_user_scopes() -> None:
+    tenant_id = uuid4()
+    user_id = uuid4()
+    other_user_id = uuid4()
+    first_user_key = permission_cache_key(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        space_id=uuid4(),
+        node_id=uuid4(),
+        action="download",
+        permission_version=1,
+    )
+    second_user_key = permission_cache_key(
+        tenant_id=tenant_id,
+        user_id=other_user_id,
+        space_id=uuid4(),
+        node_id=uuid4(),
+        action="download",
+        permission_version=1,
+    )
+    invalidator = InMemoryPermissionCacheInvalidator(keys={first_user_key, second_user_key})
+
+    user_event = OutboxEvent(
+        tenant_id=tenant_id,
+        event_type=PERMISSION_CHANGED_EVENT,
+        aggregate_type="tenant",
+        aggregate_id=tenant_id,
+        payload={
+            "scope": "tenant",
+            "resource_id": str(tenant_id),
+            "permission_version": 2,
+            "affected_user_id": str(user_id),
+        },
+    )
+    user_result = await invalidator.invalidate_permission_changed(event=user_event)
+
+    assert user_result.deleted == 1
+    assert invalidator.keys == {second_user_key}
+
+    tenant_event = OutboxEvent(
+        tenant_id=tenant_id,
+        event_type=PERMISSION_CHANGED_EVENT,
+        aggregate_type="tenant",
+        aggregate_id=tenant_id,
+        payload={
+            "scope": "tenant",
+            "resource_id": str(tenant_id),
+            "permission_version": 3,
+        },
+    )
+    tenant_result = await invalidator.invalidate_permission_changed(event=tenant_event)
+
+    assert tenant_result.deleted == 1
+    assert invalidator.keys == set()
+
+
+@pytest.mark.asyncio
 async def test_permission_cache_worker_consumes_only_permission_changed_events(
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
