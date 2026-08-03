@@ -378,6 +378,12 @@ jobs:
       - name: Rust release build
         run: cargo build --workspace --release
 
+  rust-dependency-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
       - name: Cargo dependency policy
         uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25
         with:
@@ -386,7 +392,9 @@ jobs:
           arguments: --all-features --target x86_64-pc-windows-msvc
 
   windows-desktop-installer:
-    needs: rust-desktop
+    needs:
+      - rust-desktop
+      - rust-dependency-policy
     runs-on: windows-latest
     permissions:
       contents: read
