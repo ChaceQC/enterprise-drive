@@ -154,8 +154,8 @@ router -> service -> domain/policy -> repository -> db/infrastructure
 - `upload`：upload_session、upload_part、秒传、分片上传、断点续传、幂等 complete、abort。
 - `permission`：ACL、空间角色、继承、拒绝优先、权限缓存、批量权限评估。
 - `share`：内部分享、外链分享、分享给我的、接收人访问、通知、提取码、过期、次数限制、撤销。
-- `preview`：预览任务、转码适配、派生物写入。
-- `search`：索引构建、权限过滤、索引重建、删除同步。
+- `preview`：预览任务、转码适配、派生物写入、最后访问时间和产物生命周期。
+- `search`：索引构建、权限过滤、索引重建、删除同步、OCR 和复杂格式抽取。
 - `audit`：audit_log、outbox、dispatcher、失败重试。
 - `quota`：quota_account、quota_ledger、并发扣减、回滚、校准任务。
 - `admin`：用户、组织、空间、配额、身份源、审计、统计、维护、分页、筛选、导出。
@@ -284,8 +284,10 @@ uv run mypy app
 - 应用层仍需对搜索结果做二次权限校验。
 - 文件上传完成、删除、恢复、权限变更后必须通过 outbox 触发索引同步。
 - 预览和转码必须放在 Worker 中执行，不能阻塞 API 请求。
+- OCR、PDF 渲染和 Office 转换必须使用隔离队列、外部命令超时、源文件/页数/像素/输出体量边界和独立临时目录；内容处理 Worker 应定期回收子进程，不能与 API、审计或权限队列混跑。
 - 压缩包预览必须限制展开数量、总大小、递归深度和路径，避免资源耗尽和路径穿越。
 - Office、图片、音视频等预览产物必须写入私有对象存储，并经过权限控制访问。
+- 预览产物必须记录最后访问时间；旧版本和孤儿产物清理必须经过保留期、受控 key 前缀、审计、指标和可重入维护任务保护。
 
 ## 15. API 契约
 

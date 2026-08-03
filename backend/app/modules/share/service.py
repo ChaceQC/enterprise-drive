@@ -11,8 +11,11 @@ from app.core.security import ensure_utc, hash_password, hash_token
 from app.modules.audit.schemas import AuditContext, AuditEvent
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
+from app.modules.auth.repository import AuthRepository
 from app.modules.file.models import Node
 from app.modules.file.repository import FileRepository
+from app.modules.org.repository import OrgRepository
+from app.modules.org.service import OrgService
 from app.modules.permission.actions import ACTION_SHARE
 from app.modules.permission.service import PermissionService
 from app.modules.share.constants import (
@@ -24,6 +27,7 @@ from app.modules.share.constants import (
     SHARE_TYPES,
 )
 from app.modules.share.models import Share
+from app.modules.share.recipient_grants import ShareRecipientGrantService
 from app.modules.share.repository import ShareRepository
 from app.modules.share.schemas import (
     CreateShareResult,
@@ -40,11 +44,17 @@ class ShareService:
         file_repository: FileRepository,
         permission_service: PermissionService,
         audit_service: AuditService | None = None,
+        recipient_grant_service: ShareRecipientGrantService | None = None,
     ) -> None:
         self.repository = repository
         self.file_repository = file_repository
         self.permission_service = permission_service
         self.audit_service = audit_service
+        self.recipient_grant_service = recipient_grant_service or ShareRecipientGrantService(
+            repository=repository,
+            auth_repository=AuthRepository(repository.session),
+            org_service=OrgService(repository=OrgRepository(repository.session)),
+        )
 
     async def create_share(
         self,
@@ -68,6 +78,19 @@ class ShareService:
             max_views=max_views,
             max_downloads=max_downloads,
         )
+        for recipient in recipients or []:
+            try:
+                await self.recipient_grant_service.validate_recipient(
+                    tenant_id=current_user.tenant_id,
+                    subject_type=recipient.subject_type,
+                    subject_id=recipient.subject_id,
+                )
+            except ValueError as exc:
+                raise ApiError(
+                    "SHARE_RECIPIENT_NOT_FOUND",
+                    "分享接收人不存在或不可用",
+                    status_code=404,
+                ) from exc
         root_node = await self.file_repository.get_node_by_id(
             tenant_id=current_user.tenant_id,
             node_id=root_node_id,
@@ -125,6 +148,11 @@ class ShareService:
                     share_id=share.id,
                     subject_type=recipient.subject_type,
                     subject_id=recipient.subject_id,
+                )
+            if share_type == SHARE_TYPE_INTERNAL:
+                await self.recipient_grant_service.reconcile_share(
+                    tenant_id=current_user.tenant_id,
+                    share_id=share.id,
                 )
             await self._record_share_created(
                 current_user=current_user,
@@ -199,6 +227,10 @@ class ShareService:
             )
             if not revoked:
                 raise ApiError("SHARE_NOT_ACTIVE", "分享不是可撤销状态", status_code=409)
+            await self.recipient_grant_service.reconcile_share(
+                tenant_id=current_user.tenant_id,
+                share_id=share_id,
+            )
             await self._record_share_revoked(
                 current_user=current_user,
                 share_id=share_id,

@@ -43,3 +43,25 @@ class OrgService:
             tenant_id=tenant_id,
             group_id=group_id,
         )
+
+    async def list_active_department_member_user_ids(
+        self,
+        *,
+        tenant_id: UUID,
+        department_id: UUID,
+    ) -> list[UUID]:
+        return await self.repository.list_active_department_member_user_ids(
+            tenant_id=tenant_id,
+            department_id=department_id,
+        )
+
+    async def list_active_group_member_user_ids(
+        self,
+        *,
+        tenant_id: UUID,
+        group_id: UUID,
+    ) -> list[UUID]:
+        return await self.repository.list_active_group_member_user_ids(
+            tenant_id=tenant_id,
+            group_id=group_id,
+        )

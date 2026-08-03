@@ -27,8 +27,8 @@
 - 空间、文件树、文件版本、回收站、基础容量账本。
 - S3 兼容对象存储上传下载，支持 multipart upload。
 - 目录权限、空间角色、拒绝优先、权限缓存和高危动作二次校验。
-- 内部分享、外链分享、提取码、过期、次数限制、撤销。
-- 预览 Worker、搜索索引 Worker、审计 outbox dispatcher。
+- 内部分享、外链分享、创建者/接收人列表、站内通知、提取码、过期、次数限制、撤销和授权重算。
+- 预览 Worker、预览产物生命周期、搜索索引/OCR Worker、审计 outbox dispatcher。
 - API/Worker 结构化日志、Prometheus 指标和 OpenTelemetry tracing。
 - Docker Compose 本地开发环境、Windows 11 Docker 正式部署、自动化备份/校验/隔离恢复、Alembic migration、CI 质量门禁。
 
@@ -46,17 +46,17 @@
 
 当前仓库尚无 `frontend/` Web 工程，以下能力已从概念升级为正式 Sprint 和工程任务：
 
-- Sprint 9 / `0.6.0`：文件版本、回收站/批量文件操作以及用户/部门/用户组管理 API 已完成，继续交付内部分享接收端、空间管理和统计/维护/导出 API。
+- Sprint 9 / `0.6.0`：文件版本、回收站/批量文件操作、内部分享接收端与通知、用户/部门/用户组管理 API 已完成，继续交付空间管理和统计/维护/导出 API。
 - Sprint 10 / `0.7.0`：TypeScript + React + Vite Web 用户端与管理后台，覆盖批量操作、分享通知，使用生成的 OpenAPI client 和 Playwright E2E。
 - Sprint 11 / `0.8.0`：登录失败防护、账号锁定、密码与会话管理、OIDC/OAuth 2.1 + PKCE、LDAP 同步及对应用户端/管理端身份页面。
-- Sprint 12 / `0.9.0`：继续完成大目录权限重算和治理页面、完整生命周期、OCR、审计分区、Outbox dead-letter、备份签名与离线恢复治理。
+- Sprint 12 / `0.9.0`：继续完成大目录权限重算和治理页面、生命周期策略扩展、审计分区、Outbox dead-letter、备份签名与离线恢复治理；图片/扫描 PDF OCR、旧 Office/ODF 抽取和基础分享/预览生命周期已提前完成。
 - Sprint 13 / `1.0.0`：后端、Web、桌面端统一 UAT、性能、安全、升级回滚和正式发布。
 
 虚拟盘、macOS/Linux 文件提供器、WebDAV、SMB、移动端、在线协同、复杂 DLP、跨地域双活和计费已进入带编号与入口条件的远期 Backlog。
 
 ## 当前状态
 
-当前仓库已完成 Sprint 1 工程底座、Sprint 2 空间和文件树以及 Sprint 3 上传下载完整闭环，并已落地 Sprint 4 权限系统与 Sprint 5 分享、预览、搜索的基础能力。当前运行时 OpenAPI 为 58 个路径、79 个操作，数据库 migration head 为 `20260803_0019`。已建立 `backend` 后端工程、uv 依赖锁定、FastAPI 应用入口、配置加载、带 request/task/trace 关联的 JSON 结构化日志、`X-Request-ID` 中间件、统一错误响应、健康检查、Prometheus 指标、OpenTelemetry FastAPI/Celery tracing、本地依赖 Compose 和后端 CI。认证基础能力已落地：租户、用户、`auth_sessions` 表，管理员 seed，本地账号登录、服务端 opaque session、HttpOnly Cookie、CSRF 校验、会话轮换和登出。基础审计、outbox 和 Celery audit 队列 dispatcher 已接入；`GET /api/v1/admin/audit-logs` 已提供系统管理员专用的租户隔离审计查询。用户、部门和用户组管理已提供 `/api/v1/admin/users`、`/api/v1/admin/departments`、`/api/v1/admin/groups` 的 cursor 列表、详情、创建、更新、停用及部门/用户组成员管理，所有入口按当前租户隔离并要求系统管理员权限，写操作使用实体 `version` 前置条件、写入审计，用户停用会吊销有效会话，组织成员或状态变化会递增租户权限版本并写入租户级 `permission.changed`。空间和文件树已具备 `spaces`、`nodes`、`file_blobs`、`file_versions` 元数据表，支持创建空间、创建文件夹、按游标列出目录节点、重命名、移动、删除到回收站、恢复、回收站根节点分页和四类批量文件操作。
+当前仓库已完成 Sprint 1 工程底座、Sprint 2 空间和文件树、Sprint 3 上传下载、Sprint 4 权限系统以及 Sprint 5 分享、预览、搜索闭环。当前运行时 OpenAPI 为 64 个路径、85 个操作，数据库 migration head 为 `20260803_0020`。已建立 `backend` 后端工程、uv 依赖锁定、FastAPI 应用入口、配置加载、带 request/task/trace 关联的 JSON 结构化日志、`X-Request-ID` 中间件、统一错误响应、健康检查、Prometheus 指标、OpenTelemetry FastAPI/Celery tracing、本地依赖 Compose 和后端 CI。认证基础能力已落地：租户、用户、`auth_sessions` 表，管理员 seed，本地账号登录、服务端 opaque session、HttpOnly Cookie、CSRF 校验、会话轮换和登出。基础审计、outbox 和 Celery audit 队列 dispatcher 已接入；`GET /api/v1/admin/audit-logs` 已提供系统管理员专用的租户隔离审计查询。用户、部门和用户组管理已提供 `/api/v1/admin/users`、`/api/v1/admin/departments`、`/api/v1/admin/groups` 的 cursor 列表、详情、创建、更新、停用及部门/用户组成员管理，所有入口按当前租户隔离并要求系统管理员权限，写操作使用实体 `version` 前置条件、写入审计，用户停用会吊销有效会话，组织成员或状态变化会递增租户权限版本并写入租户级 `permission.changed`。空间和文件树已具备 `spaces`、`nodes`、`file_blobs`、`file_versions` 元数据表，支持创建空间、创建文件夹、按游标列出目录节点、重命名、移动、删除到回收站、恢复、回收站根节点分页和四类批量文件操作。
 
 Sprint 3 上传主链路已包含 `upload_sessions`、multipart init/presign/complete/abort、秒传、服务端 SHA-256、最终对象归档、失败清理、过期会话回收、限流、下载、容量流水以及对象/回收站治理。multipart complete 使用标准 S3 HTTP 控制面；同 hash 首次上传在 PostgreSQL 中通过原子 upsert 只创建一个 blob，异常 complete 可从对象事实恢复，失败路径会清理受控 `uploads/...` 临时对象。
 
@@ -66,7 +66,7 @@ Sprint 3 上传主链路已包含 `upload_sessions`、multipart init/presign/com
 
 项目文件传输正式使用 `Drive Transfer Protocol v1`（`DTP/1`）。上传、文件下载和外链下载允许客户端发送 `X-Drive-Transfer-Protocol: DTP/1`，未知版本返回 HTTP 426；JSON 传输响应返回 `protocol_version=DTP/1`，代理文件流返回同名响应头。DTP/1 只定义 HTTPS 之上的状态机、分片、断点、校验、幂等和错误码；普通文件正文通过短期预签名 HTTPS 直达 MinIO/S3，高密级或强审计场景可使用 `GET /api/v1/files/{node_id}/content` 由 API 流式代理。
 
-文件安全策略已提供 `/api/v1/admin/file-security/policies` 的列表、创建、更新和停用接口，可按扩展名或 MIME 前缀选择 `presigned`、`proxy`、`watermark`、`blocked` 模式，并记录密级、策略版本和审计。当前版本与历史版本下载都会执行关键字 DLP 的 audit/block、fail-closed 和自动选路；内部图片/PDF 可通过 `GET /api/v1/files/{node_id}/watermarked-content` 生成动态水印。公开外链支持 `delivery_mode=presigned|watermark`，水印派生对象使用真实文件名、MIME 和大小记账；要求代理的策略会阻止外链直连。外链代理流、历史版本专用水印、OCR、legal hold 和复杂内容识别继续归后续治理。
+文件安全策略已提供 `/api/v1/admin/file-security/policies` 的列表、创建、更新和停用接口，可按扩展名或 MIME 前缀选择 `presigned`、`proxy`、`watermark`、`blocked` 模式，并记录密级、策略版本和审计。当前版本与历史版本下载都会执行关键字 DLP 的 audit/block、fail-closed 和自动选路；内部图片/PDF 可通过 `GET /api/v1/files/{node_id}/watermarked-content` 生成动态水印。公开外链支持 `delivery_mode=presigned|watermark`，水印派生对象使用真实文件名、MIME 和大小记账；要求代理的策略会阻止外链直连。搜索正文已支持图片/扫描 PDF OCR；外链代理流、历史版本专用水印、legal hold 和高级内容分类继续归后续治理。
 
 `BE-036` 已完成文件版本核心 API：`GET /api/v1/files/{node_id}/versions` 使用签名 cursor 分页列出不可变历史并标记当前版本；`GET /api/v1/files/{node_id}/versions/{version_id}/download` 按指定历史版本返回 DTP/1 预签名下载；`POST /api/v1/files/{node_id}/versions/{version_id}/rollback` 在节点行锁和可选当前版本前置条件下创建递增的新版本，不改写旧版本。回滚复用原 blob、增加引用计数、执行多维配额扣减、更新 `current_version_id`，并写入审计、搜索抽取/索引和预览事件。
 
@@ -76,11 +76,11 @@ Sprint 2 剩余增强已闭环：创建文件夹、移动、恢复和对应批�
 
 `BE-027` 可观测性已完成：API `/metrics` 暴露路由模板维度的请求数/延迟、上传下载、权限、Outbox 和搜索延迟指标，正式 2-worker Uvicorn 使用 Prometheus multiprocess 聚合；5 个 Celery Worker 分别在 Compose 内部 `9100` 暴露 task 数量、状态、耗时及本进程业务指标。JSON 日志自动关联 `service`、`env`、`request_id`、`task_id`、`trace_id` 和 `span_id`；OpenTelemetry exporter 默认 `none`，可配置 Console 或 OTLP/HTTP。
 
-`BE-030` 已完成 API 与网络安全矩阵；当前运行时 OpenAPI 为 58 个路径、79 个操作，其中排除 ping/login 后的 77 个受保护或业务操作均继续纳入矩阵。损坏/超大图片、文档路径与扩展名注入、Range 权限、预签名 URL、用户/组织/配额/安全策略管理和轮换 token 外链穷举也已覆盖。Trusted Host/CORS 已通过动态测试，真实 Nginx raw HTTP smoke 已验证 CL/TE 冲突、重复 Content-Length、API 请求体 413 与 storage 流式入口，并固化进 CI。
+`BE-030` 已完成 API 与网络安全矩阵；当前运行时 OpenAPI 为 64 个路径、85 个操作，新增内部分享和通知路由已纳入匿名、CSRF、登录态和跨租户门禁。损坏/超大图片、OCR 页数/像素/体量边界、文档路径与扩展名注入、Range 权限、预签名 URL、用户/组织/配额/安全策略管理和轮换 token 外链穷举也已覆盖。Trusted Host/CORS 已通过动态测试，真实 Nginx raw HTTP smoke 已验证 CL/TE 冲突、重复 Content-Length、API 请求体 413 与 storage 流式入口，并固化进 CI。
 
-Sprint 4 权限系统已新增 `space_members` 基础表，创建空间时会自动写入当前用户的 `owner` 角色成员关系。空间列表、文件树、上传初始化、multipart complete 和下载已通过 `PermissionService` 做空间级成员角色检查：`viewer` 可列表和下载，`editor` 可上传与修改，`owner/admin` 可执行全部空间级动作。空间成员管理 API 已接入，支持 owner/admin 添加、调整和移除成员，权限变更会递增空间权限版本并写入审计。节点 ACL 已支持 `user`、`department`、`group` 三类主体，基于 org 事实表展开用户部门和用户组，支持 allow/deny、继承开关和 deny 优先，并已覆盖文件列表、创建文件夹、上传初始化、multipart complete 和下载入口；文件列表响应会通过批量权限评估返回每个子节点的常用动作权限，避免列表页逐项查询。系统管理员现可通过管理 API 完成用户生命周期、部门层级重命名/移动/停用、用户组状态以及部门/组成员变更；部门路径更新会原子改写子树并拒绝环路，所有修改使用版本前置条件、租户隔离和审计。空间成员和节点 ACL 变更都会写入 `permission.changed` outbox event，`permission.invalidate_cache` 会消费该事件并删除匹配的 Redis 权限缓存 key；部门/用户组成员或状态变化会写入租户级事件，按受影响用户或整个租户失效权限缓存。搜索 ACL 已新增 token builder 和 `search.acl_rebuild_requested` outbox event；秒传、multipart complete、重命名、移动、删除、恢复和彻底删除会写入 `search.index_requested`，上传完成还会写入 `search.extract_requested`。`search.dispatch_outbox` 会从 PostgreSQL 重新构建文件索引文档写入 OpenSearch，不再活跃或已彻底删除的文件会删除索引文档，并在 ACL 变更后按 space 或 node 子树保守重建索引 token；搜索抽取入口当前支持安全的小型 UTF-8 文本类文件、PDF 可复制正文、DOCX 段落/表格、PPTX 文本框/表格和 XLSX 单元格抽取，PDF 使用成熟开源库 `pypdf`，DOCX 使用成熟开源库 `python-docx`，PPTX 使用成熟开源库 `python-pptx`，XLSX 使用成熟开源库 `openpyxl`，抽取结果写入 `file_versions.search_text` 并刷新索引 `content` 字段，解码或解析失败标记为 `failed`，归档或正文超限标记为 `skipped`，对象存储读取失败交给 outbox 重试。预览基础链路已接入 `preview.render_requested` outbox event 和 `preview` 队列，当前使用成熟开源库 Pillow 将图片生成私有 WebP 预览产物，通过 Poppler `pdftoppm` 将 PDF 首页渲染为图片后复用同一 WebP 产物链路，并通过 LibreOffice headless 将 Office 文档先转换为 PDF 再复用 PDF/图片链路；`preview.dispatch_outbox` 已配置 Celery 软/硬超时、速率限制、结构化失败日志和 `preview_failures_total` 指标；`GET /api/v1/files/{node_id}/preview` 会通过 `preview` 权限校验后返回短期私有预览 URL。`GET /api/v1/search` 已接入查询层 `acl_tokens` allow 过滤、`deny_acl_tokens` 排除过滤、签名 cursor 分页、HTML 编码的 `<mark>` 高亮片段、`search.query` 限流和 `read_meta` 二次权限校验。最终对象的 DB 驱动清理由 `file.cleanup_unreferenced_blobs` 承担；对象存储中没有 DB 元数据的孤儿最终对象由 `file.cleanup_orphaned_objects` 承担。
+Sprint 4 权限系统已新增 `space_members` 基础表，创建空间时会自动写入当前用户的 `owner` 角色成员关系。空间列表、文件树、上传初始化、multipart complete 和下载已通过 `PermissionService` 做空间级成员角色检查：`viewer` 可列表和下载，`editor` 可上传与修改，`owner/admin` 可执行全部空间级动作。空间成员管理 API 已接入，支持 owner/admin 添加、调整和移除成员，权限变更会递增空间权限版本并写入审计。节点 ACL 已支持 `user`、`department`、`group` 三类主体，基于 org 事实表展开用户部门和用户组，支持 allow/deny、继承开关和 deny 优先，并已覆盖文件列表、创建文件夹、上传初始化、multipart complete 和下载入口；文件列表响应会通过批量权限评估返回每个子节点的常用动作权限，避免列表页逐项查询。系统管理员现可通过管理 API 完成用户生命周期、部门层级重命名/移动/停用、用户组状态以及部门/组成员变更；部门路径更新会原子改写子树并拒绝环路，所有修改使用版本前置条件、租户隔离和审计。空间成员和节点 ACL 变更都会写入 `permission.changed` outbox event，`permission.invalidate_cache` 会消费该事件并删除匹配的 Redis 权限缓存 key；部门/用户组成员或状态变化会写入租户级事件，按受影响用户或整个租户失效权限缓存。搜索 ACL 已新增 token builder 和 `search.acl_rebuild_requested` outbox event；秒传、multipart complete、重命名、移动、删除、恢复和彻底删除会写入 `search.index_requested`，上传完成还会写入 `search.extract_requested`。`search.dispatch_outbox` 会从 PostgreSQL 重新构建文件索引文档写入 OpenSearch，不再活跃或已彻底删除的文件会删除索引文档，并在 ACL 变更后按 space 或 node 子树保守重建索引 token；搜索抽取支持 UTF-8 文本、可复制正文 PDF、DOCX/PPTX/XLSX、图片 OCR、扫描 PDF OCR，以及 LibreOffice 转换后的旧 Office/ODF 文档。Tesseract OCR 受页数、像素、渲染字节、正文字符数和命令超时边界约束，抽取结果写入 `file_versions.search_text` 并刷新索引 `content` 字段。预览链路使用 Pillow、Poppler 和 LibreOffice 生成私有 WebP 产物；`GET /api/v1/files/{node_id}/preview` 会刷新 `last_accessed_at` 并返回短期私有 URL，`preview.cleanup_artifacts` 周期清理非当前旧版本产物和超期孤儿预览对象。`GET /api/v1/search` 已接入 allow/deny token、签名 cursor、HTML 编码高亮、限流和 `read_meta` 二次权限校验。最终对象的 DB 驱动清理由 `file.cleanup_unreferenced_blobs` 承担；对象存储中没有 DB 元数据的孤儿最终对象由 `file.cleanup_orphaned_objects` 承担。
 
-分享模块已建立基础数据模型、迁移、服务层和基础 HTTP API：支持内部分享、外链分享、提取码哈希、过期时间、访问/下载次数上限、撤销状态、分享项、内部接收人和访问日志表。创建分享会逐个校验节点级 `share` 权限，外链只返回一次 256-bit 级随机 `raw_token`，数据库只保存全局唯一 token hash 和提取码 hash；`POST /api/v1/shares`、`GET /api/v1/shares/{share_id}`、`POST /api/v1/shares/{share_id}/revoke` 已接入 Cookie Session、CSRF、创建者边界、审计与 outbox。`POST /api/v1/public/shares/access` 已接入租户、token、提取码、状态、过期、次数和限流校验。`POST /api/v1/public/shares/download` 会重新校验分享项、当前版本和文件安全策略，支持普通预签名或图片/PDF 水印派生下载，并以派生文件的真实大小记录响应、访问日志与审计；外链受控代理流仍属后续边界。
+分享模块支持内部分享、外链分享、提取码哈希、过期时间、访问/下载次数上限、撤销、分享项、用户/部门/用户组接收人和访问日志。内部分享新增 `GET /api/v1/shares/created`、`GET /api/v1/shares/received`、`GET /api/v1/shares/{share_id}/items`、`POST /api/v1/shares/{share_id}/download`、通知列表和已读入口；`share_recipient_grants` 将当前接收人展开为用户授权，组织成员变化通过 outbox 重算，撤销、过期和成员移除会失活授权与通知。接收人访问/下载会重新校验创建者当前分享权限、节点/版本/blob、次数限制和文件安全策略，并写入成功/拒绝访问日志与审计。`share.expire_shares` 已由 Celery beat 周期执行。公开外链接口继续支持租户、token、提取码、次数、限流以及预签名或图片/PDF 水印派生下载；外链受控代理流仍属后续边界。
 
 本地后端验证：
 

@@ -15,7 +15,11 @@ from app.infrastructure.storage.s3 import S3StorageAdapter
 from app.modules.audit.dispatcher import LoggingOutboxPublisher, OutboxDispatcher, OutboxPublisher
 from app.modules.audit.models import OutboxEvent
 from app.modules.audit.repository import AuditRepository
+from app.modules.audit.schemas import AuditContext
+from app.modules.audit.service import AuditService
+from app.modules.auth.repository import AuthRepository
 from app.modules.preview.events import PREVIEW_RENDER_REQUESTED
+from app.modules.preview.lifecycle import PreviewArtifactLifecycleService
 from app.modules.preview.renderer import PreviewRenderResult, PreviewRenderService
 from app.modules.preview.repository import PreviewRepository
 
@@ -36,6 +40,29 @@ def dispatch_preview_outbox(batch_size: int | None = None) -> dict[str, int]:
 
 
 celery_app.task(name="preview.dispatch_outbox")(dispatch_preview_outbox)
+
+
+def cleanup_preview_artifacts(
+    tenant_id: str | None = None,
+    limit: int = 100,
+    retention_days: int | None = None,
+    dry_run: bool = False,
+    request_id: str | None = None,
+    scan_all: bool = True,
+) -> dict[str, object]:
+    return asyncio.run(
+        _cleanup_preview_artifacts(
+            tenant_id=UUID(tenant_id) if tenant_id else None,
+            limit=limit,
+            retention_days=retention_days,
+            dry_run=dry_run,
+            request_id=request_id,
+            scan_all=scan_all,
+        )
+    )
+
+
+celery_app.task(name="preview.cleanup_artifacts")(cleanup_preview_artifacts)
 
 
 async def _dispatch_preview_outbox(batch_size: int | None = None) -> dict[str, int]:
@@ -73,6 +100,74 @@ async def _dispatch_preview_outbox(batch_size: int | None = None) -> dict[str, i
         )
         await session.commit()
         return result.to_dict()
+
+
+async def _cleanup_preview_artifacts(
+    *,
+    tenant_id: UUID | None,
+    limit: int,
+    retention_days: int | None,
+    dry_run: bool,
+    request_id: str | None,
+    scan_all: bool,
+) -> dict[str, object]:
+    settings = get_settings()
+    session_factory = get_session_factory()
+    total: dict[str, object] = {
+        "stale_scanned": 0,
+        "stale_cleaned": 0,
+        "orphan_scanned": 0,
+        "orphan_cleaned": 0,
+        "dry_run": 0,
+        "storage_errors": 0,
+        "next_storage_key": None,
+    }
+    async with session_factory() as session:
+        tenant_ids = [tenant_id] if tenant_id else await AuthRepository(session).list_tenant_ids()
+        for current_tenant_id in tenant_ids:
+            repository = PreviewRepository(session)
+            service = PreviewArtifactLifecycleService(
+                repository=repository,
+                storage=S3StorageAdapter(settings=settings),
+                bucket=settings.s3_bucket,
+                audit_service=AuditService(repository=AuditRepository(session)),
+            )
+            after_storage_key: str | None = None
+            include_stale = True
+            while True:
+                result = await service.cleanup(
+                    tenant_id=current_tenant_id,
+                    retention_days=(
+                        retention_days
+                        if retention_days is not None
+                        else settings.preview_artifact_retention_days
+                    ),
+                    limit=limit,
+                    after_storage_key=after_storage_key,
+                    dry_run=dry_run,
+                    include_stale=include_stale,
+                    audit_context=AuditContext(request_id=request_id),
+                )
+                payload = result.to_dict()
+                for key in (
+                    "stale_scanned",
+                    "stale_cleaned",
+                    "orphan_scanned",
+                    "orphan_cleaned",
+                    "dry_run",
+                    "storage_errors",
+                ):
+                    value = payload[key]
+                    assert isinstance(value, int)
+                    current_value = total[key]
+                    assert isinstance(current_value, int)
+                    total[key] = current_value + value
+                total["next_storage_key"] = result.next_storage_key
+                if not scan_all or result.next_storage_key is None:
+                    break
+                after_storage_key = result.next_storage_key
+                include_stale = False
+    return total
 
 
 class PreviewOutboxPublisher:

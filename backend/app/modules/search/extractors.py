@@ -41,6 +41,43 @@ _TEXT_EXTENSIONS = {
 _PDF_MIME_TYPES = {"application/pdf"}
 _PDF_EXTENSIONS = {".pdf"}
 _DEFAULT_PDF_MAX_PAGES = 50
+_IMAGE_MIME_TYPES = {
+    "image/bmp",
+    "image/gif",
+    "image/jpeg",
+    "image/png",
+    "image/tiff",
+    "image/webp",
+}
+_IMAGE_EXTENSIONS = {
+    ".bmp",
+    ".gif",
+    ".jpeg",
+    ".jpg",
+    ".png",
+    ".tif",
+    ".tiff",
+    ".webp",
+}
+_LEGACY_OFFICE_MIME_TYPES = {
+    "application/msword",
+    "application/rtf",
+    "application/vnd.ms-excel",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.oasis.opendocument.presentation",
+    "application/vnd.oasis.opendocument.spreadsheet",
+    "application/vnd.oasis.opendocument.text",
+    "text/rtf",
+}
+_LEGACY_OFFICE_EXTENSIONS = {
+    ".doc",
+    ".odp",
+    ".ods",
+    ".odt",
+    ".ppt",
+    ".rtf",
+    ".xls",
+}
 _DOCX_MIME_TYPES = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
@@ -80,6 +117,22 @@ class TextExtractor(Protocol):
     def extract(self, content: bytes, context: TextExtractionContext) -> str: ...
 
 
+class OcrTextEngine(Protocol):
+    def extract_image(self, content: bytes, context: TextExtractionContext) -> str: ...
+
+    def extract_pdf(
+        self,
+        content: bytes,
+        context: TextExtractionContext,
+        *,
+        max_pages: int,
+    ) -> str: ...
+
+
+class OfficeDocumentConverter(Protocol):
+    def convert_to_pdf(self, content: bytes, context: TextExtractionContext) -> bytes: ...
+
+
 class Utf8TextExtractor:
     def supports(self, context: TextExtractionContext) -> bool:
         if context.mime_type.startswith("text/") or context.mime_type in _TEXT_MIME_TYPES:
@@ -95,8 +148,16 @@ class Utf8TextExtractor:
 
 
 class PdfTextExtractor:
-    def __init__(self, *, max_pages: int = _DEFAULT_PDF_MAX_PAGES) -> None:
+    def __init__(
+        self,
+        *,
+        max_pages: int = _DEFAULT_PDF_MAX_PAGES,
+        ocr_engine: OcrTextEngine | None = None,
+        max_source_bytes: int | None = None,
+    ) -> None:
         self.max_pages = max_pages
+        self.ocr_engine = ocr_engine
+        self.max_source_bytes = max_source_bytes
 
     def supports(self, context: TextExtractionContext) -> bool:
         normalized_name = context.name.casefold()
@@ -118,7 +179,63 @@ class PdfTextExtractor:
             raise
         except (PdfReadError, UnicodeDecodeError, OSError, ValueError) as exc:
             raise TextExtractionError("decode_failed") from exc
-        return "\n".join(text.strip() for text in page_texts if text.strip())
+        text = "\n".join(text.strip() for text in page_texts if text.strip())
+        if text or self.ocr_engine is None:
+            return text
+        return self.ocr_engine.extract_pdf(
+            content,
+            context,
+            max_pages=self.max_pages,
+        )
+
+
+class ImageOcrTextExtractor:
+    def __init__(
+        self,
+        *,
+        ocr_engine: OcrTextEngine,
+        max_source_bytes: int | None = None,
+    ) -> None:
+        self.ocr_engine = ocr_engine
+        self.max_source_bytes = max_source_bytes
+
+    def supports(self, context: TextExtractionContext) -> bool:
+        normalized_name = context.name.casefold()
+        return context.mime_type in _IMAGE_MIME_TYPES or any(
+            normalized_name.endswith(extension) for extension in _IMAGE_EXTENSIONS
+        )
+
+    def extract(self, content: bytes, context: TextExtractionContext) -> str:
+        return self.ocr_engine.extract_image(content, context)
+
+
+class OfficeDocumentTextExtractor:
+    def __init__(
+        self,
+        *,
+        converter: OfficeDocumentConverter,
+        pdf_extractor: PdfTextExtractor,
+        max_source_bytes: int | None = None,
+    ) -> None:
+        self.converter = converter
+        self.pdf_extractor = pdf_extractor
+        self.max_source_bytes = max_source_bytes
+
+    def supports(self, context: TextExtractionContext) -> bool:
+        normalized_name = context.name.casefold()
+        return context.mime_type in _LEGACY_OFFICE_MIME_TYPES or any(
+            normalized_name.endswith(extension) for extension in _LEGACY_OFFICE_EXTENSIONS
+        )
+
+    def extract(self, content: bytes, context: TextExtractionContext) -> str:
+        pdf_content = self.converter.convert_to_pdf(content, context)
+        return self.pdf_extractor.extract(
+            pdf_content,
+            TextExtractionContext(
+                mime_type="application/pdf",
+                name=f"{context.name}.pdf",
+            ),
+        )
 
 
 class DocxTextExtractor:
@@ -275,11 +392,38 @@ def _check_archive_limits(
             raise TextExtractionError(reason, status="skipped")
 
 
-def default_text_extractors() -> list[TextExtractor]:
-    return [
+def default_text_extractors(
+    *,
+    ocr_engine: OcrTextEngine | None = None,
+    office_converter: OfficeDocumentConverter | None = None,
+    complex_source_max_bytes: int | None = None,
+    pdf_max_pages: int = _DEFAULT_PDF_MAX_PAGES,
+) -> list[TextExtractor]:
+    pdf_extractor = PdfTextExtractor(
+        max_pages=pdf_max_pages,
+        ocr_engine=ocr_engine,
+        max_source_bytes=complex_source_max_bytes if ocr_engine is not None else None,
+    )
+    extractors: list[TextExtractor] = [
         Utf8TextExtractor(),
-        PdfTextExtractor(),
+        pdf_extractor,
         DocxTextExtractor(),
         PptxTextExtractor(),
         XlsxTextExtractor(),
     ]
+    if ocr_engine is not None:
+        extractors.append(
+            ImageOcrTextExtractor(
+                ocr_engine=ocr_engine,
+                max_source_bytes=complex_source_max_bytes,
+            )
+        )
+    if office_converter is not None:
+        extractors.append(
+            OfficeDocumentTextExtractor(
+                converter=office_converter,
+                pdf_extractor=pdf_extractor,
+                max_source_bytes=complex_source_max_bytes,
+            )
+        )
+    return extractors

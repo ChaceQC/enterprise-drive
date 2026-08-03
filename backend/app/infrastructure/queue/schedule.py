@@ -28,6 +28,11 @@ def build_beat_schedule(settings: Settings) -> dict[str, dict[str, object]]:
             "schedule": outbox_interval,
             "options": {"queue": "preview"},
         },
+        "dispatch-share-outbox": {
+            "task": "share.dispatch_outbox",
+            "schedule": outbox_interval,
+            "options": {"queue": "permission"},
+        },
         "expire-upload-sessions": {
             "task": "upload.expire_sessions",
             "schedule": float(settings.upload_cleanup_interval_seconds),
@@ -38,6 +43,23 @@ def build_beat_schedule(settings: Settings) -> dict[str, dict[str, object]]:
             "task": "file.cleanup_expired_trash",
             "schedule": float(settings.trash_cleanup_interval_seconds),
             "kwargs": {"limit": batch_size},
+            "options": {"queue": "maintenance"},
+        },
+        "expire-shares": {
+            "task": "share.expire_shares",
+            "schedule": float(settings.share_expiry_interval_seconds),
+            "kwargs": {"limit": batch_size},
+            "options": {"queue": "maintenance"},
+        },
+        "cleanup-preview-artifacts": {
+            "task": "preview.cleanup_artifacts",
+            "schedule": float(settings.preview_cleanup_interval_seconds),
+            "kwargs": {
+                "limit": batch_size,
+                "retention_days": settings.preview_artifact_retention_days,
+                "dry_run": False,
+                "scan_all": True,
+            },
             "options": {"queue": "maintenance"},
         },
         "process-file-tree-operations": {

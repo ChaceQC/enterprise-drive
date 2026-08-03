@@ -43,6 +43,7 @@ class PresignedDownload:
 class StorageObject:
     storage_key: str
     size_bytes: int | None = None
+    last_modified: datetime | None = None
 
 
 class StorageAdapter(Protocol):

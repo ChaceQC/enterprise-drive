@@ -1,5 +1,73 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-03 Sprint 5 分享、预览与搜索闭环
+
+### 当前状态
+
+- `PROJECT_STAGE_STATUS.md` 中 Sprint 5 的内部分享接收端、通知/授权重算、OCR/复杂格式和预览产物生命周期剩余项均已完成，Sprint 5 尚未完成项现为空。
+- 运行时 OpenAPI 为 64 个路径、85 个操作；安全矩阵同步到 85 项，数据库 migration head 为 `20260803_0020`。
+- 下一项进入 `BE-044` 剩余空间管理和 `BE-045` 统计、维护、导出管理 API。
+
+### 已完成
+
+- 新增 `GET /api/v1/shares/created`、`GET /api/v1/shares/received`、`GET /api/v1/shares/{share_id}/items` 和 `POST /api/v1/shares/{share_id}/download`，覆盖创建者列表、接收人列表/详情和 DTP/1 受控下载；读取和下载均重新校验当前分享状态、接收人授权、创建者当前 `share` 权限、节点/版本/blob 事实和文件安全策略。
+- 新增 `share_recipient_grants` 物化授权和 `share_notifications` 站内通知；创建分享时展开用户、部门和用户组，部门/用户组成员或状态变化写入 `share.recipients_rebuild_requested`，`share.dispatch_outbox` 重算授权。成员移除、撤销或过期会失活授权并使对应通知失效。
+- 新增通知 cursor 列表、未读筛选和已读入口；内部分享访问/下载的成功与拒绝均写入 `share_access_logs` 和审计，访问日志继续使用 `view`/`download` 动作，审计使用 `share.internal.accessed`/`share.internal.downloaded`。
+- 新增 `share.expire_shares` 周期维护任务，按租户锁定过期 active 分享、更新状态、失活授权/通知并写入 `share.expired` 审计；调度间隔由 `DRIVE_SHARE_EXPIRY_INTERVAL_SECONDS` 控制。
+- `preview_artifacts` 新增 `last_accessed_at`；获取预览 URL 时刷新访问时间。`preview.cleanup_artifacts` 会删除非当前版本且超过保留期的产物记录/对象，并扫描 `previews/{tenant_id}/` 下超期且无数据库记录的孤儿对象，写入审计和 `preview_artifact_cleanup_total` 指标。
+- 搜索抽取接入 Tesseract 图片 OCR 和扫描 PDF OCR；PDF 先尝试 `pypdf` 正文，正文为空时再 OCR。旧 `.doc/.xls/.ppt` 与 ODF 文档经 LibreOffice 转 PDF 后抽取；页数、源文件体量、像素、渲染字节、正文字符数和外部命令超时均有配置边界。
+- `worker-search` 改用包含 LibreOffice、Poppler、Tesseract `eng`/`chi_sim` 的内容处理镜像，使用独立 1 GiB tmpfs，默认 `--max-tasks-per-child=20`，避免 OCR/转换临时文件和长期进程内存影响其他队列。
+- 新增 `20260803_0020_sprint5_completion.py`，创建分享授权/通知表，为预览产物增加最后访问时间和生命周期索引。
+
+### 验证
+
+- Sprint 5 新增核心用例最初 `4 passed`；过期分享和 OCR 资源边界补充用例分别通过。
+- 与分享、预览、搜索、组织事件、安全矩阵和 Celery 调度直接相关的既有集合首轮仅 1 项因授权重算事件范围过宽失败，收紧事件后只重跑该失败项并通过。
+- 最终定向命令中的预览生命周期和 Celery schedule 已通过；唯一拒绝下载访问日志动作命名不一致已修复，并只重跑 `test_internal_share_received_items_download_notification_and_revoke`，结果 `1 passed`。
+- `uv run mypy app`：178 个源码文件通过；Ruff lint、Bandit、Alembic 离线 SQL与单一 head 检查通过。
+- OpenAPI 对账为 64 个路径、85 个操作；`docker compose --env-file .env.windows.example -f compose.windows.yml config --quiet` 通过，确认 Search Worker 使用内容处理镜像、独立 tmpfs 和 `max-tasks-per-child=20`。
+- 临时空 PostgreSQL 从零升级到 `20260803_0020` 通过，并查询确认 `share_recipient_grants`、`share_notifications` 和 `preview_artifacts.last_accessed_at` 已创建；临时容器已删除。
+- `docker build --target preview --tag enterprise-drive-preview:sprint5-check backend` 首次因 Debian 镜像同步返回批量 404，加入 apt 无缓存索引和 5 次重试后重建通过；镜像构建阶段验证 `soffice`、`pdftoppm`、Tesseract 及 `eng`/`chi_sim` 语言包。
+- 未重复运行全量 pytest、真实 MinIO、备份恢复或 Sprint 3 性能测试；这些路径与本轮最终修复无直接关系，继续复用已有通过证据。
+
+### 后续边界
+
+- OCR 已覆盖图片、扫描 PDF 与旧 Office/ODF 转换抽取，但不是通用内容分类或复杂 DLP；legal hold、外链代理流和历史版本专用水印继续后续治理。
+- 预览生命周期当前按全局保留天数清理；租户级策略、legal hold、治理页面和手工恢复工作流继续 `BE-047` 的扩展边界。
+- 根 Compose 仍不包含 Prometheus、Alertmanager 和 Grafana；生产需要抓取 Worker 指标并加载现有告警规则。
+
+### 下一步
+
+1. 完成 `BE-044` 剩余的空间管理 API。
+2. 完成 `BE-045` 统计、维护任务和导出管理 API。
+3. 在正式发布阶段补生产 TLS/DNS、MinIO 风险治理和 `v0.4.0` 标记，不重跑已通过且未受影响的 Sprint 3 性能工件。
+
+### 涉及文件
+
+- `backend/app/modules/share/`
+- `backend/app/modules/preview/`
+- `backend/app/modules/search/`
+- `backend/app/infrastructure/search/content_extraction.py`
+- `backend/app/workers/share_tasks.py`
+- `backend/app/workers/preview_tasks.py`
+- `backend/app/workers/search_tasks.py`
+- `backend/migrations/versions/20260803_0020_sprint5_completion.py`
+- `backend/tests/test_sprint5_completion.py`
+- `backend/tests/security_route_matrix.py`
+- `backend/tests/test_celery_schedule.py`
+- `backend/Dockerfile`
+- `compose.windows.yml`
+- `.env.windows.example`
+- `backend/.env.example`
+- `README.md`
+- `backend/README.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `PROJECT_STAGE_STATUS.md`
+- `docs/deployment-preview-worker.md`
+- `docs/deployment-windows-docker.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-08-03 Sprint 4 用户、部门与用户组管理闭环
 
 ### 当前状态

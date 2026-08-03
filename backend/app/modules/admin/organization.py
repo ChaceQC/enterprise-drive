@@ -33,6 +33,7 @@ from app.modules.audit.schemas import AuditContext, AuditEvent
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
 from app.modules.org.models import Department, DepartmentMember, UserGroup, UserGroupMember
+from app.modules.share.events import emit_share_recipients_rebuild_requested
 
 _MAX_DEPARTMENT_PATH_LENGTH = 2048
 
@@ -1898,6 +1899,15 @@ class AdminOrganizationService:
             scope="tenant",
             resource_id=current_user.tenant_id,
             permission_version=permission_version,
+            reason=reason,
+            affected_user_id=affected_user_id,
+            metadata=metadata,
+        )
+        await emit_share_recipients_rebuild_requested(
+            audit_service=self.audit_service,
+            tenant_id=current_user.tenant_id,
+            scope="tenant",
+            resource_id=current_user.tenant_id,
             reason=reason,
             affected_user_id=affected_user_id,
             metadata=metadata,

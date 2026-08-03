@@ -346,6 +346,7 @@ class S3StorageAdapter:
                 StorageObject(
                     storage_key=object_name,
                     size_bytes=int(item.size) if item.size is not None else None,
+                    last_modified=item.last_modified,
                 )
             )
             if len(objects) >= limit:

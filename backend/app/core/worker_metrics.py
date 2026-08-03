@@ -56,6 +56,13 @@ trash_cleanup_released_bytes_total = Counter(
     registry=WORKER_METRICS_REGISTRY,
 )
 
+preview_artifact_cleanup_total = Counter(
+    "preview_artifact_cleanup_total",
+    "预览产物生命周期扫描和清理计数",
+    ("status",),
+    registry=WORKER_METRICS_REGISTRY,
+)
+
 maintenance_task_consecutive_failures = Gauge(
     "maintenance_task_consecutive_failures",
     "维护任务当前连续失败次数",
@@ -157,6 +164,12 @@ def record_trash_cleanup_released_bytes(*, size_bytes: int) -> None:
     if size_bytes <= 0:
         return
     trash_cleanup_released_bytes_total.inc(size_bytes)
+
+
+def record_preview_artifact_cleanup(*, status: str, count: int = 1) -> None:
+    if count <= 0:
+        return
+    preview_artifact_cleanup_total.labels(status=_bounded_label(status)).inc(count)
 
 
 def set_maintenance_task_health(

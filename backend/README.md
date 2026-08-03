@@ -139,7 +139,7 @@ uv run pytest tests/test_route_security_matrix.py `
   tests/test_security_adversarial.py -q
 ```
 
-矩阵与运行时 OpenAPI 的 58 个路径、79 个操作完全对账，覆盖匿名、CSRF、管理员、真实跨租户资源和活跃会话撤权；排除 ping/login 后的 77 个受保护或业务操作均在矩阵内。对抗输入覆盖损坏/超大图片、文档路径与扩展名注入、Range 权限、预签名 URL、用户/组织/配额/安全策略管理、不同 token 外链穷举、Trusted Host 和 CORS。
+矩阵与运行时 OpenAPI 的 64 个路径、85 个操作完全对账，覆盖匿名、CSRF、管理员、内部分享接收人、真实跨租户资源和活跃会话撤权。对抗输入覆盖损坏/超大图片、OCR 页数/像素/体量边界、文档路径与扩展名注入、Range 权限、预签名 URL、用户/组织/配额/安全策略管理、不同 token 外链穷举、Trusted Host 和 CORS。
 
 真实 Nginx 原始 HTTP 安全 smoke：
 
@@ -254,13 +254,13 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - 真实 MinIO 集成测试，覆盖对象读写、copy、delete、list 游标、预签名下载、标准 S3 HTTP multipart 控制面、预签名分片 PUT、complete 后 hash 校验和孤儿最终对象扫描。
 - 真实 PostgreSQL Docker 集成测试，覆盖完整 Alembic migration、`idx_nodes_trash_cleanup`、回收站保留期清理、删除批次去重、行锁、租户隔离、容量账本、blob 引用、审计和搜索 outbox。
 - `permission.invalidate_cache` 任务，消费 `permission.changed` outbox event 并失效 Redis 权限缓存 key；审计 dispatcher 只消费 `audit.*`，避免抢占权限事件。
-- 搜索 ACL token builder、`search.acl_rebuild_requested` outbox event、`search.index_requested` 文件索引事件、`search.extract_requested` 文本抽取事件和 `GET /api/v1/search` 查询接口；`search.dispatch_outbox` 会从 PostgreSQL 重新加载文件、版本、blob、空间成员和节点 ACL 事实后写入 OpenSearch，不再活跃或已彻底删除的文件会删除索引文档，并在 ACL 变更后按 space 或 node 子树保守重建索引 token；当前抽取支持 UTF-8 文本类文件、PDF 可复制正文、DOCX 段落/表格文本、PPTX 文本框/表格文本和 XLSX 单元格文本，PDF 使用 `pypdf` 解析，DOCX 使用 `python-docx` 解析，PPTX 使用 `python-pptx` 解析，XLSX 使用 `openpyxl` 解析，写入 `file_versions.search_text` 后刷新索引 `content` 字段；图片 OCR 等复杂格式后续继续接入成熟开源解析工具；查询接口使用 `acl_tokens` allow 过滤、`deny_acl_tokens` 排除过滤、签名 cursor 分页、HTML 编码高亮和 `read_meta` 二次权限校验。
-- 预览基础链路：上传成功后写入 `preview.render_requested` outbox event，`preview.dispatch_outbox` 消费事件并使用 Pillow 生成图片 WebP 预览产物；PDF 会通过 Poppler `pdftoppm` 在临时目录中渲染第一页 PNG，再复用 Pillow 生成 WebP；Office 文档会通过 LibreOffice headless 转换为 PDF，再复用 PDF/图片链路。产物写入私有对象存储 `previews/{tenant_id}/{node_id}/{version_id}/image.webp`；`GET /api/v1/files/{node_id}/preview` 会校验节点级 `preview` 权限并返回短期私有预览 URL。缺少 `pdftoppm` 或 `soffice` 时会标记为 `unsupported` 并写入明确错误原因，避免无意义重试；`preview.dispatch_outbox` 已配置独立 Celery 软/硬超时、速率限制、结构化失败日志和 `preview_failures_total` 指标，便于后续接入日志告警与指标看板。
-- `shares`、`share_items`、`share_recipients`、`share_access_logs` 基础表和迁移；服务层支持内部分享、外链分享、提取码哈希、过期时间、访问/下载次数上限和撤销状态。
+- 搜索 ACL token builder、`search.acl_rebuild_requested`、`search.index_requested`、`search.extract_requested` 和 `GET /api/v1/search` 已完成；抽取支持 UTF-8 文本、可复制正文 PDF、DOCX/PPTX/XLSX、图片 OCR、扫描 PDF OCR，以及经 LibreOffice 转换的旧 Office/ODF。Tesseract 使用 `eng+chi_sim`，并限制复杂源文件体量、PDF 页数、像素、渲染字节、正文字符数和命令超时；查询继续使用 allow/deny token、签名 cursor、HTML 编码高亮和 `read_meta` 二次权限校验。
+- 预览链路使用 Pillow、Poppler 和 LibreOffice 生成私有 WebP 产物；`GET /api/v1/files/{node_id}/preview` 校验 `preview` 权限、刷新 `last_accessed_at` 并返回短期 URL。`preview.cleanup_artifacts` 周期清理非当前旧版本产物和超期孤儿预览对象，写入审计和 `preview_artifact_cleanup_total`；缺少外部工具或资源超限会返回明确状态。
+- `shares`、`share_items`、`share_recipients`、`share_recipient_grants`、`share_notifications`、`share_access_logs` 表和迁移；服务层支持内外部分享、创建者/接收人列表、接收人详情/下载、通知、授权重算、提取码、过期、次数限制和撤销。
 - 分享创建会校验 root 节点和全部分享项的节点级 `share` 权限，分享项必须与 root 节点属于同一空间；外链原始 token 只返回一次，数据库只保存全局唯一 token hash，提取码只保存 Argon2id hash。
-- 分享创建和撤销会写入 `share.created` / `share.revoked` 审计事件和 `audit.share.*` outbox event；`POST /api/v1/shares`、`GET /api/v1/shares/{share_id}`、`POST /api/v1/shares/{share_id}/revoke` 已接入 Cookie Session、CSRF 和创建者边界；`POST /api/v1/public/shares/access` 已接入 `tenant_slug`、外链 token、提取码、状态、过期、访问次数校验，以及 IP 总量和 `token + IP` 维度限流，会带租户边界查询分享、原子增加 `view_count` 并写入 `share_access_logs`；`POST /api/v1/public/shares/download` 会重新校验分享项、当前版本、下载次数和文件安全策略，支持 `delivery_mode=presigned|watermark`，并以实际响应文件名、MIME 和字节数记录访问日志与审计。
+- 分享创建和撤销会写入审计与 outbox；内部接收人可使用 `GET /api/v1/shares/created`、`GET /api/v1/shares/received`、`GET /api/v1/shares/{share_id}/items`、`POST /api/v1/shares/{share_id}/download` 和通知列表/已读入口。组织成员变化触发 `share.recipients_rebuild_requested`，`share.dispatch_outbox` 重算授权；`share.expire_shares` 周期失效过期分享、授权和通知。公开访问/下载继续执行 token、提取码、状态、过期、次数、限流和文件安全策略。
 - `file_security_policies` 按扩展名/MIME 前缀提供密级、`presigned/proxy/watermark/blocked` 下载模式、关键字 DLP audit/block、fail-closed、水印模板、版本前置条件和租户隔离管理；当前版本、历史版本和公开外链下载均执行策略。
-- 内部图片/PDF 动态水印通过 `GET /api/v1/files/{node_id}/watermarked-content` 返回；公开外链水印生成私有派生对象后签发短期 URL。外链代理流、历史版本专用水印、OCR、legal hold 和复杂内容识别继续后续治理。
+- 内部图片/PDF 动态水印通过 `GET /api/v1/files/{node_id}/watermarked-content` 返回；公开外链水印生成私有派生对象后签发短期 URL。图片和扫描 PDF OCR 已用于搜索正文；外链代理流、历史版本专用水印、legal hold 和高级内容分类继续后续治理。
 - 文件下载预签名 URL 接口，按当前文件版本生成短期私有对象下载地址。
 - 下载成功和拒绝均写入 `file.downloaded` 审计事件与 outbox event。
 - 管理员 seed 脚本。
@@ -337,12 +337,18 @@ uv run pytest tests/test_storage_minio_integration.py -q
 ## 分享接口
 
 - `POST /api/v1/shares`
+- `GET /api/v1/shares/created`
+- `GET /api/v1/shares/received`
+- `GET /api/v1/shares/notifications`
+- `POST /api/v1/shares/notifications/{notification_id}/read`
+- `GET /api/v1/shares/{share_id}/items`
+- `POST /api/v1/shares/{share_id}/download`
 - `GET /api/v1/shares/{share_id}`
 - `POST /api/v1/shares/{share_id}/revoke`
 - `POST /api/v1/public/shares/access`
 - `POST /api/v1/public/shares/download`
 
-创建分享接口支持 `internal` 和 `external` 类型。内部分享必须指定用户、部门或用户组接收人；外链分享会返回一次性明文 `raw_token`，数据库只保存全局唯一 token hash。分享创建会检查 root 节点和全部分享项的 `share` 权限，分享项必须与 root 节点属于同一空间。详情和撤销当前只允许创建者访问。公开外链访问接口不需要登录，请求体需要提供 `tenant_slug`、`raw_token` 和可选 `passcode`；后端先解析租户，再按 `tenant_id + token_hash` 查询外链，校验状态、过期时间、提取码和访问次数限制，并按 IP 总量和 `token + IP` 维度限流。校验通过后原子增加 `view_count`，返回分享基础信息和分享项节点 ID，并写入 `share_access_logs` 和 `share.external.accessed` 审计。
+创建分享接口支持 `internal` 和 `external` 类型。内部分享必须指定用户、部门或用户组接收人；后端将其展开到 `share_recipient_grants`，创建者和接收人分别通过 cursor 列表访问。接收人详情/下载会重新校验当前授权、分享状态/次数、创建者当前分享权限、节点/版本/blob 和文件安全策略；成功与拒绝均写入访问日志和审计。站内通知支持 cursor、未读筛选和已读；成员移除、分享撤销或过期会使通知失效。外链分享会返回一次性明文 `raw_token`，数据库只保存全局唯一 token hash；公开访问继续执行租户、提取码、状态、过期、次数和限流校验。
 
 公开外链下载接口不需要登录，请求体需要提供 `tenant_slug`、`raw_token`、`node_id` 和可选 `passcode`。后端按外链 token 和租户边界加载分享，校验状态、过期时间、提取码、分享权限是否为 `download`、请求节点是否为 root 或分享项、节点是否仍是同一空间内的文件、当前版本和 blob 是否存在；通过后用数据库条件 update 原子增加 `download_count`，再通过 `StorageAdapter.presign_download` 返回短期私有对象下载 URL。外链下载限流同时覆盖 IP 总量和 `token + node + IP` 维度；成功和失败都会记录 `share_access_logs`，审计 actor_type 为 `external`。当前公开下载使用预签名 URL，后端 Range 代理、水印导出和更细的 external subject 策略将在高密级下载或预览链路中继续补齐。
 
@@ -460,4 +466,4 @@ Prometheus 规则位于 `../deploy/monitoring/maintenance-alerts.yml`，完整�
 
 `BE-034` 的 `/content` 入口复用完全相同的权限、当前版本和 active blob 判断，由 `StorageAdapter.stream_object` 从私有对象存储按 offset/length 分块读取，不把整文件载入 API 内存。无 `Range` 时返回 HTTP 200 完整流；单段 `Range` 支持 `bytes=start-end`、`bytes=start-` 和 `bytes=-suffix` 并返回 HTTP 206。多段、反向、越界或超过 `DRIVE_DOWNLOAD_PROXY_MAX_RANGE_BYTES` 的部分请求返回 HTTP 416 和 `Content-Range: bytes */{size}`。响应包含 `Accept-Ranges`、`Content-Length`、ETag、UTF-8 `Content-Disposition`、`Cache-Control: private, no-store` 和 DTP/1 响应头。
 
-预签名、代理和水印下载分别使用 `file.download_presign`、`file.download_proxy`、`file.download_watermark` 限流，并按 `tenant + user + node + IP` 计数。下载入口已通过 `PermissionService` 校验节点级 `download` 权限，并按当前匹配策略自动允许或拒绝 `presigned/proxy/watermark/blocked` 模式；关键字 DLP 可记录命中或直接阻止下载，fail-closed 可在搜索正文尚未就绪时阻止访问。内部水印入口只处理配置上限内的图片和 PDF，动态文本可包含用户、用户 ID、租户 ID 与时间。成功和拒绝审计均记录策略 ID、版本、密级、DLP 状态、传输模式和真实响应字节数；外链代理流、历史版本专用水印及 OCR/复杂内容分类继续后续治理。
+预签名、代理和水印下载分别使用 `file.download_presign`、`file.download_proxy`、`file.download_watermark` 限流，并按 `tenant + user + node + IP` 计数。下载入口已通过 `PermissionService` 校验节点级 `download` 权限，并按当前匹配策略自动允许或拒绝 `presigned/proxy/watermark/blocked` 模式；关键字 DLP 可记录命中或直接阻止下载，fail-closed 可在搜索正文尚未就绪时阻止访问。内部水印入口只处理配置上限内的图片和 PDF，动态文本可包含用户、用户 ID、租户 ID 与时间。搜索正文已支持图片/扫描 PDF OCR；成功和拒绝审计均记录策略 ID、版本、密级、DLP 状态、传输模式和真实响应字节数。外链代理流、历史版本专用水印、legal hold 与高级内容分类继续后续治理。

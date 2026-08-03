@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -32,6 +33,7 @@ class SearchExtractionService:
         storage: StorageAdapter,
         settings: Settings,
         max_bytes: int | None = None,
+        max_chars: int | None = None,
         extractors: list[TextExtractor] | None = None,
     ) -> None:
         self.repository = repository
@@ -41,6 +43,7 @@ class SearchExtractionService:
         self.max_bytes = (
             max_bytes if max_bytes is not None else settings.search_text_extract_max_bytes
         )
+        self.max_chars = max_chars if max_chars is not None else self.max_bytes
         self.extractors = extractors if extractors is not None else default_text_extractors()
 
     async def extract_version(
@@ -74,7 +77,8 @@ class SearchExtractionService:
                 reason="unsupported_mime_type",
             )
 
-        if blob.size_bytes > self.max_bytes:
+        source_limit = _extractor_source_limit(extractor, fallback=self.max_bytes)
+        if blob.size_bytes > source_limit:
             await self.repository.set_version_search_state(
                 tenant_id=tenant_id,
                 version_id=version_id,
@@ -100,10 +104,10 @@ class SearchExtractionService:
             content_bytes = await self.storage.read_object_bytes(
                 bucket=self.settings.s3_bucket,
                 storage_key=blob.storage_key,
-                max_bytes=self.max_bytes,
+                max_bytes=source_limit,
             )
-            text = extractor.extract(content_bytes, context)
-            if len(text) > self.max_bytes:
+            text = await asyncio.to_thread(extractor.extract, content_bytes, context)
+            if len(text) > self.max_chars:
                 await self.repository.set_version_search_state(
                     tenant_id=tenant_id,
                     version_id=version_id,
@@ -170,3 +174,8 @@ class SearchExtractionService:
         return next(
             (extractor for extractor in self.extractors if extractor.supports(context)), None
         )
+
+
+def _extractor_source_limit(extractor: TextExtractor, *, fallback: int) -> int:
+    configured = getattr(extractor, "max_source_bytes", None)
+    return configured if isinstance(configured, int) and configured > 0 else fallback

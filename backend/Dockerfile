@@ -63,8 +63,9 @@ FROM runtime-base AS preview
 
 USER root
 
-RUN apt-get update \
-    && apt-get install --no-install-recommends -y \
+RUN apt-get -o Acquire::Retries=5 -o Acquire::http::No-Cache=true update \
+    && apt-get -o Acquire::Retries=5 -o Acquire::http::No-Cache=true \
+        install --no-install-recommends -y \
         fontconfig \
         fonts-dejavu-core \
         fonts-noto-cjk \
@@ -73,13 +74,20 @@ RUN apt-get update \
         libreoffice-impress \
         libreoffice-writer \
         poppler-utils \
+        tesseract-ocr \
+        tesseract-ocr-chi-sim \
+        tesseract-ocr-eng \
     && fc-cache -f \
     && soffice --version \
     && pdftoppm -v \
+    && tesseract --version \
+    && tesseract --list-langs \
+    && tesseract --list-langs 2>/dev/null | grep -Fxq eng \
+    && tesseract --list-langs 2>/dev/null | grep -Fxq chi_sim \
     && rm -rf /var/lib/apt/lists/* /var/cache/fontconfig/* \
     && chown -R app:app /tmp/enterprise-drive /home/app
 
 USER app
 
 LABEL org.opencontainers.image.title="Enterprise Drive Preview Worker" \
-      org.opencontainers.image.description="Celery preview runtime with LibreOffice, Poppler and CJK fonts"
+      org.opencontainers.image.description="Celery content runtime with LibreOffice, Poppler, Tesseract and CJK fonts"

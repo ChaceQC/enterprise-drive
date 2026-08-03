@@ -56,7 +56,7 @@ docker info --format '{{.OSType}}'
 | `migration` | 一次性 Alembic migration | 不发布 |
 | `seed` | migration 后一次性创建或校准初始管理员 | 不发布 |
 | `worker-preview` | 图片、PDF、Office 预览 | 不发布 |
-| `worker-search` | 文本抽取、索引写入 | 不发布 |
+| `worker-search` | 文本/OCR/旧格式抽取、索引写入 | 不发布 |
 | `worker-audit` | 审计 outbox | 不发布 |
 | `worker-permission` | 权限缓存失效 | 不发布 |
 | `worker-maintenance` | 生命周期与治理任务 | 不发布 |
@@ -363,15 +363,17 @@ Preview Worker 不能和 audit/permission 队列混跑。
 
 - `upload.expire_sessions`
 - `file.cleanup_expired_trash`
+- `share.expire_shares`
+- `preview.cleanup_artifacts`
 - `file.process_tree_operations`
 - `file.cleanup_unreferenced_blobs`
 - `file.cleanup_orphaned_objects`
 - `quota.reconcile_space_usage`
-- 后续接入的过期分享、预览产物和其他生命周期治理任务
+- 后续接入的其他生命周期治理任务
 
 Beat 使用 UTC。当前 schedule 文件位于容器临时目录，可由静态配置重建；任务事实和执行结果仍以数据库、审计和任务自身状态为准。每个维护任务必须幂等，不能仅依赖 beat 单实例保证。
 
-Celery signal 统一记录上述六个周期维护任务的连续失败状态，Redis key 为 `maintenance_health:{task_name}`。达到配置阈值时 Worker 写结构化错误日志并设置 Prometheus alert Gauge；主进程定时刷新 stale 和时间戳指标。规则文件位于 `deploy/monitoring/maintenance-alerts.yml`，详细指标、配置和排障流程见 `docs/maintenance-monitoring.md`。Redis 只保存监控状态，不替代 PostgreSQL 与审计事实。
+Celery signal 统一记录上述八个周期维护任务的连续失败状态，Redis key 为 `maintenance_health:{task_name}`。达到配置阈值时 Worker 写结构化错误日志并设置 Prometheus alert Gauge；主进程定时刷新 stale 和时间戳指标。规则文件位于 `deploy/monitoring/maintenance-alerts.yml`，详细指标、配置和排障流程见 `docs/maintenance-monitoring.md`。Redis 只保存监控状态，不替代 PostgreSQL 与审计事实。
 
 ## 8. Preview Worker
 
@@ -379,6 +381,7 @@ Preview Worker 镜像必须包含：
 
 - LibreOffice `soffice`
 - Poppler `pdftoppm`
+- Tesseract 及 `eng`、`chi_sim` 语言包
 - Pillow 所需系统库
 - 常用中文字体
 
@@ -393,11 +396,15 @@ Preview Worker 镜像必须包含：
 
 临时目录不与 PostgreSQL、MinIO、OpenSearch 数据卷共用。详细要求见 `docs/deployment-preview-worker.md`。
 
+Search Worker 使用同一内容处理镜像执行图片/扫描 PDF OCR 和旧 Office/ODF 转换，但只消费 `search` 队列。默认使用独立 `SEARCH_TMPFS_SIZE=1073741824`、`--concurrency=2` 和 `--max-tasks-per-child=20`；不得与 Preview Worker 共享 tmpfs 或进程。
+
 容器内验证：
 
 ```powershell
 docker compose -f compose.windows.yml --env-file .env.windows exec worker-preview soffice --version
 docker compose -f compose.windows.yml --env-file .env.windows exec worker-preview pdftoppm -v
+docker compose -f compose.windows.yml --env-file .env.windows exec worker-search tesseract --version
+docker compose -f compose.windows.yml --env-file .env.windows exec worker-search tesseract --list-langs
 ```
 
 ## 9. Named Volumes 与数据边界
@@ -615,7 +622,7 @@ $backupPath = [string](
 - gateway 的 API 与 S3 外部端点可访问；公网模式还要检查 HTTP `308`、证书链、HSTS、双域名 Host 分流和真实预签名 PUT/GET。
 - Worker 已连接预期队列。
 - `beat` 只有一个有效实例。
-- Preview 工具版本可读取。
+- Preview/OCR 工具版本与 Tesseract `eng`、`chi_sim` 语言包可读取。
 - 容器无持续重启。
 - Windows 宿主磁盘空间正常。
 - 发布前备份已通过 `backup-verify`，并且最近一次不同 Compose project 隔离恢复演练有记录。
@@ -775,6 +782,18 @@ docker compose -f compose.windows.yml --env-file .env.windows exec worker-previe
 ```
 
 同时检查临时目录、内存限制、任务超时和 `preview_failures_total`。
+
+### 图片或扫描 PDF OCR 未生成正文
+
+在 `worker-search` 内检查：
+
+```powershell
+docker compose -f compose.windows.yml --env-file .env.windows exec worker-search tesseract --version
+docker compose -f compose.windows.yml --env-file .env.windows exec worker-search tesseract --list-langs
+docker compose -f compose.windows.yml --env-file .env.windows exec worker-search pdftoppm -v
+```
+
+确认语言列表同时包含 `eng` 和 `chi_sim`，并检查 `DRIVE_SEARCH_OCR_ENABLED`、页数/像素/渲染体量、命令超时、Search Worker 独立 tmpfs 和 outbox 错误原因。
 
 ### OpenSearch 在 Docker Desktop 中频繁重启
 

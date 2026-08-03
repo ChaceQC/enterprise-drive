@@ -92,12 +92,14 @@ class PreviewAccessService:
                 error=version.preview_error,
             )
 
+        await self.repository.touch_artifact(artifact)
         presigned = await self.storage.presign_download(
             bucket=self.settings.s3_bucket,
             storage_key=artifact.storage_key,
             filename=f"{node.name}.webp",
             expires_in_seconds=self.settings.preview_presign_expires_seconds,
         )
+        await self.repository.commit()
         return FilePreviewResponse(
             node_id=node.id,
             version_id=version.id,

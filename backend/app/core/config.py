@@ -175,6 +175,7 @@ class Settings(BaseSettings):
     upload_cleanup_interval_seconds: int = Field(default=300, ge=1)
     trash_retention_days: int = Field(default=30, ge=1)
     trash_cleanup_interval_seconds: int = Field(default=3600, ge=1)
+    share_expiry_interval_seconds: int = Field(default=300, ge=1)
     blob_cleanup_interval_seconds: int = Field(default=3600, ge=1)
     orphan_object_scan_interval_seconds: int = Field(default=86400, ge=1)
     quota_reconciliation_interval_seconds: int = Field(default=86400, ge=1)
@@ -221,6 +222,17 @@ class Settings(BaseSettings):
     share_external_download_rate_limit_count: int = 120
     share_external_download_rate_limit_window_seconds: int = 60
     search_text_extract_max_bytes: int = 512 * 1024
+    search_complex_extract_max_bytes: int = Field(default=20 * 1024 * 1024, ge=1)
+    search_extract_max_chars: int = Field(default=1_000_000, ge=1)
+    search_ocr_enabled: bool = True
+    search_ocr_command: str = "tesseract"
+    search_ocr_languages: str = "eng+chi_sim"
+    search_ocr_page_segmentation_mode: int = Field(default=3, ge=0, le=13)
+    search_ocr_max_pages: int = Field(default=20, ge=1, le=200)
+    search_ocr_pdf_dpi: int = Field(default=144, ge=72, le=300)
+    search_ocr_max_pixels: int = Field(default=100_000_000, ge=1)
+    search_ocr_max_rendered_bytes: int = Field(default=100 * 1024 * 1024, ge=1)
+    search_ocr_command_timeout_seconds: int = Field(default=60, ge=1, le=600)
     preview_max_source_bytes: int = 20 * 1024 * 1024
     preview_image_max_side: int = 1600
     preview_office_command: str = "soffice"
@@ -233,6 +245,8 @@ class Settings(BaseSettings):
     preview_task_time_limit_seconds: int = 150
     preview_task_rate_limit: str = "30/m"
     preview_presign_expires_seconds: int = 300
+    preview_artifact_retention_days: int = Field(default=30, ge=1)
+    preview_cleanup_interval_seconds: int = Field(default=86400, ge=1)
 
     session_cookie_name: str = "drive_session"
     csrf_cookie_name: str = "drive_csrf"

@@ -424,6 +424,14 @@ async def test_internal_routes_hide_foreign_tenant_resources(
             "/api/v1/shares",
             {"share_type": "external", "root_node_id": str(fixture.file_node_id)},
         ),
+        ("GET", "/api/v1/shares/{share_id}/items"): (
+            f"/api/v1/shares/{fixture.share_id}/items",
+            None,
+        ),
+        ("POST", "/api/v1/shares/{share_id}/download"): (
+            f"/api/v1/shares/{fixture.share_id}/download",
+            {"node_id": str(fixture.file_node_id)},
+        ),
         ("GET", "/api/v1/shares/{share_id}"): (
             f"/api/v1/shares/{fixture.share_id}",
             None,

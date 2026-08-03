@@ -65,6 +65,89 @@ class ShareDetail(BaseModel):
     revoked_by: UUID | None
 
 
+class ShareListItem(BaseModel):
+    id: UUID
+    share_type: str
+    root_node_id: UUID
+    root_name: str
+    root_node_type: str
+    permission: str
+    status: str
+    created_by: UUID
+    creator_name: str
+    expires_at: datetime | None
+    max_views: int | None
+    max_downloads: int | None
+    view_count: int
+    download_count: int
+    created_at: datetime
+    available: bool
+
+
+class ShareListResponse(BaseModel):
+    items: list[ShareListItem]
+    next_cursor: str | None = None
+
+
+class InternalShareItem(BaseModel):
+    node_id: UUID
+    name: str
+    node_type: str
+    is_root: bool
+    current_version_id: UUID | None
+    size_bytes: int | None
+    mime_type: str | None
+
+
+class InternalShareItemsResponse(BaseModel):
+    share: ShareListItem
+    access_role: Literal["creator", "recipient"]
+    items: list[InternalShareItem]
+
+
+class InternalShareDownloadRequest(BaseModel):
+    node_id: UUID
+    delivery_mode: Literal["presigned", "watermark"] = "presigned"
+
+
+class InternalShareDownloadResponse(DriveTransferProtocolResponse):
+    share_id: UUID
+    node_id: UUID
+    version_id: UUID
+    file_name: str
+    size_bytes: int
+    mime_type: str | None
+    download_url: str
+    expires_at: datetime
+    headers: dict[str, str]
+    download_count: int
+
+
+class ShareNotificationItem(BaseModel):
+    id: UUID
+    notification_type: str
+    share_id: UUID
+    root_node_id: UUID
+    root_name: str
+    created_by: UUID
+    creator_name: str
+    is_read: bool
+    read_at: datetime | None
+    invalidated_at: datetime | None
+    created_at: datetime
+
+
+class ShareNotificationListResponse(BaseModel):
+    items: list[ShareNotificationItem]
+    next_cursor: str | None = None
+
+
+class ShareNotificationReadResponse(BaseModel):
+    notification_id: UUID
+    read: Literal[True] = True
+    read_at: datetime
+
+
 class RevokeShareResponse(BaseModel):
     share_id: UUID
     revoked: Literal[True] = True

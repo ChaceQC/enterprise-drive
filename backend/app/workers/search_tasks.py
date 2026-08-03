@@ -6,6 +6,10 @@ from uuid import UUID
 from app.core.config import get_settings
 from app.db.session import get_session_factory
 from app.infrastructure.queue.celery_app import celery_app
+from app.infrastructure.search.content_extraction import (
+    LibreOfficeSearchConverter,
+    TesseractOcrEngine,
+)
 from app.infrastructure.search.opensearch import OpenSearchIndexAdapter
 from app.infrastructure.storage.s3 import S3StorageAdapter
 from app.modules.audit.dispatcher import LoggingOutboxPublisher, OutboxDispatcher, OutboxPublisher
@@ -17,6 +21,7 @@ from app.modules.search.events import (
     SEARCH_INDEX_REQUESTED,
 )
 from app.modules.search.extractor import SearchExtractionService
+from app.modules.search.extractors import default_text_extractors
 from app.modules.search.indexer import SearchIndexService
 from app.modules.search.repository import SearchRepository
 
@@ -38,6 +43,22 @@ async def _dispatch_search_outbox(batch_size: int | None = None) -> dict[str, in
             repository=search_repository,
             index_adapter=index_adapter,
         )
+        ocr_engine = (
+            TesseractOcrEngine(
+                command=settings.search_ocr_command,
+                pdf_command=settings.preview_pdf_command,
+                languages=settings.search_ocr_languages,
+                page_segmentation_mode=settings.search_ocr_page_segmentation_mode,
+                max_pages=settings.search_ocr_max_pages,
+                pdf_dpi=settings.search_ocr_pdf_dpi,
+                max_pixels=settings.search_ocr_max_pixels,
+                max_rendered_bytes=settings.search_ocr_max_rendered_bytes,
+                timeout_seconds=settings.search_ocr_command_timeout_seconds,
+                max_output_chars=settings.search_extract_max_chars,
+            )
+            if settings.search_ocr_enabled
+            else None
+        )
         publisher = SearchOutboxPublisher(
             index_service=index_service,
             extraction_service=SearchExtractionService(
@@ -45,6 +66,17 @@ async def _dispatch_search_outbox(batch_size: int | None = None) -> dict[str, in
                 index_service=index_service,
                 storage=S3StorageAdapter(settings=settings),
                 settings=settings,
+                max_chars=settings.search_extract_max_chars,
+                extractors=default_text_extractors(
+                    ocr_engine=ocr_engine,
+                    office_converter=LibreOfficeSearchConverter(
+                        command=settings.preview_office_command,
+                        timeout_seconds=settings.search_ocr_command_timeout_seconds,
+                        max_pdf_bytes=settings.preview_office_max_pdf_bytes,
+                    ),
+                    complex_source_max_bytes=settings.search_complex_extract_max_bytes,
+                    pdf_max_pages=settings.search_ocr_max_pages,
+                ),
             ),
             fallback_publisher=LoggingOutboxPublisher(),
         )

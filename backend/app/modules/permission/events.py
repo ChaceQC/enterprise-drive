@@ -4,6 +4,7 @@ from uuid import UUID
 
 from app.modules.audit.service import AuditService
 from app.modules.search.events import emit_search_acl_rebuild_requested
+from app.modules.share.events import emit_share_recipients_rebuild_requested
 
 
 async def emit_permission_changed(
@@ -39,3 +40,13 @@ async def emit_permission_changed(
         reason=reason,
         metadata=metadata,
     )
+    if scope == "tenant":
+        await emit_share_recipients_rebuild_requested(
+            audit_service=audit_service,
+            tenant_id=tenant_id,
+            scope=scope,
+            resource_id=resource_id,
+            reason=reason,
+            affected_user_id=affected_user_id,
+            metadata=metadata,
+        )

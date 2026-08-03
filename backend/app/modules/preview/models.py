@@ -15,6 +15,7 @@ class PreviewArtifact(Base):
     __table_args__ = (
         Index("uq_preview_artifacts_kind", "tenant_id", "version_id", "artifact_type", unique=True),
         Index("idx_preview_artifacts_node", "tenant_id", "node_id", "created_at"),
+        Index("idx_preview_artifacts_lifecycle", "tenant_id", "last_accessed_at", "id"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
@@ -41,6 +42,11 @@ class PreviewArtifact(Base):
     storage_key: Mapped[str] = mapped_column(String(512), nullable=False)
     size_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
+    last_accessed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         default=utc_now,

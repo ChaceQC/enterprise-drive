@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.modules.auth.models import User
 from app.modules.org.models import Department, DepartmentMember, UserGroup, UserGroupMember
 
 
@@ -145,6 +146,50 @@ class OrgRepository:
                 UserGroupMember.user_id == user_id,
             )
             .order_by(UserGroup.slug, UserGroup.id)
+        )
+        return list(result.scalars().all())
+
+    async def list_active_department_member_user_ids(
+        self,
+        *,
+        tenant_id: UUID,
+        department_id: UUID,
+    ) -> list[UUID]:
+        result = await self.session.execute(
+            select(User.id)
+            .join(DepartmentMember, DepartmentMember.user_id == User.id)
+            .join(Department, Department.id == DepartmentMember.department_id)
+            .where(
+                User.tenant_id == tenant_id,
+                User.is_active.is_(True),
+                DepartmentMember.tenant_id == tenant_id,
+                DepartmentMember.department_id == department_id,
+                Department.tenant_id == tenant_id,
+                Department.status == "active",
+            )
+            .order_by(User.id)
+        )
+        return list(result.scalars().all())
+
+    async def list_active_group_member_user_ids(
+        self,
+        *,
+        tenant_id: UUID,
+        group_id: UUID,
+    ) -> list[UUID]:
+        result = await self.session.execute(
+            select(User.id)
+            .join(UserGroupMember, UserGroupMember.user_id == User.id)
+            .join(UserGroup, UserGroup.id == UserGroupMember.group_id)
+            .where(
+                User.tenant_id == tenant_id,
+                User.is_active.is_(True),
+                UserGroupMember.tenant_id == tenant_id,
+                UserGroupMember.group_id == group_id,
+                UserGroup.tenant_id == tenant_id,
+                UserGroup.status == "active",
+            )
+            .order_by(User.id)
         )
         return list(result.scalars().all())
 

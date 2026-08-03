@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import AsyncIterator
-from datetime import timedelta
+from datetime import datetime, timedelta
 from uuid import uuid4
 
 from app.core.security import utc_now
@@ -22,6 +22,7 @@ class InMemoryStorageAdapter:
         self.aborted_uploads: set[str] = set()
         self.completed_uploads: dict[str, list[CompletedUploadPart]] = {}
         self.object_contents: dict[tuple[str, str], bytes] = {}
+        self.object_last_modified: dict[tuple[str, str], datetime] = {}
         self.copied_objects: list[tuple[str, str, str]] = []
         self.deleted_objects: list[tuple[str, str]] = []
         self.presigned_downloads: list[tuple[str, str, str]] = []
@@ -129,6 +130,7 @@ class InMemoryStorageAdapter:
                 storage_key=source_key,
             )
         self.object_contents[(bucket, destination_key)] = content
+        self.object_last_modified[(bucket, destination_key)] = utc_now()
 
     async def delete_object(
         self,
@@ -138,6 +140,7 @@ class InMemoryStorageAdapter:
     ) -> None:
         self.deleted_objects.append((bucket, storage_key))
         self.object_contents.pop((bucket, storage_key), None)
+        self.object_last_modified.pop((bucket, storage_key), None)
 
     async def read_object_bytes(
         self,
@@ -182,6 +185,7 @@ class InMemoryStorageAdapter:
         content_type: str,
     ) -> None:
         self.object_contents[(bucket, storage_key)] = content
+        self.object_last_modified[(bucket, storage_key)] = utc_now()
 
     async def list_objects(
         self,
@@ -194,7 +198,11 @@ class InMemoryStorageAdapter:
         if limit <= 0:
             return []
         objects = [
-            StorageObject(storage_key=storage_key, size_bytes=len(content))
+            StorageObject(
+                storage_key=storage_key,
+                size_bytes=len(content),
+                last_modified=self.object_last_modified.get((object_bucket, storage_key)),
+            )
             for (object_bucket, storage_key), content in sorted(self.object_contents.items())
             if object_bucket == bucket
             and storage_key.startswith(prefix)

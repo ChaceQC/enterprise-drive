@@ -11,6 +11,7 @@ AuthorizationPolicy = Literal[
     "authenticated",
     "external_share",
     "file_tree_operation_owner",
+    "internal_share",
     "node_delete",
     "node_download",
     "node_grant",
@@ -41,6 +42,7 @@ _QUOTA_POLICY_ID = "00000000-0000-4000-8000-00000000000b"
 _FILE_SECURITY_POLICY_ID = "00000000-0000-4000-8000-00000000000c"
 _DEPARTMENT_ID = "00000000-0000-4000-8000-00000000000d"
 _GROUP_ID = "00000000-0000-4000-8000-00000000000e"
+_NOTIFICATION_ID = "00000000-0000-4000-8000-00000000000f"
 _RAW_SHARE_TOKEN = "0" * 32
 _CONTENT_HASH = "0" * 64
 
@@ -760,6 +762,61 @@ ROUTE_SECURITY_MATRIX: tuple[SecurityRouteCase, ...] = (
         csrf_mode="required",
         authorization="node_share",
         json_body={"share_type": "external", "root_node_id": _NODE_ID},
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/shares/created",
+        request_path="/api/v1/shares/created",
+        access_mode="session",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="authenticated",
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/shares/received",
+        request_path="/api/v1/shares/received",
+        access_mode="session",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="authenticated",
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/shares/notifications",
+        request_path="/api/v1/shares/notifications",
+        access_mode="session",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="authenticated",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/shares/notifications/{notification_id}/read",
+        request_path=f"/api/v1/shares/notifications/{_NOTIFICATION_ID}/read",
+        access_mode="session",
+        tenant_scope="session",
+        csrf_mode="required",
+        authorization="authenticated",
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/shares/{share_id}/items",
+        request_path=f"/api/v1/shares/{_SHARE_ID}/items",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="none",
+        authorization="internal_share",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/shares/{share_id}/download",
+        request_path=f"/api/v1/shares/{_SHARE_ID}/download",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="internal_share",
+        json_body={"node_id": _NODE_ID},
     ),
     SecurityRouteCase(
         method="GET",

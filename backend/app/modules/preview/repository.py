@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import utc_now
 from app.modules.file.models import FileBlob, FileVersion, Node
 from app.modules.preview.models import PreviewArtifact
 
@@ -82,6 +84,7 @@ class PreviewRepository:
             existing.mime_type = mime_type
             existing.storage_key = storage_key
             existing.size_bytes = size_bytes
+            existing.last_accessed_at = utc_now()
             await self.session.flush()
             return existing
         artifact = PreviewArtifact(
@@ -92,6 +95,7 @@ class PreviewRepository:
             mime_type=mime_type,
             storage_key=storage_key,
             size_bytes=size_bytes,
+            last_accessed_at=utc_now(),
         )
         self.session.add(artifact)
         await self.session.flush()
@@ -112,6 +116,68 @@ class PreviewRepository:
             )
         )
         return result.scalar_one_or_none()
+
+    async def touch_artifact(self, artifact: PreviewArtifact) -> None:
+        artifact.last_accessed_at = utc_now()
+        await self.session.flush()
+
+    async def list_lifecycle_candidates(
+        self,
+        *,
+        tenant_id: UUID,
+        accessed_before: datetime,
+        limit: int,
+    ) -> list[PreviewArtifact]:
+        result = await self.session.execute(
+            select(PreviewArtifact)
+            .join(
+                FileVersion,
+                and_(
+                    FileVersion.tenant_id == PreviewArtifact.tenant_id,
+                    FileVersion.id == PreviewArtifact.version_id,
+                ),
+            )
+            .join(
+                Node,
+                and_(
+                    Node.tenant_id == PreviewArtifact.tenant_id,
+                    Node.id == PreviewArtifact.node_id,
+                ),
+            )
+            .where(
+                PreviewArtifact.tenant_id == tenant_id,
+                PreviewArtifact.last_accessed_at <= accessed_before,
+                or_(
+                    Node.is_deleted.is_(True),
+                    Node.current_version_id.is_(None),
+                    Node.current_version_id != PreviewArtifact.version_id,
+                ),
+            )
+            .order_by(PreviewArtifact.last_accessed_at, PreviewArtifact.id)
+            .limit(limit)
+            .with_for_update(skip_locked=True)
+        )
+        return list(result.scalars().all())
+
+    async def list_existing_storage_keys(
+        self,
+        *,
+        tenant_id: UUID,
+        storage_keys: list[str],
+    ) -> set[str]:
+        if not storage_keys:
+            return set()
+        result = await self.session.execute(
+            select(PreviewArtifact.storage_key).where(
+                PreviewArtifact.tenant_id == tenant_id,
+                PreviewArtifact.storage_key.in_(storage_keys),
+            )
+        )
+        return set(result.scalars().all())
+
+    async def delete_artifact(self, artifact: PreviewArtifact) -> None:
+        await self.session.delete(artifact)
+        await self.session.flush()
 
     async def commit(self) -> None:
         await self.session.commit()
