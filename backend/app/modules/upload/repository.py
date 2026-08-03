@@ -1,13 +1,21 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.file.models import FileBlob, FileVersion, Node
 from app.modules.upload.models import UploadPart, UploadSession
+
+
+@dataclass(frozen=True)
+class BlobReferenceResolution:
+    blob: FileBlob
+    created: bool
 
 
 class UploadRepository:
@@ -135,6 +143,48 @@ class UploadRepository:
         self.session.add(blob)
         await self.session.flush()
         return blob
+
+    async def resolve_file_blob_reference(
+        self,
+        *,
+        tenant_id: UUID,
+        hash_algo: str,
+        content_hash: str,
+        size_bytes: int,
+        storage_key: str,
+        mime_type: str | None,
+    ) -> BlobReferenceResolution:
+        existing = await self.get_blob_by_hash_any_status(
+            tenant_id=tenant_id,
+            hash_algo=hash_algo,
+            content_hash=content_hash,
+            size_bytes=size_bytes,
+        )
+        if existing is not None:
+            return BlobReferenceResolution(blob=existing, created=False)
+
+        try:
+            async with self.session.begin_nested():
+                created = await self.create_file_blob(
+                    tenant_id=tenant_id,
+                    hash_algo=hash_algo,
+                    content_hash=content_hash,
+                    size_bytes=size_bytes,
+                    storage_key=storage_key,
+                    mime_type=mime_type,
+                    ref_count=1,
+                )
+            return BlobReferenceResolution(blob=created, created=True)
+        except IntegrityError as exc:
+            existing = await self.get_blob_by_hash_any_status(
+                tenant_id=tenant_id,
+                hash_algo=hash_algo,
+                content_hash=content_hash,
+                size_bytes=size_bytes,
+            )
+            if existing is None:
+                raise RuntimeError("file blob creation race did not resolve") from exc
+            return BlobReferenceResolution(blob=existing, created=False)
 
     async def create_upload_session(
         self,

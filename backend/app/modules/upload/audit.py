@@ -110,13 +110,21 @@ def aborted_upload_metadata(*, upload_session: UploadSession) -> dict[str, objec
     }
 
 
-def failed_upload_metadata(*, upload_session: UploadSession, reason: str) -> dict[str, object]:
+def failed_upload_metadata(
+    *,
+    upload_session: UploadSession,
+    reason: str,
+    cleanup_errors: list[str] | None = None,
+) -> dict[str, object]:
+    errors = cleanup_errors or []
     return {
         "mode": "multipart",
         "space_id": str(upload_session.space_id),
         "parent_id": str(upload_session.parent_id),
         "status": upload_session.status,
         "reason": reason,
+        "cleanup_status": "failed" if errors else "cleaned",
+        "cleanup_errors": errors,
     }
 
 

@@ -1,6 +1,6 @@
 # 项目阶段进度
 
-更新时间：2026-08-02
+更新时间：2026-08-03
 
 ## 1. 总体结论
 
@@ -27,7 +27,7 @@
 |---|---|---|
 | Sprint 1：工程底座 | FastAPI、uv、配置、日志、错误处理、健康检查、指标、Tracing、PostgreSQL/Redis/MinIO/OpenSearch/Celery、Cookie Session、CSRF、CI | OIDC、LDAP、账号治理属于后续 Sprint 11 |
 | Sprint 2：空间和文件树 | 空间、目录、列表、重命名、移动、删除/恢复/彻底删除、大目录后台任务、回收站分页、四类批量操作、批量幂等、`fail/keep_both/replace`、游标分页、基础审计 | 无 |
-| Sprint 3：上传下载 | multipart、秒传、断点状态、complete/abort 幂等、预签名下载、服务端 SHA-256、最终对象归档、限流、容量账本、清理任务、真实 MinIO CI | SDK 私有 multipart 方法替换评估；并发竞争、异常恢复、升级兼容；目标规模压测；策略/账户管理 API；水印/DLP |
+| Sprint 3：上传下载 | multipart、秒传、断点状态、complete/abort 幂等、预签名下载、服务端 SHA-256、最终对象归档、限流、容量账本、清理任务、真实 MinIO CI、标准 S3 HTTP multipart 控制面、同 hash 并发解析和失败存储清理 | 目标规模压测；策略/账户管理 API；水印/DLP |
 | Sprint 4：权限系统 | 空间成员和角色、用户/部门/用户组 ACL、继承、deny 优先、缓存失效、搜索 ACL 过滤、关键入口二次查权 | 完整用户/部门/用户组管理 API 仍待 `BE-044/045` |
 | Sprint 5：分享、预览、搜索 | 内外部分享、提取码、过期、次数限制、撤销、图片/PDF/Office 预览、OpenSearch 索引、文本抽取、权限过滤 | “分享给我的”、通知和授权重算；OCR、扫描 PDF、复杂格式；预览产物生命周期治理 |
 | Sprint 6：管理、治理、上线 | 管理员审计查询、生命周期清理、指标与 Tracing、Windows 11 Docker Compose、Nginx、TLS/ACME、备份校验恢复、安全门禁 | 完整管理 API、Alertmanager/Grafana 看板、生产 DNS/受信证书实测、周期恢复演练、备份轮换；正式 `v0.4.0` 发布标记 |

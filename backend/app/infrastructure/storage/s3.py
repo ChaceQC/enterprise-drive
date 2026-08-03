@@ -9,7 +9,7 @@ from urllib.parse import quote, urlsplit
 
 from minio import Minio
 from minio.commonconfig import CopySource
-from minio.datatypes import Part
+from minio.error import S3Error
 
 from app.core.config import Settings
 from app.core.security import utc_now
@@ -21,6 +21,7 @@ from app.infrastructure.storage.base import (
     PresignedUploadPart,
     StorageObject,
 )
+from app.infrastructure.storage.s3_multipart import S3MultipartControlClient
 
 
 class S3StorageAdapter:
@@ -34,6 +35,11 @@ class S3StorageAdapter:
             endpoint_url=settings.s3_public_endpoint_url or settings.s3_endpoint_url,
             settings=settings,
         )
+        self._multipart_control = S3MultipartControlClient(
+            client=self._client,
+            request_timeout_seconds=settings.s3_control_request_timeout_seconds,
+            presign_expires_seconds=settings.s3_control_presign_expires_seconds,
+        )
 
     async def create_multipart_upload(
         self,
@@ -44,10 +50,10 @@ class S3StorageAdapter:
     ) -> MultipartUpload:
         await asyncio.to_thread(self._ensure_bucket, bucket)
         provider_upload_id = await asyncio.to_thread(
-            self._client._create_multipart_upload,
-            bucket,
-            storage_key,
-            {"Content-Type": content_type or "application/octet-stream"},
+            self._multipart_control.create,
+            bucket=bucket,
+            storage_key=storage_key,
+            content_type=content_type,
         )
         return MultipartUpload(provider_upload_id=str(provider_upload_id))
 
@@ -86,10 +92,10 @@ class S3StorageAdapter:
         provider_upload_id: str,
     ) -> None:
         await asyncio.to_thread(
-            self._client._abort_multipart_upload,
-            bucket,
-            storage_key,
-            provider_upload_id,
+            self._multipart_control.abort,
+            bucket=bucket,
+            storage_key=storage_key,
+            provider_upload_id=provider_upload_id,
         )
 
     async def complete_multipart_upload(
@@ -100,24 +106,31 @@ class S3StorageAdapter:
         provider_upload_id: str,
         parts: list[CompletedUploadPart],
     ) -> CompletedMultipartUpload:
-        multipart_parts = [
-            Part(part.part_no, part.etag, size=part.size_bytes)
-            for part in sorted(parts, key=lambda item: item.part_no)
-        ]
-        response = await asyncio.to_thread(
-            self._client._complete_multipart_upload,
-            bucket,
-            storage_key,
-            provider_upload_id,
-            multipart_parts,
-        )
-        head_response = await asyncio.to_thread(
-            self._client.stat_object,
-            bucket,
-            storage_key,
-        )
+        try:
+            response_etag = await asyncio.to_thread(
+                self._multipart_control.complete,
+                bucket=bucket,
+                storage_key=storage_key,
+                provider_upload_id=provider_upload_id,
+                parts=parts,
+            )
+        except Exception as complete_error:
+            try:
+                recovered = await asyncio.to_thread(
+                    self._stat_completed_object_if_present,
+                    bucket,
+                    storage_key,
+                )
+            except Exception as stat_error:
+                raise complete_error from stat_error
+            if recovered is None:
+                raise complete_error
+            return recovered
+
+        head_response = await asyncio.to_thread(self._client.stat_object, bucket, storage_key)
         return CompletedMultipartUpload(
-            etag=str(response.etag) if response.etag is not None else None,
+            etag=response_etag
+            or (str(head_response.etag) if head_response.etag is not None else None),
             size_bytes=int(head_response.size) if head_response.size is not None else None,
         )
 
@@ -250,6 +263,22 @@ class S3StorageAdapter:
         if self._client.bucket_exists(bucket):
             return
         self._client.make_bucket(bucket, location=self.settings.s3_region)
+
+    def _stat_completed_object_if_present(
+        self,
+        bucket: str,
+        storage_key: str,
+    ) -> CompletedMultipartUpload | None:
+        try:
+            response = self._client.stat_object(bucket, storage_key)
+        except S3Error as exc:
+            if exc.code in {"NoSuchBucket", "NoSuchKey", "NoSuchObject"}:
+                return None
+            raise
+        return CompletedMultipartUpload(
+            etag=str(response.etag) if response.etag is not None else None,
+            size_bytes=int(response.size) if response.size is not None else None,
+        )
 
     def _calculate_sha256(self, bucket: str, storage_key: str) -> str:
         response = self._client.get_object(bucket, storage_key)

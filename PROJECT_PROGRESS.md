@@ -1,5 +1,36 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-03 Sprint 3 对象存储稳定性与同 hash 并发闭环
+
+### 当前状态
+
+- Sprint 3 的 MinIO SDK 私有 multipart 方法、同 hash 首次上传竞争、异常 complete 恢复和失败临时对象清理已完成。
+- `PROJECT_STAGE_STATUS.md` 中 Sprint 3 尚余目标规模压测、策略/账户管理 API 和水印/DLP。
+
+### 已完成
+
+- 新增 `S3MultipartControlClient`，使用 MinIO 公共 `get_presigned_url` 和标准 S3 HTTP POST/DELETE/XML 完成 create、complete、abort，不再调用三个 SDK 私有 multipart 方法。
+- 新增控制请求超时和控制 URL 有效期配置；MinIO Python 依赖范围收紧为 `>=7.2.20,<8`，避免未经验证的主版本升级。
+- complete 请求异常但对象已由存储端提交时，通过 `stat_object` 恢复 ETag 和大小；不存在 provider upload 的 abort 作为幂等成功处理。
+- 上传失败统一最佳努力 abort multipart 并删除受控 `uploads/...` 临时对象，`upload.failed` 审计记录 `cleanup_status` 和 `cleanup_errors`。
+- 同 hash blob 创建改为 savepoint 内插入；唯一约束竞争失败后读取已提交 blob 并原子增加引用，避免把 blob 竞争误报为同名文件冲突。
+
+### 验证
+
+- `uv lock --check` 通过。
+- 新增 multipart 控制面单测 `3 passed`。
+- 真实固定版本 MinIO 定向 multipart 用例 `1 passed`，覆盖 create、预签名 PUT、complete、hash 和 abort。
+- hash 不匹配失败清理定向用例 `1 passed`，确认会话为 `failed`、multipart 已 abort、临时对象已删除且审计清理结果为空错误。
+- 临时 PostgreSQL 16 容器执行当前 migration 后，新增同 hash 双会话竞争用例 `1 passed`，确认只创建一个 blob 且 `ref_count=2`。
+- 变更文件 Ruff format/check 与相关模块 Mypy 通过；未运行全量 pytest、备份恢复、性能压测或无关模块测试。
+- 两个临时 MinIO 容器和一个临时 PostgreSQL 容器均已删除。
+
+### 下一步
+
+1. 完成 Sprint 3 的配额账户/策略管理 API，并补显式变更审计和最小并发校验。
+2. 完成水印/DLP 基础策略与下载自动选路。
+3. 最后恢复执行一次尚未完成的目标规模压测，不重复既有 smoke、备份恢复和完整后端回归。
+
 ## 2026-08-02 Sprint 2 剩余增强闭环
 
 ### 当前状态

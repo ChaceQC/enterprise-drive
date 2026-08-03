@@ -49,7 +49,7 @@
 - 已移除 `boto3/botocore` 直接依赖，改用 MinIO Python SDK 作为默认对象存储适配实现。
 - `S3StorageAdapter` 仍通过 `StorageAdapter` 协议向业务层暴露能力，上传、下载和清理任务不直接依赖具体 SDK。
 - 完整技术计划书、README、后端 README 和执行计划已同步改为 MinIO Python SDK 与开放 S3 兼容客户端路线。
-- 当前 MinIO Python SDK 的 multipart create/complete/abort 仍需要在适配层调用客户端私有方法；该用法已限定在 `infrastructure` 内，并在进度文档中记录后续替换触发条件。
+- 2026-07-01 审计时 MinIO Python SDK 的 multipart create/complete/abort 仍在适配层调用客户端私有方法；2026-08-03 已改为公共预签名 API + 标准 S3 HTTP/XML 控制面，并由真实 MinIO 门禁锁定行为。
 
 参考依据：
 
@@ -213,7 +213,7 @@
 
 ## 后续行动建议
 
-1. 对象存储默认实现、依赖基线和相关文档已完成整改，后续只需持续观察 MinIO Python SDK multipart 私有方法的兼容性风险。
+1. 对象存储默认实现、依赖基线和相关文档已完成整改；2026-08-03 又移除 MinIO multipart 私有方法依赖，后续按 `minio 7.x` 兼容窗口和真实集成门禁管理升级风险。
 2. Redis 固定窗口限流已改为 Lua 原子脚本；后续新增复杂限流策略时再评估成熟限流库。
 3. 浏览器认证已改为 BFF + HttpOnly Cookie Session，后续接入 OIDC/OAuth 2.1 + PKCE 时应继续保持 BFF 会话边界。
 4. 容量校准已恢复为基于 PostgreSQL 事实表和现有 SQLAlchemy 能力的维护任务，未引入额外复杂调度或自研规则引擎；后续继续推进 blob/object 垃圾回收。

@@ -33,7 +33,7 @@ from app.modules.upload.schemas import (
     CompleteUploadPartRequest,
     CompleteUploadResponse,
 )
-from app.modules.upload.storage_keys import build_object_storage_key
+from app.modules.upload.storage_keys import build_object_storage_key, is_upload_temp_storage_key
 from app.modules.upload.timing import (
     UploadCompleteTimings,
     measure_upload_complete_phase,
@@ -150,10 +150,6 @@ class UploadLifecycleService:
                     audit_context=audit_context,
                 )
         except ApiError:
-            await self._delete_temp_object(
-                bucket=storage_bucket,
-                storage_key=temp_storage_key,
-            )
             raise
         should_delete_temp_object = final_storage_key != temp_storage_key
 
@@ -173,26 +169,18 @@ class UploadLifecycleService:
                 parts=[(part.part_no, part.etag, part.size_bytes) for part in parts],
                 uploaded_at=now,
             )
-            existing_blob = await self.repository.get_blob_by_hash_any_status(
+            blob_resolution = await self.repository.resolve_file_blob_reference(
                 tenant_id=tenant_id,
                 hash_algo=upload_session.hash_algo,
                 content_hash=upload_session.content_hash,
                 size_bytes=upload_session.size_bytes,
+                storage_key=final_storage_key,
+                mime_type=upload_session.mime_type,
             )
-            if existing_blob is None:
-                blob = await self.repository.create_file_blob(
-                    tenant_id=tenant_id,
-                    hash_algo=upload_session.hash_algo,
-                    content_hash=upload_session.content_hash,
-                    size_bytes=upload_session.size_bytes,
-                    storage_key=final_storage_key,
-                    mime_type=upload_session.mime_type,
-                    ref_count=1,
-                )
-            else:
-                if existing_blob.status != "active":
+            blob = blob_resolution.blob
+            if not blob_resolution.created:
+                if blob.status != "active":
                     raise ApiError("BLOB_DELETING", "文件内容正在清理，请稍后重试", status_code=409)
-                blob = existing_blob
                 blob_referenced = await self.repository.increment_blob_ref_count(
                     tenant_id=tenant_id,
                     blob_id=blob.id,
@@ -276,33 +264,19 @@ class UploadLifecycleService:
                 )
         except ApiError as exc:
             await self.repository.rollback()
-            if should_delete_temp_object:
-                await self._delete_temp_object(
-                    bucket=storage_bucket,
-                    storage_key=temp_storage_key,
-                )
-            if exc.code == "QUOTA_EXCEEDED":
-                await self._mark_failed(
-                    current_user=current_user,
-                    session_id=session_id,
-                    reason="quota_exceeded",
-                    audit_context=audit_context,
-                )
-            elif exc.code == "BLOB_DELETING":
-                await self._mark_failed(
-                    current_user=current_user,
-                    session_id=session_id,
-                    reason="blob_deleting",
-                    audit_context=audit_context,
-                )
+            failure_reason = {
+                "QUOTA_EXCEEDED": "quota_exceeded",
+                "BLOB_DELETING": "blob_deleting",
+            }.get(exc.code, "db_finalize_failed")
+            await self._mark_failed(
+                current_user=current_user,
+                session_id=session_id,
+                reason=failure_reason,
+                audit_context=audit_context,
+            )
             raise
         except IntegrityError as exc:
             await self.repository.rollback()
-            if should_delete_temp_object:
-                await self._delete_temp_object(
-                    bucket=storage_bucket,
-                    storage_key=temp_storage_key,
-                )
             await self._mark_failed(
                 current_user=current_user,
                 session_id=session_id,
@@ -390,7 +364,21 @@ class UploadLifecycleService:
         if upload_session.status in {"completed", "expired"}:
             await self.repository.rollback()
             return
+        storage_bucket = upload_session.storage_bucket
+        storage_key = upload_session.storage_key
+        provider_upload_id = upload_session.provider_upload_id
         upload_session.status = "failed"
+        await self.repository.commit()
+
+        cleanup_errors = await self._cleanup_failed_storage(
+            bucket=storage_bucket,
+            storage_key=storage_key,
+            provider_upload_id=provider_upload_id,
+        )
+        upload_session = await self._get_upload_session_for_update(
+            current_user=current_user,
+            session_id=session_id,
+        )
         await record_upload_event(
             audit_service=self.audit_service,
             current_user=current_user,
@@ -398,9 +386,37 @@ class UploadLifecycleService:
             resource_id=upload_session.id,
             result="denied",
             audit_context=audit_context,
-            metadata=failed_upload_metadata(upload_session=upload_session, reason=reason),
+            metadata=failed_upload_metadata(
+                upload_session=upload_session,
+                reason=reason,
+                cleanup_errors=cleanup_errors,
+            ),
         )
         await self.repository.commit()
+
+    async def _cleanup_failed_storage(
+        self,
+        *,
+        bucket: str,
+        storage_key: str,
+        provider_upload_id: str | None,
+    ) -> list[str]:
+        errors: list[str] = []
+        if provider_upload_id is not None:
+            try:
+                await self.storage.abort_multipart_upload(
+                    bucket=bucket,
+                    storage_key=storage_key,
+                    provider_upload_id=provider_upload_id,
+                )
+            except Exception:
+                errors.append("abort_multipart_upload_failed")
+        if is_upload_temp_storage_key(storage_key):
+            try:
+                await self.storage.delete_object(bucket=bucket, storage_key=storage_key)
+            except Exception:
+                errors.append("delete_temp_object_failed")
+        return errors
 
     async def _validate_completed_object_hash(
         self,

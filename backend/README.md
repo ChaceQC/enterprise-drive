@@ -186,7 +186,7 @@ $env:DRIVE_TEST_MINIO_BUCKET = "enterprise-drive-test"
 uv run pytest tests/test_storage_minio_integration.py -q
 ```
 
-`backend-ci` 会在 GitHub Actions 中启动临时 MinIO 并运行该集成测试文件，覆盖 MinIO SDK multipart 私有方法封装、预签名 PUT/GET、copy、delete、list、服务端 hash 校验和孤儿最终对象扫描。后续仍需继续扩展异常恢复、SDK 升级兼容和并发竞争场景。
+`backend-ci` 会在 GitHub Actions 中启动临时 MinIO 并运行该集成测试文件，覆盖基于 MinIO 公共 `get_presigned_url` 和标准 S3 HTTP POST/DELETE 的 multipart 控制面、预签名 PUT/GET、copy、delete、list、服务端 hash 校验和孤儿最终对象扫描。运行时依赖限制为 `minio>=7.2.20,<8`，升级到新的 7.x 版本时必须通过同一真实 MinIO 门禁；`DRIVE_S3_CONTROL_REQUEST_TIMEOUT_SECONDS` 和 `DRIVE_S3_CONTROL_PRESIGN_EXPIRES_SECONDS` 分别控制内部控制请求超时和控制 URL 有效期。
 
 ### BE-029 性能基准
 
@@ -245,7 +245,7 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - `quota.reconcile_space_usage` 维护任务，支持空间容量只读报告和修复模式。
 - `file.cleanup_unreferenced_blobs` 维护任务，清理 ref_count 为 0 且无版本引用的最终对象和 blob 元数据。
 - `file.cleanup_orphaned_objects` 维护任务，默认 dry-run，按对象存储游标扫描受控 `objects/{tenant_id}/{hash_prefix}/{sha256}` key，清理没有 DB blob 元数据引用的孤儿最终对象。
-- 真实 MinIO 集成测试，覆盖对象读写、copy、delete、list 游标、预签名下载、multipart 私有方法封装、预签名分片 PUT、complete 后 hash 校验和孤儿最终对象扫描。
+- 真实 MinIO 集成测试，覆盖对象读写、copy、delete、list 游标、预签名下载、标准 S3 HTTP multipart 控制面、预签名分片 PUT、complete 后 hash 校验和孤儿最终对象扫描。
 - 真实 PostgreSQL Docker 集成测试，覆盖完整 Alembic migration、`idx_nodes_trash_cleanup`、回收站保留期清理、删除批次去重、行锁、租户隔离、容量账本、blob 引用、审计和搜索 outbox。
 - `permission.invalidate_cache` 任务，消费 `permission.changed` outbox event 并失效 Redis 权限缓存 key；审计 dispatcher 只消费 `audit.*`，避免抢占权限事件。
 - 搜索 ACL token builder、`search.acl_rebuild_requested` outbox event、`search.index_requested` 文件索引事件、`search.extract_requested` 文本抽取事件和 `GET /api/v1/search` 查询接口；`search.dispatch_outbox` 会从 PostgreSQL 重新加载文件、版本、blob、空间成员和节点 ACL 事实后写入 OpenSearch，不再活跃或已彻底删除的文件会删除索引文档，并在 ACL 变更后按 space 或 node 子树保守重建索引 token；当前抽取支持 UTF-8 文本类文件、PDF 可复制正文、DOCX 段落/表格文本、PPTX 文本框/表格文本和 XLSX 单元格文本，PDF 使用 `pypdf` 解析，DOCX 使用 `python-docx` 解析，PPTX 使用 `python-pptx` 解析，XLSX 使用 `openpyxl` 解析，写入 `file_versions.search_text` 后刷新索引 `content` 字段；图片 OCR 等复杂格式后续继续接入成熟开源解析工具；查询接口使用 `acl_tokens` allow 过滤、`deny_acl_tokens` 排除过滤、签名 cursor 分页、HTML 编码高亮和 `read_meta` 二次权限校验。

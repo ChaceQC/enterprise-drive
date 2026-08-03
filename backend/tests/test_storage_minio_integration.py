@@ -148,7 +148,7 @@ async def test_minio_storage_adapter_supports_core_object_operations(
 
 
 @pytest.mark.asyncio
-async def test_minio_storage_adapter_multipart_private_api_wrapper(
+async def test_minio_storage_adapter_multipart_standard_http_control(
     minio_settings: Settings,
     storage_adapter: S3StorageAdapter,
 ) -> None:

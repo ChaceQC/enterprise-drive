@@ -130,7 +130,7 @@ $env:DRIVE_TEST_MINIO_BUCKET = "enterprise-drive-test"
 uv run pytest tests/test_storage_minio_integration.py -q
 ```
 
-GitHub `backend-ci` 会启动临时 MinIO，并运行这组真实对象存储集成测试，覆盖 MinIO SDK multipart 私有方法封装、预签名上传/下载、copy、delete、list、hash 校验和孤儿最终对象扫描。
+GitHub `backend-ci` 会启动临时 MinIO，并运行这组真实对象存储集成测试，覆盖基于公共预签名 API 和标准 S3 HTTP 的 multipart 控制面、预签名上传/下载、copy、delete、list、hash 校验和孤儿最终对象扫描。
 
 BE-029 目标规模数据准备使用 `uv run python -X utf8 -m performance.target_data`，OpenSearch 文档和审计日志分阶段批量生成，state checkpoint 支持中断恢复；`--max-batches` 默认只推进 1 批，显式传 `0` 才表示本次不限批次，大于 100,000 条的数据仍必须显式确认。`performance.runner upload_complete` 还提供真实 MinIO multipart complete、Server-Timing 分段和 `BE-029/2` 机器/镜像/索引/磁盘/分位报告。目标规模灌入与完整 target profile 当前暂停，不再阻塞 `BE-033` 及后续工程任务。详见 `docs/performance-benchmark.md`。
 

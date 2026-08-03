@@ -635,7 +635,7 @@ requires-dist = [
     { name = "asyncpg", specifier = ">=0.29" },
     { name = "celery", extras = ["redis"], specifier = ">=5.4" },
     { name = "fastapi", specifier = ">=0.115" },
-    { name = "minio", specifier = ">=7.2.20" },
+    { name = "minio", specifier = ">=7.2.20,<8" },
     { name = "openpyxl", specifier = ">=3.1" },
     { name = "opensearch-py", specifier = ">=2.6" },
     { name = "opentelemetry-api", specifier = ">=1.26" },

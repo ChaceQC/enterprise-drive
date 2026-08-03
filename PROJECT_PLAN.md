@@ -66,19 +66,19 @@
 - 孤儿最终对象扫描。（已完成 `file.cleanup_orphaned_objects`，按对象存储游标扫描受控 `objects/{tenant_id}/{hash_prefix}/{sha256}` key，默认 dry-run，显式确认后删除无 DB blob 元数据引用的孤儿最终对象，并写入审计和指标）
 - 下载预签名 URL。（已完成当前版本下载签名）
 - 上传下载审计。（已完成上传初始化、秒传、complete、abort、expired 和下载成功/拒绝审计）
-- 企业级补强计划：当前上传/下载链路已具备主路径能力，`BE-031`/`BE-032` 的首轮验收已完成，真实 MinIO 集成测试覆盖核心对象操作、multipart 私有方法封装和孤儿最终对象扫描；后续仍需补齐 MinIO SDK multipart 私有方法替换评估或稳定封装、同 hash 首次上传竞争的细粒度并发测试、异常恢复路径和升级兼容测试。
+- 企业级补强计划：当前上传/下载链路已具备主路径能力，`BE-031`/`BE-032` 的对象存储稳定性补强已完成；multipart 控制面使用 MinIO 公共预签名 API 和标准 S3 HTTP POST/DELETE，不再调用 SDK 私有方法，真实 MinIO、异常完成恢复、失败清理和同 hash PostgreSQL 并发测试已形成门禁。
 
 ### 上传下载企业级补强计划
 
 上传/下载链路、秒传、multipart、服务端 hash 校验、容量账本和彻底删除容量释放是当前最重要的企业级主链路。现阶段已经形成基础闭环，但上线前必须继续按以下计划补强，避免把临时实现误当成企业级完成态：
 
-- MinIO Python SDK multipart 当前在 `infrastructure` 适配层使用 `_create_multipart_upload`、`_complete_multipart_upload`、`_abort_multipart_upload` 私有方法。这不属于业务层随意自研，但 SDK 升级稳定性不够企业级；后续要评估公开 API、稳定开源 S3 兼容客户端、标准 HTTP/SigV4 适配，或至少补齐版本探测、窄封装和真实对象存储集成测试。
+- MinIO multipart create/complete/abort 已改为 `S3MultipartControlClient`：通过公共 `get_presigned_url` 生成内部短期控制 URL，再发送标准 S3 HTTP POST/DELETE 和 XML 请求，不再依赖 `_create_multipart_upload`、`_complete_multipart_upload`、`_abort_multipart_upload`。依赖范围锁定为 `minio>=7.2.20,<8`，控制请求超时与 URL 有效期可配置；升级必须通过真实 MinIO 集成门禁。
 - 对象复制到最终 `objects/{tenant_id}/{hash_prefix}/{content_hash}` 成功但数据库最终化失败后，可能出现孤儿最终对象。`file.cleanup_orphaned_objects` 反向扫描任务及 `BE-031/BE-032` 的真实 MinIO 主路径验收已完成；仍需由 `BE-035` 补生产失败告警、积压/吞吐看板和周期运行治理。
 - `BE-033` 已补齐空间、可选用户、可选租户和文件策略四类容量账户，上传初始化执行快速检查，版本创建通过原子条件更新和统一 ledger 扣减，彻底删除按版本流水释放全部维度。仍待 `BE-044` 提供账户/策略管理 API，并补部门额度、临时上传占用上限和多维通用校准。
 - `BE-035` 已在 Celery beat 既有调度上补齐原五个维护任务的 Redis 连续失败状态、结构化阈值告警、stale/时间戳 Gauge、通用任务结果计数和 Prometheus 规则文件；本轮新增的 `file.process_tree_operations` 已接入同一健康状态。外部 Alertmanager 路由、完整看板、过期分享和预览产物治理继续后续交付。
 - `BE-034` 已在短期预签名直连之外补充内部受控代理下载、单段 HTTP Range、流式对象读取和范围审计；低风险大文件继续使用预签名直连。密级标签自动强制代理、外链代理、水印和内容 DLP 仍属后续治理策略。
-- 并发下同 hash 首次上传竞争当前主要依赖数据库唯一约束和补偿路径，已有基础处理，但还需要补更细的并发测试、对象归档幂等检查和失败恢复路径，确保不会产生错误引用、漏容量或孤儿最终对象。
-- 真实对象存储集成测试首组已在 CI 和本机真实 Docker 中通过，覆盖 multipart 私有方法封装、预签名 PUT/GET、copy、delete、list、hash 校验和孤儿最终对象扫描；后续仍需扩展异常恢复、SDK 升级兼容、并发竞争和更完整的失败补偿场景。
+- 同 hash 首次上传竞争已使用数据库 savepoint 解析唯一约束竞争：并发事务只创建一个 blob，后续事务复用并原子增加引用；真实 PostgreSQL 双会话测试确认 `1` 个 blob、`ref_count=2`。complete 响应丢失时会通过对象 stat 恢复结果，hash、归档或数据库最终化失败会最佳努力 abort multipart 并删除 `uploads/...` 临时对象，最终对象孤儿继续由既有反向扫描兜底。
+- 真实对象存储集成测试已在 CI 和本机真实 Docker 中覆盖标准 HTTP multipart、预签名 PUT/GET、copy、delete、list、hash 校验和孤儿最终对象扫描；单元门禁覆盖 complete 成功但响应丢失后的 stat 恢复，以及不存在 upload 的幂等 abort。
 
 ### Sprint 4：权限系统
 

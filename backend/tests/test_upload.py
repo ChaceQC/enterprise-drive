@@ -399,6 +399,7 @@ async def test_complete_upload_rejects_hash_mismatch_without_creating_version(
     client: AsyncClient,
     session_factory: async_sessionmaker[AsyncSession],
     settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
 ) -> None:
     await seed_admin(session_factory, settings)
     token = await login(client)
@@ -463,6 +464,13 @@ async def test_complete_upload_rejects_hash_mismatch_without_creating_version(
     assert audit.request_id == "req_upload_hash_mismatch"
     assert audit.result == "denied"
     assert audit.metadata_json["reason"] == "hash_mismatch"
+    assert audit.metadata_json["cleanup_status"] == "cleaned"
+    assert audit.metadata_json["cleanup_errors"] == []
+    assert upload_session.provider_upload_id in storage_adapter.aborted_uploads
+    assert (
+        upload_session.storage_bucket,
+        upload_session.storage_key,
+    ) in storage_adapter.deleted_objects
 
 
 @pytest.mark.asyncio

@@ -159,6 +159,8 @@ class Settings(BaseSettings):
     s3_access_key_id: str = "drive-dev"
     s3_secret_access_key: str = "drive-dev-password"
     s3_region: str = "us-east-1"
+    s3_control_request_timeout_seconds: int = Field(default=30, ge=1, le=300)
+    s3_control_presign_expires_seconds: int = Field(default=300, ge=60, le=3600)
     opensearch_url: str = "http://127.0.0.1:19200"
     opensearch_index_name: str = "drive_files_v1"
     celery_broker_url: str = "redis://127.0.0.1:16379/1"
