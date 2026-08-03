@@ -265,6 +265,7 @@ impl LocalIndex {
             .map_err(IndexError::from)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn update_transfer(
         &self,
         task_id: Uuid,
