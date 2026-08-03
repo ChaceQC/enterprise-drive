@@ -202,44 +202,6 @@ class ShareExternalDownloadService:
                         error=exc,
                         metadata={"reason": exc.code.lower()},
                     )
-                await self.storage.put_object_bytes(
-                    bucket=self.settings.s3_bucket,
-                    storage_key=_external_watermark_key(
-                        tenant_id=share.tenant_id,
-                        share_id=share.id,
-                        node_id=node.id,
-                        version_id=version.id,
-                    ),
-                    content=rendered.content,
-                    content_type=rendered.media_type,
-                )
-                watermark_key = _external_watermark_key(
-                    tenant_id=share.tenant_id,
-                    share_id=share.id,
-                    node_id=node.id,
-                    version_id=version.id,
-                )
-                presigned = await self.storage.presign_download(
-                    bucket=self.settings.s3_bucket,
-                    storage_key=watermark_key,
-                    filename=rendered.file_name,
-                    expires_in_seconds=self.settings.download_presign_expires_seconds,
-                )
-                response_file_name = rendered.file_name
-                response_mime_type = rendered.media_type
-                response_size_bytes = len(rendered.content)
-            else:
-                presigned = await self.storage.presign_download(
-                    bucket=self.settings.s3_bucket,
-                    storage_key=blob.storage_key,
-                    filename=node.name,
-                    expires_in_seconds=self.settings.download_presign_expires_seconds,
-                )
-                response_file_name = node.name
-                response_mime_type = (
-                    version.mime_type or blob.mime_type or "application/octet-stream"
-                )
-                response_size_bytes = version.size_bytes
             consumed = await self.repository.consume_external_download(
                 tenant_id=share.tenant_id,
                 share_id=share.id,
@@ -264,6 +226,40 @@ class ShareExternalDownloadService:
                     ),
                     metadata={"reason": "download_limit_or_state"},
                 )
+            if delivery_mode == "watermark":
+                watermark_key = _external_watermark_key(
+                    tenant_id=share.tenant_id,
+                    share_id=share.id,
+                    node_id=node.id,
+                    version_id=version.id,
+                )
+                await self.storage.put_object_bytes(
+                    bucket=self.settings.s3_bucket,
+                    storage_key=watermark_key,
+                    content=rendered.content,
+                    content_type=rendered.media_type,
+                )
+                presigned = await self.storage.presign_download(
+                    bucket=self.settings.s3_bucket,
+                    storage_key=watermark_key,
+                    filename=rendered.file_name,
+                    expires_in_seconds=self.settings.download_presign_expires_seconds,
+                )
+                response_file_name = rendered.file_name
+                response_mime_type = rendered.media_type
+                response_size_bytes = len(rendered.content)
+            else:
+                presigned = await self.storage.presign_download(
+                    bucket=self.settings.s3_bucket,
+                    storage_key=blob.storage_key,
+                    filename=node.name,
+                    expires_in_seconds=self.settings.download_presign_expires_seconds,
+                )
+                response_file_name = node.name
+                response_mime_type = (
+                    version.mime_type or blob.mime_type or "application/octet-stream"
+                )
+                response_size_bytes = version.size_bytes
             updated_share = await self.repository.get_share(
                 tenant_id=share.tenant_id,
                 share_id=share.id,
