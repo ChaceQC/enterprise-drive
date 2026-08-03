@@ -13,7 +13,7 @@
 ## 2. 当前仓库快照
 
 - 分支：`dev`
-- Sprint 3 对象存储稳定性基线：`31a0de1`；本次配额、安全与性能收尾提交见 Git 历史
+- Sprint 3 对象存储稳定性基线：`31a0de1`；配额、安全与性能收尾：`6465c5a`；CI 安全解析与下载达限修复：`404cc08`、`d8185a5`
 - 项目版本：`0.4.0`
 - Git tag：当前尚未建立 `v0.4.0` tag
 - 运行时 OpenAPI：48 个路径、58 个操作
@@ -41,7 +41,9 @@
 
 ## 4. 已有验证证据
 
-- 最近一次完整后端门禁记录：`188 passed, 4 skipped`。
+- 最新 GitHub Actions `backend-ci`：运行 `30782429638`、提交 `d8185a5`，5 个 job 全部成功。
+- 该 CI 后端门禁：`314 passed`；Ruff、格式检查、Bandit、依赖漏洞审计、Mypy、真实 PostgreSQL/MinIO、Windows 部署和 MinIO 供应链门禁均通过。
+- CI 收尾修复：S3 multipart 外部 XML 改用 `defusedxml` 安全解析；外链下载在生成预签名 URL 或写入水印派生对象前原子占用下载次数，达限请求不再产生无效存储副作用。
 - `BE-036` 定向验证：`3 passed`。
 - `BE-037` 集中定向验证：`3 passed`；安全矩阵 `51 passed`；真实跨租户定向 `1 passed`。
 - Sprint 2 剩余增强定向验证：冲突策略 `3 passed`、大目录 `2 passed`；与 schedule/安全矩阵/跨租户合并为 `61 passed`。
