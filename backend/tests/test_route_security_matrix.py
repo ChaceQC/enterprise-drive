@@ -95,7 +95,7 @@ async def test_authenticated_mutations_require_csrf(
     await login(client)
     csrf_cases = [case for case in ROUTE_SECURITY_MATRIX if case.csrf_mode == "required"]
 
-    assert len(csrf_cases) == 56
+    assert len(csrf_cases) == 57
     for case in csrf_cases:
         response = await client.request(
             case.method,

@@ -728,6 +728,7 @@ async def test_abort_upload_marks_session_terminal(
     assert abort_response.status_code == 200
     assert abort_response.json() == {
         "protocol_version": "DTP/1",
+        "client_operation_id": None,
         "session_id": session_id,
         "status": "aborted",
     }
