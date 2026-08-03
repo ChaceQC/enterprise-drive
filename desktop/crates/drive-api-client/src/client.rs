@@ -321,7 +321,11 @@ impl ApiClient {
                 request_id: None,
                 details: None,
             });
-        Err(ApiClientError::Api(payload.code, payload.message))
+        Err(ApiClientError::Api {
+            code: payload.code,
+            message: payload.message,
+            details: payload.details,
+        })
     }
 
     fn authenticated(&self, request: RequestBuilder) -> Result<RequestBuilder> {

@@ -22,6 +22,8 @@ htmlcov/
 *.key
 *.crt
 *.p12
+*.pfx
+!desktop/signing/desktop-code-signing.pem
 deploy/monitoring/secrets/*
 !deploy/monitoring/secrets/alertmanager-webhook-url.example
 
@@ -30,6 +32,7 @@ node_modules/
 target/
 dist/
 build/
+desktop/apps/drive-desktop/src-tauri/gen/
 *.egg-info/
 
 # Local service data

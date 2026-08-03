@@ -1,6 +1,6 @@
 # 企业网盘
 
-企业网盘工程，当前已实现的代码为版本 `0.5.0`，已包含后端主链路与 Windows 11 Rust/Tauri 桌面 Alpha；目标是形成可试点上线的企业级文件管理服务。项目以《企业网盘开发者技术计划书.md》为技术基线，优先保障文件元数据、对象存储、权限、审计、搜索和异步任务之间的一致性。
+企业网盘工程，当前已实现的代码为版本 `0.5.0`，已包含后端主链路与 Windows 11 Rust/Tauri 桌面端的双向同步、离线恢复和签名更新闭环；目标是形成可试点上线的企业级文件管理服务。项目以《企业网盘开发者技术计划书.md》为技术基线，优先保障文件元数据、对象存储、权限、审计、搜索和异步任务之间的一致性。
 
 ## 技术基线
 
@@ -35,13 +35,16 @@
 
 ## 二期 Rust 桌面客户端
 
-当前仓库已交付 Sprint 7 的 Windows 11 桌面 Alpha，目标版本为 `0.5.0`，采用 Rust stable、Cargo workspace 和 Tauri 2；Sprint 8 的双向同步与签名更新仍按计划保留。
+当前仓库已交付 Sprint 7 和 Sprint 8 的 `DC-001` 至 `DC-010`，目标版本为 `0.5.0`，采用 Rust stable、Cargo workspace 和 Tauri 2。
 
-- Rust 负责 API client、设备会话、服务端增量同步、本地 SQLite 索引、上传下载队列、系统凭据存储和脱敏诊断导出。
-- 首个 Alpha 提供登录、空间与目录浏览、上传下载队列、同步目录选择、暂停/继续/取消、离线元数据和任务栏托盘。
-- 后端已补齐设备会话、增量变更游标、删除 tombstone、版本前置条件和幂等客户端操作 ID；文件系统监听、双向同步和冲突副本属于 Sprint 8。
-- 下载队列支持临时文件、Range 续传和 SHA-256 校验；冲突副本、完整原子替换和 Windows 路径监听策略属于 Sprint 8。
-- 首发平台为 Windows 11；签名安装包和更新验签稳定后，再推进 macOS 和 Linux。
+- Rust 负责 API client、设备会话、远端增量消费、本地 SQLite 索引与离线操作队列、上传下载、系统凭据、平台路径边界、更新验签和脱敏诊断导出。
+- 桌面端提供登录、空间与目录浏览、上传下载队列、同步目录选择、暂停/继续/取消、离线元数据、任务栏托盘、逐文件同步状态和冲突记录。
+- `notify` 监听本地创建、修改、删除、重命名和移动；远端增量、tombstone、版本前置条件和客户端操作 ID 共同驱动双向同步，设备吊销会停止 watcher、操作和传输。
+- 冲突默认保留双方内容，生成带设备名和 UTC 时间的副本；目录移动/重命名竞争会终止原排队操作，防止随后覆盖远端结果。
+- 下载只在 `.drivepart` 的版本、hash、进度和长度匹配时发送 Range，SHA-256 通过后执行 Windows 原子替换；旧临时内容或 hash 失败会清理并有界重试。
+- 支持选择性同步、忽略规则、带宽/并发限制、Windows 保留名、尾随点/空格、Unicode NFC、长路径和默认不跟随链接/reparse point。
+- `drive-update` 校验 Ed25519 清单与包签名、SHA-256、平台和版本，支持暂存安装、健康标记和 watchdog 回退；CI 生成 Authenticode 签名安装包，仓库只包含公钥与公开证书。
+- 首发平台为 Windows 11；Windows 稳定后再推进 macOS 和 Linux。
 
 ## 后续产品路线
 
@@ -57,7 +60,7 @@
 
 ## 当前状态
 
-当前仓库已完成 Sprint 1 至 Sprint 7 的代码侧交付（Sprint 7 范围为 `DC-001` 至 `DC-006`）。运行时 OpenAPI 为 80 个路径、107 个操作，数据库 migration head 为 `20260803_0022`。桌面端目录包含 Tauri 2 应用、设备会话、增量同步、SQLite 索引、DTP/1 传输队列、Windows Credential Manager 适配和脱敏诊断导出；后端认证、权限、审计、搜索、管理 API、Compose 与 CI 基线保持不变。
+当前仓库已完成 Sprint 1 至 Sprint 9 的代码侧交付，其中 Sprint 7 和 Sprint 8 覆盖 `DC-001` 至 `DC-010`，Sprint 9 的后端核心产品闭环也已完成。运行时 OpenAPI 为 80 个路径、107 个操作，数据库 migration head 为 `20260803_0023`。桌面端目录包含 Tauri 2 应用、设备会话、双向同步、SQLite 离线队列、DTP/1 传输、Windows Credential Manager/路径适配、签名更新回退和脱敏诊断；后端认证、权限、审计、搜索、管理 API、Compose 与 CI 基线保持一致。
 
 Sprint 3 上传主链路已包含 `upload_sessions`、multipart init/presign/complete/abort、秒传、服务端 SHA-256、最终对象归档、失败清理、过期会话回收、限流、下载、容量流水以及对象/回收站治理。multipart complete 使用标准 S3 HTTP 控制面；同 hash 首次上传在 PostgreSQL 中通过原子 upsert 只创建一个 blob，异常 complete 可从对象事实恢复，失败路径会清理受控 `uploads/...` 临时对象。
 

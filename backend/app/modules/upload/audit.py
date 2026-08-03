@@ -76,6 +76,9 @@ def multipart_upload_metadata(*, upload_session: UploadSession) -> dict[str, obj
         "mode": "multipart",
         "space_id": str(upload_session.space_id),
         "parent_id": str(upload_session.parent_id),
+        "target_node_id": (
+            str(upload_session.target_node_id) if upload_session.target_node_id else None
+        ),
         "size_bytes": upload_session.size_bytes,
         "total_parts": upload_session.total_parts,
     }
@@ -93,6 +96,7 @@ def completed_upload_metadata(
         "space_id": str(upload_session.space_id),
         "parent_id": str(upload_session.parent_id),
         "node_id": str(node.id),
+        "version_update": upload_session.target_node_id is not None,
         "version_id": str(version.id),
         "blob_id": str(blob.id),
         "size_bytes": upload_session.size_bytes,
@@ -105,6 +109,9 @@ def aborted_upload_metadata(*, upload_session: UploadSession) -> dict[str, objec
         "mode": "multipart",
         "space_id": str(upload_session.space_id),
         "parent_id": str(upload_session.parent_id),
+        "target_node_id": (
+            str(upload_session.target_node_id) if upload_session.target_node_id else None
+        ),
         "status": upload_session.status,
         "total_parts": upload_session.total_parts,
     }
@@ -121,6 +128,9 @@ def failed_upload_metadata(
         "mode": "multipart",
         "space_id": str(upload_session.space_id),
         "parent_id": str(upload_session.parent_id),
+        "target_node_id": (
+            str(upload_session.target_node_id) if upload_session.target_node_id else None
+        ),
         "status": upload_session.status,
         "reason": reason,
         "cleanup_status": "failed" if errors else "cleaned",

@@ -8,16 +8,25 @@ use drive_api_client::{
 };
 use drive_device_session::DeviceSessionManager;
 use drive_diagnostics::DiagnosticsExporter;
-use drive_local_index::{IndexedNode, LocalIndex, TransferTask};
+use drive_local_index::{IndexedNode, LocalIndex, SyncConflict, SyncEntry, TransferTask};
 use drive_platform::{application_data_dir, SystemCredentialStore};
-use drive_sync_engine::{SyncEngine, SyncPageSummary, SyncRunSummary};
+use drive_sync_engine::{
+    SyncConfiguration, SyncCycleSummary, SyncEngine, SyncInitializationSummary, SyncPageSummary,
+};
 use drive_transfer::TransferManager;
+use drive_update::{StagedUpdate, UpdateManager};
+use parking_lot::Mutex;
 use serde::Deserialize;
 use tauri::tray::TrayIconBuilder;
+use tauri::AppHandle;
 use tauri::State;
 use uuid::Uuid;
 
 const DEFAULT_API_URL: &str = "http://localhost:18080/api/v1";
+const DEFAULT_UPDATE_MANIFEST_URL: &str =
+    "https://github.com/ChaceQC/enterprise-drive/releases/latest/download/latest.json";
+const WINDOWS_UPDATE_TARGET: &str = "x86_64-pc-windows-msvc";
+const UPDATE_PUBLIC_KEY: &str = include_str!("../../../../update-public-key.txt");
 
 struct AppState {
     installation_id: Uuid,
@@ -27,6 +36,8 @@ struct AppState {
     sync: SyncEngine,
     transfers: TransferManager,
     diagnostics: DiagnosticsExporter,
+    updates: UpdateManager,
+    staged_update: Mutex<Option<StagedUpdate>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -58,6 +69,16 @@ struct SyncRootCommand {
     space_id: Uuid,
     root_node_id: Uuid,
     local_path: String,
+    #[serde(default)]
+    device_name: Option<String>,
+    #[serde(default)]
+    include_patterns: Vec<String>,
+    #[serde(default)]
+    ignore_patterns: Vec<String>,
+    #[serde(default)]
+    bandwidth_limit_bps: Option<u64>,
+    #[serde(default)]
+    max_concurrent_transfers: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -165,10 +186,23 @@ fn list_offline_files(
 async fn configure_sync_root(
     request: SyncRootCommand,
     state: State<'_, AppState>,
-) -> Result<SyncRunSummary, String> {
+) -> Result<SyncInitializationSummary, String> {
     state
         .sync
-        .initialize_root(request.space_id, request.root_node_id, request.local_path)
+        .configure_bidirectional_root(
+            request.space_id,
+            request.root_node_id,
+            request.local_path,
+            SyncConfiguration {
+                device_name: request
+                    .device_name
+                    .unwrap_or_else(|| "Windows Desktop".to_string()),
+                include_patterns: request.include_patterns,
+                ignore_patterns: request.ignore_patterns,
+                bandwidth_limit_bps: request.bandwidth_limit_bps,
+                max_concurrent_transfers: request.max_concurrent_transfers.unwrap_or(4),
+            },
+        )
         .await
         .map_err(display_error)
 }
@@ -182,6 +216,40 @@ async fn pull_sync_changes(
         .sync
         .pull_once(request.root_node_id, 200)
         .await
+        .map_err(display_error)
+}
+
+#[tauri::command]
+async fn run_sync_cycle(
+    request: RootCommand,
+    state: State<'_, AppState>,
+) -> Result<SyncCycleSummary, String> {
+    state
+        .sync
+        .run_root_once(request.root_node_id)
+        .await
+        .map_err(display_error)
+}
+
+#[tauri::command]
+fn list_sync_status(
+    request: RootCommand,
+    state: State<'_, AppState>,
+) -> Result<Vec<SyncEntry>, String> {
+    state
+        .index
+        .list_sync_entries(request.root_node_id)
+        .map_err(display_error)
+}
+
+#[tauri::command]
+fn list_sync_conflicts(
+    request: RootCommand,
+    state: State<'_, AppState>,
+) -> Result<Vec<SyncConflict>, String> {
+    state
+        .index
+        .list_conflicts(request.root_node_id)
         .map_err(display_error)
 }
 
@@ -265,6 +333,36 @@ fn export_diagnostics(state: State<'_, AppState>) -> Result<String, String> {
         .map_err(display_error)
 }
 
+#[tauri::command]
+async fn check_for_update(state: State<'_, AppState>) -> Result<Option<StagedUpdate>, String> {
+    let staged = state
+        .updates
+        .check_and_stage()
+        .await
+        .map_err(display_error)?;
+    *state.staged_update.lock() = staged.clone();
+    Ok(staged)
+}
+
+#[tauri::command]
+fn install_staged_update(app: AppHandle, state: State<'_, AppState>) -> Result<bool, String> {
+    let Some(staged) = state.staged_update.lock().clone() else {
+        return Ok(false);
+    };
+    let current_executable = std::env::current_exe().map_err(display_error)?;
+    state
+        .updates
+        .launch_install(&staged, &current_executable)
+        .map_err(display_error)?;
+    app.exit(0);
+    Ok(true)
+}
+
+#[tauri::command]
+fn rollback_update(state: State<'_, AppState>) -> Result<bool, String> {
+    state.updates.launch_rollback().map_err(display_error)
+}
+
 fn spawn_transfer(manager: TransferManager, task_id: Uuid) {
     tauri::async_runtime::spawn(async move {
         let _ = manager.run(task_id).await;
@@ -293,24 +391,52 @@ pub fn run() {
     let credentials = Arc::new(SystemCredentialStore::new("EnterpriseDrive"));
     let sessions = DeviceSessionManager::new(api.clone(), credentials, installation_id);
     let _ = sessions.restore();
+    let transfers = TransferManager::new(api.clone(), index.clone());
+    let sync = SyncEngine::with_transfers(api.clone(), index.clone(), transfers.clone());
+    let _ = index.recover_interrupted_operations();
+    let _ = transfers.recover_automatic();
+    let _ = sync.start_saved_watchers();
+    let update_manifest_url = std::env::var("DRIVE_DESKTOP_UPDATE_MANIFEST_URL")
+        .unwrap_or_else(|_| DEFAULT_UPDATE_MANIFEST_URL.to_string());
+    let updates = UpdateManager::new(
+        update_manifest_url,
+        &data_dir,
+        env!("CARGO_PKG_VERSION"),
+        WINDOWS_UPDATE_TARGET,
+        UPDATE_PUBLIC_KEY,
+    )
+    .expect("desktop update verifier must initialize");
+    let _ = updates.mark_current_healthy();
+    let background_sync = sync.clone();
+    let background_api = api.clone();
     let state = AppState {
         installation_id,
         data_dir,
         sessions,
         index: index.clone(),
-        sync: SyncEngine::new(api.clone(), index.clone()),
-        transfers: TransferManager::new(api, index.clone()),
+        sync,
+        transfers,
         diagnostics: DiagnosticsExporter::new(index),
+        updates,
+        staged_update: Mutex::new(None),
     };
 
     tauri::Builder::default()
         .manage(state)
-        .setup(|app| {
+        .setup(move |app| {
             let mut tray = TrayIconBuilder::new().tooltip("企业网盘");
             if let Some(icon) = app.default_window_icon() {
                 tray = tray.icon(icon.clone());
             }
             tray.build(app)?;
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    if background_api.device_token().is_some() {
+                        let _ = background_sync.run_all_once().await;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -324,6 +450,9 @@ pub fn run() {
             list_offline_files,
             configure_sync_root,
             pull_sync_changes,
+            run_sync_cycle,
+            list_sync_status,
+            list_sync_conflicts,
             start_upload,
             start_download,
             pause_transfer,
@@ -331,6 +460,9 @@ pub fn run() {
             cancel_transfer,
             list_transfers,
             export_diagnostics,
+            check_for_update,
+            install_staged_update,
+            rollback_update,
         ])
         .run(tauri::generate_context!())
         .expect("Tauri application failed");

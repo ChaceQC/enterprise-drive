@@ -36,6 +36,7 @@ from app.modules.upload.schemas import (
     CompleteUploadResponse,
 )
 from app.modules.upload.storage_keys import build_object_storage_key, is_upload_temp_storage_key
+from app.modules.upload.target import require_upload_version_target
 from app.modules.upload.timing import (
     UploadCompleteTimings,
     measure_upload_complete_phase,
@@ -116,7 +117,24 @@ class UploadLifecycleService:
             current_user=current_user,
             upload_session=upload_session,
         )
-        await self._ensure_name_available(current_user=current_user, upload_session=upload_session)
+        if upload_session.target_node_id is None:
+            await self._ensure_name_available(
+                current_user=current_user,
+                upload_session=upload_session,
+            )
+        else:
+            assert upload_session.expected_current_version_id is not None
+            await require_upload_version_target(
+                file_repository=self.file_repository,
+                permission_service=self.permission_service,
+                current_user=current_user,
+                target_node_id=upload_session.target_node_id,
+                space_id=upload_session.space_id,
+                parent_id=upload_session.parent_id,
+                normalized_name=upload_session.normalized_name,
+                expected_current_version_id=upload_session.expected_current_version_id,
+                for_update=False,
+            )
         await self.quota_service.ensure_upload_capacity(
             tenant_id=tenant_id,
             space_id=upload_session.space_id,
@@ -240,24 +258,44 @@ class UploadLifecycleService:
                 )
                 if not blob_referenced:
                     raise ApiError("BLOB_DELETING", "文件内容正在清理，请稍后重试", status_code=409)
-            node = await self.repository.create_file_node(
-                tenant_id=tenant_id,
-                space_id=upload_session.space_id,
-                parent_id=upload_session.parent_id,
-                owner_id=user_id,
-                name=upload_session.file_name,
-                normalized_name=upload_session.normalized_name,
-            )
+            if upload_session.target_node_id is None:
+                node = await self.repository.create_file_node(
+                    tenant_id=tenant_id,
+                    space_id=upload_session.space_id,
+                    parent_id=upload_session.parent_id,
+                    owner_id=user_id,
+                    name=upload_session.file_name,
+                    normalized_name=upload_session.normalized_name,
+                )
+                version_no = 1
+            else:
+                assert upload_session.expected_current_version_id is not None
+                node = await require_upload_version_target(
+                    file_repository=self.file_repository,
+                    permission_service=self.permission_service,
+                    current_user=current_user,
+                    target_node_id=upload_session.target_node_id,
+                    space_id=upload_session.space_id,
+                    parent_id=upload_session.parent_id,
+                    normalized_name=upload_session.normalized_name,
+                    expected_current_version_id=upload_session.expected_current_version_id,
+                    for_update=True,
+                )
+                version_no = await self.file_repository.next_version_no(
+                    tenant_id=tenant_id,
+                    node_id=node.id,
+                )
             version = await self.repository.create_file_version(
                 tenant_id=tenant_id,
                 node_id=node.id,
                 blob_id=blob.id,
-                version_no=1,
+                version_no=version_no,
                 size_bytes=upload_session.size_bytes,
                 mime_type=upload_session.mime_type,
                 created_by=user_id,
             )
             node.current_version_id = version.id
+            node.updated_at = utc_now()
             await self.quota_service.reserve_file_version(
                 tenant_id=tenant_id,
                 space_id=upload_session.space_id,
@@ -290,7 +328,11 @@ class UploadLifecycleService:
                 tenant_id=tenant_id,
                 node_id=node.id,
                 space_id=upload_session.space_id,
-                reason="upload_completed",
+                reason=(
+                    "upload_version_completed"
+                    if upload_session.target_node_id is not None
+                    else "upload_completed"
+                ),
                 metadata={"version_id": str(version.id), "blob_id": str(blob.id)},
             )
             await emit_search_extract_requested(
@@ -299,7 +341,11 @@ class UploadLifecycleService:
                 node_id=node.id,
                 version_id=version.id,
                 blob_id=blob.id,
-                reason="upload_completed",
+                reason=(
+                    "upload_version_completed"
+                    if upload_session.target_node_id is not None
+                    else "upload_completed"
+                ),
             )
             await emit_preview_render_requested(
                 audit_service=self.audit_service,
@@ -307,7 +353,11 @@ class UploadLifecycleService:
                 node_id=node.id,
                 version_id=version.id,
                 blob_id=blob.id,
-                reason="upload_completed",
+                reason=(
+                    "upload_version_completed"
+                    if upload_session.target_node_id is not None
+                    else "upload_completed"
+                ),
             )
             response = CompleteUploadResponse(
                 session_id=upload_session.id,
@@ -332,6 +382,7 @@ class UploadLifecycleService:
             failure_reason = {
                 "QUOTA_EXCEEDED": "quota_exceeded",
                 "BLOB_DELETING": "blob_deleting",
+                "FILE_VERSION_CONFLICT": "version_conflict",
             }.get(exc.code, "db_finalize_failed")
             await self._mark_failed(
                 current_user=current_user,
@@ -348,6 +399,12 @@ class UploadLifecycleService:
                 reason="db_finalize_failed",
                 audit_context=audit_context,
             )
+            if upload_session.target_node_id is not None:
+                raise ApiError(
+                    "FILE_VERSION_CONFLICT",
+                    "文件版本创建冲突",
+                    status_code=409,
+                ) from exc
             raise node_name_conflict_error() from exc
 
         return response

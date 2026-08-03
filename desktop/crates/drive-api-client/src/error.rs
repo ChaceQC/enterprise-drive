@@ -18,6 +18,12 @@ pub enum KnownErrorCode {
     ClientOperationIdReused,
     UploadPartInvalid,
     UploadPartSizeInvalid,
+    NodeNameExists,
+    NodeNotFound,
+    SyncRootNotFound,
+    UploadSessionExpired,
+    UploadNotActive,
+    QuotaExceeded,
     Unknown(String),
 }
 
@@ -37,6 +43,12 @@ impl KnownErrorCode {
             "CLIENT_OPERATION_ID_REUSED" => Self::ClientOperationIdReused,
             "UPLOAD_PART_INVALID" => Self::UploadPartInvalid,
             "UPLOAD_PART_SIZE_INVALID" => Self::UploadPartSizeInvalid,
+            "NODE_NAME_EXISTS" => Self::NodeNameExists,
+            "NODE_NOT_FOUND" => Self::NodeNotFound,
+            "SYNC_ROOT_NOT_FOUND" => Self::SyncRootNotFound,
+            "UPLOAD_SESSION_EXPIRED" => Self::UploadSessionExpired,
+            "UPLOAD_NOT_ACTIVE" => Self::UploadNotActive,
+            "QUOTA_EXCEEDED" => Self::QuotaExceeded,
             other => Self::Unknown(other.to_string()),
         }
     }
@@ -56,8 +68,12 @@ pub enum ApiClientError {
     Transport(#[from] reqwest::Error),
     #[error("invalid API base URL: {0}")]
     InvalidBaseUrl(#[from] url::ParseError),
-    #[error("API returned {0}: {1}")]
-    Api(String, String),
+    #[error("API returned {code}: {message}")]
+    Api {
+        code: String,
+        message: String,
+        details: Option<serde_json::Value>,
+    },
     #[error("device token is not available")]
     MissingDeviceToken,
     #[error("response decoding failed: {0}")]
@@ -67,7 +83,14 @@ pub enum ApiClientError {
 impl ApiClientError {
     pub fn api_code(&self) -> Option<&str> {
         match self {
-            Self::Api(code, _) => Some(code),
+            Self::Api { code, .. } => Some(code),
+            _ => None,
+        }
+    }
+
+    pub fn details(&self) -> Option<&serde_json::Value> {
+        match self {
+            Self::Api { details, .. } => details.as_ref(),
             _ => None,
         }
     }

@@ -22,6 +22,9 @@ drive-local-index = { path = "../../../crates/drive-local-index", version = "0.5
 drive-platform = { path = "../../../crates/drive-platform", version = "0.5.0" }
 drive-sync-engine = { path = "../../../crates/drive-sync-engine", version = "0.5.0" }
 drive-transfer = { path = "../../../crates/drive-transfer", version = "0.5.0" }
+drive-update = { path = "../../../crates/drive-update", version = "0.5.0" }
+parking_lot.workspace = true
 serde.workspace = true
 tauri.workspace = true
+tokio.workspace = true
 uuid.workspace = true

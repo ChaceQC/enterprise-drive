@@ -138,6 +138,8 @@ pub struct InitUploadRequest {
     pub hash_algo: String,
     pub mime_type: Option<String>,
     pub conflict_policy: String,
+    pub target_node_id: Option<Uuid>,
+    pub expected_current_version_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -180,6 +182,8 @@ pub struct UploadSessionStatus {
     pub expires_at: DateTime<Utc>,
     pub completed_node_id: Option<Uuid>,
     pub completed_version_id: Option<Uuid>,
+    pub target_node_id: Option<Uuid>,
+    pub expected_current_version_id: Option<Uuid>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

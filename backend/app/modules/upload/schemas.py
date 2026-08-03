@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from app.core.transfer_protocol import DriveTransferProtocolResponse
 
@@ -18,6 +18,16 @@ class InitUploadRequest(BaseModel):
     hash_algo: str = Field(default="sha256", min_length=1, max_length=16)
     mime_type: str | None = Field(default=None, max_length=255)
     conflict_policy: Literal["fail"] = "fail"
+    target_node_id: UUID | None = None
+    expected_current_version_id: UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_version_target(self) -> InitUploadRequest:
+        if self.target_node_id is None and self.expected_current_version_id is not None:
+            raise ValueError("expected_current_version_id requires target_node_id")
+        if self.target_node_id is not None and self.expected_current_version_id is None:
+            raise ValueError("target_node_id requires expected_current_version_id")
+        return self
 
 
 class InstantUploadResponse(DriveTransferProtocolResponse):
@@ -57,6 +67,8 @@ class UploadSessionStatusResponse(DriveTransferProtocolResponse):
     expires_at: datetime
     completed_node_id: UUID | None
     completed_version_id: UUID | None
+    target_node_id: UUID | None
+    expected_current_version_id: UUID | None
 
 
 class CompleteUploadPartRequest(BaseModel):

@@ -64,11 +64,21 @@
             <input name="spaceId" placeholder="space UUID" required />
             <input name="rootNodeId" placeholder="root node UUID" required />
             <input name="localPath" placeholder="C:\Enterprise Drive" required />
-            <button type="submit">建立同步根快照</button>
+            <input name="deviceName" value="Windows 11 Desktop" placeholder="冲突副本设备名" />
+            <input name="includePatterns" placeholder="选择性同步，例如 projects/**; shared/**" />
+            <input name="ignorePatterns" placeholder="忽略规则，例如 **/*.tmp; cache/**" />
+            <div class="limit-grid">
+              <input name="bandwidthMiB" type="number" min="0" step="1" placeholder="限速 MiB/s（0 为不限）" />
+              <input name="maxConcurrent" type="number" min="1" max="16" value="4" placeholder="并发传输数" />
+            </div>
+            <button type="submit">建立双向同步根</button>
           </form>
           <div class="inline-actions">
             <button id="pull-sync" class="quiet">拉取一次增量</button>
+            <button id="run-sync-cycle" class="quiet">立即双向同步</button>
             <button id="offline-list" class="quiet">查看离线目录</button>
+            <button id="sync-status" class="quiet">逐文件状态</button>
+            <button id="sync-conflicts" class="quiet">冲突记录</button>
           </div>
           <div id="sync-result" class="output">等待同步配置</div>
         </article>
@@ -107,6 +117,20 @@
           <p class="muted">不包含设备 token、Cookie、文件正文或完整本地路径。</p>
         </div>
         <button id="export-diagnostics">导出 JSON</button>
+      </section>
+
+      <section class="panel diagnostics">
+        <div>
+          <p class="section-kicker">安全更新</p>
+          <h2>签名校验与失败回退</h2>
+          <p class="muted">更新清单、安装包签名和 SHA-256 全部通过后才进入安装。</p>
+          <div id="update-result" class="output">尚未检查更新</div>
+        </div>
+        <div class="update-actions">
+          <button id="check-update">检查并暂存</button>
+          <button id="install-update" class="quiet">安装已验证更新</button>
+          <button id="rollback-update" class="quiet">回退上一安装包</button>
+        </div>
       </section>
     </main>
 

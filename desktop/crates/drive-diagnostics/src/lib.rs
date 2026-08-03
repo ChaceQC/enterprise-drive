@@ -1,7 +1,9 @@
 use std::path::{Path, PathBuf};
 
 use chrono::{DateTime, Utc};
-use drive_local_index::{IndexError, LocalIndex, TransferTask};
+use drive_local_index::{
+    IndexError, LocalIndex, PendingOperation, SyncConflict, SyncEntry, TransferTask,
+};
 use serde::Serialize;
 use thiserror::Error;
 use uuid::Uuid;
@@ -25,6 +27,9 @@ struct DiagnosticsBundle {
     operating_system: &'static str,
     architecture: &'static str,
     sync_roots: Vec<DiagnosticSyncRoot>,
+    sync_entries: Vec<DiagnosticSyncEntry>,
+    pending_operations: Vec<DiagnosticOperation>,
+    conflicts: Vec<DiagnosticConflict>,
     transfers: Vec<DiagnosticTransfer>,
     recent_messages: Vec<String>,
 }
@@ -53,6 +58,42 @@ struct DiagnosticTransfer {
     updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Serialize)]
+struct DiagnosticSyncEntry {
+    root_node_id: Uuid,
+    node_id: Option<Uuid>,
+    relative_path: String,
+    kind: String,
+    status: String,
+    current_version_id: Option<Uuid>,
+    size_bytes: i64,
+    error_code: Option<String>,
+    updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticOperation {
+    id: Uuid,
+    root_node_id: Uuid,
+    action: String,
+    relative_path: String,
+    status: String,
+    retry_count: u32,
+    error_code: Option<String>,
+    updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Serialize)]
+struct DiagnosticConflict {
+    id: Uuid,
+    root_node_id: Uuid,
+    node_id: Option<Uuid>,
+    kind: String,
+    original_relative_path: String,
+    conflict_relative_path: Option<String>,
+    detected_at: DateTime<Utc>,
+}
+
 #[derive(Clone)]
 pub struct DiagnosticsExporter {
     index: LocalIndex,
@@ -72,9 +113,35 @@ impl DiagnosticsExporter {
         if let Some(parent) = destination.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let sync_roots = self
-            .index
-            .list_sync_roots()?
+        let roots = self.index.list_sync_roots()?;
+        let sync_entries = roots
+            .iter()
+            .flat_map(|root| {
+                self.index
+                    .list_sync_entries(root.root_node_id)
+                    .unwrap_or_default()
+            })
+            .map(redact_sync_entry)
+            .collect();
+        let pending_operations = roots
+            .iter()
+            .flat_map(|root| {
+                self.index
+                    .list_operations(root.root_node_id)
+                    .unwrap_or_default()
+            })
+            .map(redact_operation)
+            .collect();
+        let conflicts = roots
+            .iter()
+            .flat_map(|root| {
+                self.index
+                    .list_conflicts(root.root_node_id)
+                    .unwrap_or_default()
+            })
+            .map(redact_conflict)
+            .collect();
+        let sync_roots = roots
             .into_iter()
             .map(|root| DiagnosticSyncRoot {
                 root_node_id: root.root_node_id,
@@ -101,12 +168,56 @@ impl DiagnosticsExporter {
             operating_system: std::env::consts::OS,
             architecture: std::env::consts::ARCH,
             sync_roots,
+            sync_entries,
+            pending_operations,
+            conflicts,
             transfers,
             recent_messages,
         };
         let payload = serde_json::to_vec_pretty(&bundle)?;
         std::fs::write(destination, payload)?;
         Ok(destination.to_path_buf())
+    }
+}
+
+fn redact_sync_entry(entry: SyncEntry) -> DiagnosticSyncEntry {
+    DiagnosticSyncEntry {
+        root_node_id: entry.root_node_id,
+        node_id: entry.node_id,
+        relative_path: redact_path(Path::new(&entry.relative_path)),
+        kind: entry.kind.as_str().to_string(),
+        status: entry.status.as_str().to_string(),
+        current_version_id: entry.current_version_id,
+        size_bytes: entry.size_bytes,
+        error_code: entry.last_error_code,
+        updated_at: entry.updated_at,
+    }
+}
+
+fn redact_operation(operation: PendingOperation) -> DiagnosticOperation {
+    DiagnosticOperation {
+        id: operation.id,
+        root_node_id: operation.root_node_id,
+        action: operation.action.as_str().to_string(),
+        relative_path: redact_path(Path::new(&operation.relative_path)),
+        status: operation.status.as_str().to_string(),
+        retry_count: operation.retry_count,
+        error_code: operation.error_code,
+        updated_at: operation.updated_at,
+    }
+}
+
+fn redact_conflict(conflict: SyncConflict) -> DiagnosticConflict {
+    DiagnosticConflict {
+        id: conflict.id,
+        root_node_id: conflict.root_node_id,
+        node_id: conflict.node_id,
+        kind: conflict.kind,
+        original_relative_path: redact_path(Path::new(&conflict.original_relative_path)),
+        conflict_relative_path: conflict
+            .conflict_relative_path
+            .map(|path| redact_path(Path::new(&path))),
+        detected_at: conflict.detected_at,
     }
 }
 
@@ -164,6 +275,7 @@ mod tests {
         index
             .enqueue_transfer(&TransferTask {
                 id: Uuid::new_v4(),
+                root_node_id: None,
                 direction: TransferDirection::Download,
                 status: TransferStatus::Failed,
                 local_path: "C:\\Users\\alice\\secret.txt".to_string(),
@@ -171,11 +283,15 @@ mod tests {
                 space_id: None,
                 parent_id: None,
                 node_id: Some(Uuid::new_v4()),
+                expected_current_version_id: None,
+                current_version_id: None,
                 session_id: None,
                 size_bytes: 10,
                 transferred_bytes: 4,
                 content_hash: None,
                 client_operation_id: Uuid::new_v4().to_string(),
+                retry_count: 0,
+                next_attempt_at: None,
                 error_code: Some("NETWORK_ERROR".to_string()),
                 created_at: now,
                 updated_at: now,

@@ -1,10 +1,14 @@
+mod bidirectional;
+
 use std::collections::VecDeque;
 use std::path::Path;
+use std::sync::Arc;
 
 use chrono::Utc;
 use drive_api_client::{ApiClient, ApiClientError, FileNode, SyncChange, SyncChangeList};
 use drive_local_index::{IndexError, IndexedNode, LocalIndex, SyncRoot};
 use drive_platform::{validate_sync_root, PlatformError};
+use drive_transfer::{TransferError, TransferManager};
 use serde::Serialize;
 use thiserror::Error;
 use uuid::Uuid;
@@ -19,6 +23,12 @@ pub enum SyncEngineError {
     Index(#[from] IndexError),
     #[error(transparent)]
     Platform(#[from] PlatformError),
+    #[error(transparent)]
+    Transfer(#[from] TransferError),
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+    #[error(transparent)]
+    Serialization(#[from] serde_json::Error),
     #[error("sync root is not configured")]
     RootNotConfigured,
     #[error("incremental sync exceeded the page safety limit")]
@@ -44,17 +54,33 @@ pub struct SyncPageSummary {
 
 #[derive(Clone)]
 pub struct SyncEngine {
-    api: ApiClient,
-    index: LocalIndex,
+    pub(crate) api: ApiClient,
+    pub(crate) index: LocalIndex,
+    pub(crate) transfers: TransferManager,
+    pub(crate) runtime: Arc<bidirectional::SyncRuntimeState>,
 }
 
 impl SyncEngine {
     pub fn new(api: ApiClient, index: LocalIndex) -> Self {
-        Self { api, index }
+        let transfers = TransferManager::new(api.clone(), index.clone());
+        Self::with_transfers(api, index, transfers)
+    }
+
+    pub fn with_transfers(api: ApiClient, index: LocalIndex, transfers: TransferManager) -> Self {
+        Self {
+            api,
+            index,
+            transfers,
+            runtime: Arc::new(bidirectional::SyncRuntimeState::default()),
+        }
     }
 
     pub fn local_index(&self) -> LocalIndex {
         self.index.clone()
+    }
+
+    pub fn transfer_manager(&self) -> TransferManager {
+        self.transfers.clone()
     }
 
     pub async fn initialize_root(
@@ -130,13 +156,15 @@ impl SyncEngine {
                     .api
                     .list_files_page(space_id, Some(parent_id), cursor.as_deref(), 100)
                     .await?;
+                let mut nodes = Vec::with_capacity(page.items.len());
                 for node in page.items {
                     if node.node_type == "folder" {
                         folders.push_back(node.id);
                     }
-                    self.index.upsert_node(&file_node_to_indexed(node))?;
+                    nodes.push(file_node_to_indexed(node));
                     indexed += 1;
                 }
+                self.index.upsert_nodes(&nodes)?;
                 match page.next_cursor {
                     Some(next_cursor) => cursor = Some(next_cursor),
                     None => break,
@@ -163,6 +191,10 @@ impl SyncEngine {
         Err(SyncEngineError::PageLimitExceeded)
     }
 }
+
+pub use bidirectional::{
+    SyncConfiguration, SyncCycleSummary, SyncInitializationSummary, SyncWatcherSummary,
+};
 
 fn file_node_to_indexed(node: FileNode) -> IndexedNode {
     IndexedNode {

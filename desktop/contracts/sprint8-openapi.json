@@ -1,0 +1,31 @@
+{
+  "version": "0.5.0",
+  "operations": [
+    ["POST", "/api/v1/uploads/init"],
+    ["GET", "/api/v1/uploads/{session_id}"],
+    ["POST", "/api/v1/uploads/{session_id}/complete"],
+    ["GET", "/api/v1/sync/changes"]
+  ],
+  "required_schema_properties": {
+    "InitUploadRequest": [
+      "expected_current_version_id",
+      "file_name",
+      "parent_id",
+      "space_id",
+      "target_node_id"
+    ],
+    "UploadSessionStatusResponse": [
+      "completed_node_id",
+      "completed_version_id",
+      "expected_current_version_id",
+      "target_node_id"
+    ],
+    "SyncChangeResponse": [
+      "change_type",
+      "client_operation_id",
+      "current_version_id",
+      "node_id",
+      "tombstone"
+    ]
+  }
+}

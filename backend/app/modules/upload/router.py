@@ -140,6 +140,8 @@ async def init_upload(
             content_hash=request.content_hash,
             hash_algo=request.hash_algo,
             mime_type=request.mime_type,
+            target_node_id=request.target_node_id,
+            expected_current_version_id=request.expected_current_version_id,
             client_operation_id=client_operation_id,
             audit_context=build_audit_context(http_request),
         )

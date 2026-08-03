@@ -41,6 +41,7 @@ from app.modules.upload.schemas import (
     UploadSessionStatusResponse,
 )
 from app.modules.upload.storage_keys import build_upload_storage_key
+from app.modules.upload.target import require_upload_version_target
 
 
 class UploadService:
@@ -78,6 +79,8 @@ class UploadService:
         content_hash: str,
         hash_algo: str,
         mime_type: str | None,
+        target_node_id: UUID | None = None,
+        expected_current_version_id: UUID | None = None,
         client_operation_id: str | None = None,
         audit_context: AuditContext | None = None,
     ) -> InitUploadResponse:
@@ -94,6 +97,10 @@ class UploadService:
                 "content_hash": content_hash,
                 "hash_algo": hash_algo,
                 "mime_type": mime_type,
+                "target_node_id": str(target_node_id) if target_node_id else None,
+                "expected_current_version_id": (
+                    str(expected_current_version_id) if expected_current_version_id else None
+                ),
             },
         )
         if operation.replay_json is not None:
@@ -110,12 +117,26 @@ class UploadService:
             parent_id=parent_id,
         )
         normalized_name = normalize_node_name(file_name)
-        await self._ensure_name_available(
-            tenant_id=current_user.tenant_id,
-            space_id=space_id,
-            parent_id=parent.id,
-            normalized_name=normalized_name,
-        )
+        if target_node_id is None:
+            await self._ensure_name_available(
+                tenant_id=current_user.tenant_id,
+                space_id=space_id,
+                parent_id=parent.id,
+                normalized_name=normalized_name,
+            )
+        else:
+            assert expected_current_version_id is not None
+            await require_upload_version_target(
+                file_repository=self.file_repository,
+                permission_service=self.permission_service,
+                current_user=current_user,
+                target_node_id=target_node_id,
+                space_id=space_id,
+                parent_id=parent.id,
+                normalized_name=normalized_name,
+                expected_current_version_id=expected_current_version_id,
+                for_update=False,
+            )
         await self.quota_service.ensure_upload_capacity(
             tenant_id=current_user.tenant_id,
             space_id=space_id,
@@ -140,6 +161,8 @@ class UploadService:
                 blob_id=existing_blob.id,
                 size_bytes=size_bytes,
                 mime_type=mime_type or existing_blob.mime_type,
+                target_node_id=target_node_id,
+                expected_current_version_id=expected_current_version_id,
                 client_operation_id=client_operation_id,
                 operation=operation,
                 audit_context=audit_context,
@@ -162,6 +185,8 @@ class UploadService:
             content_hash=content_hash,
             hash_algo=hash_algo,
             mime_type=mime_type,
+            target_node_id=target_node_id,
+            expected_current_version_id=expected_current_version_id,
             client_operation_id=client_operation_id,
             operation=operation,
             audit_context=audit_context,
@@ -193,6 +218,8 @@ class UploadService:
             expires_at=upload_session.expires_at,
             completed_node_id=upload_session.completed_node_id,
             completed_version_id=upload_session.completed_version_id,
+            target_node_id=upload_session.target_node_id,
+            expected_current_version_id=upload_session.expected_current_version_id,
         )
 
     async def presign_upload_part(
@@ -356,24 +383,45 @@ class UploadService:
         blob_id: UUID,
         size_bytes: int,
         mime_type: str | None,
+        target_node_id: UUID | None,
+        expected_current_version_id: UUID | None,
         client_operation_id: str | None,
         operation: ClientOperationStart,
         audit_context: AuditContext | None,
     ) -> InstantUploadResponse:
         try:
-            node = await self.repository.create_file_node(
-                tenant_id=current_user.tenant_id,
-                space_id=parent.space_id,
-                parent_id=parent.id,
-                owner_id=current_user.id,
-                name=file_name,
-                normalized_name=normalized_name,
-            )
+            if target_node_id is None:
+                node = await self.repository.create_file_node(
+                    tenant_id=current_user.tenant_id,
+                    space_id=parent.space_id,
+                    parent_id=parent.id,
+                    owner_id=current_user.id,
+                    name=file_name,
+                    normalized_name=normalized_name,
+                )
+                version_no = 1
+            else:
+                assert expected_current_version_id is not None
+                node = await require_upload_version_target(
+                    file_repository=self.file_repository,
+                    permission_service=self.permission_service,
+                    current_user=current_user,
+                    target_node_id=target_node_id,
+                    space_id=parent.space_id,
+                    parent_id=parent.id,
+                    normalized_name=normalized_name,
+                    expected_current_version_id=expected_current_version_id,
+                    for_update=True,
+                )
+                version_no = await self.file_repository.next_version_no(
+                    tenant_id=current_user.tenant_id,
+                    node_id=node.id,
+                )
             version = await self.repository.create_file_version(
                 tenant_id=current_user.tenant_id,
                 node_id=node.id,
                 blob_id=blob_id,
-                version_no=1,
+                version_no=version_no,
                 size_bytes=size_bytes,
                 mime_type=mime_type,
                 created_by=current_user.id,
@@ -385,6 +433,7 @@ class UploadService:
             if not blob_referenced:
                 raise ApiError("BLOB_DELETING", "文件内容正在清理，请稍后重试", status_code=409)
             node.current_version_id = version.id
+            node.updated_at = utc_now()
             await self.quota_service.reserve_file_version(
                 tenant_id=current_user.tenant_id,
                 space_id=parent.space_id,
@@ -401,14 +450,21 @@ class UploadService:
                 action="upload.instant",
                 resource_id=node.id,
                 audit_context=audit_context,
-                metadata=instant_upload_metadata(node=node, blob_id=blob_id),
+                metadata={
+                    **instant_upload_metadata(node=node, blob_id=blob_id),
+                    "version_update": target_node_id is not None,
+                    "version_id": str(version.id),
+                    "version_no": version.version_no,
+                },
             )
             await emit_search_index_requested(
                 audit_service=self.audit_service,
                 tenant_id=current_user.tenant_id,
                 node_id=node.id,
                 space_id=parent.space_id,
-                reason="upload_instant",
+                reason=(
+                    "upload_version_instant" if target_node_id is not None else "upload_instant"
+                ),
                 metadata={"version_id": str(version.id), "blob_id": str(blob_id)},
             )
             await emit_search_extract_requested(
@@ -417,7 +473,9 @@ class UploadService:
                 node_id=node.id,
                 version_id=version.id,
                 blob_id=blob_id,
-                reason="upload_instant",
+                reason=(
+                    "upload_version_instant" if target_node_id is not None else "upload_instant"
+                ),
             )
             await emit_preview_render_requested(
                 audit_service=self.audit_service,
@@ -425,7 +483,9 @@ class UploadService:
                 node_id=node.id,
                 version_id=version.id,
                 blob_id=blob_id,
-                reason="upload_instant",
+                reason=(
+                    "upload_version_instant" if target_node_id is not None else "upload_instant"
+                ),
             )
             response = InstantUploadResponse(
                 node_id=node.id,
@@ -459,6 +519,8 @@ class UploadService:
         content_hash: str,
         hash_algo: str,
         mime_type: str | None,
+        target_node_id: UUID | None,
+        expected_current_version_id: UUID | None,
         client_operation_id: str | None,
         operation: ClientOperationStart,
         audit_context: AuditContext | None,
@@ -480,6 +542,8 @@ class UploadService:
                 tenant_id=current_user.tenant_id,
                 space_id=parent.space_id,
                 parent_id=parent.id,
+                target_node_id=target_node_id,
+                expected_current_version_id=expected_current_version_id,
                 uploader_id=current_user.id,
                 file_name=file_name,
                 normalized_name=normalized_name,

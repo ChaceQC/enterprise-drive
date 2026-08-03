@@ -1,5 +1,66 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-03 Sprint 8 Rust 双向同步与桌面发布交付
+
+### 当前状态
+
+- 分支：`dev`；项目版本保持 `0.5.0`，Sprint 8 范围为 `DC-007` 至 `DC-010`。
+- Sprint 8 实现和本地专项验收已完成：文件系统监听、远端增量消费、SQLite 离线队列、冲突副本、选择性同步、Windows 路径边界、签名更新与回退均已落地。
+- 运行时 OpenAPI 保持 80 个路径、107 个操作；migration head 更新为 `20260803_0023`。
+- 本次只补 Sprint 8 尚缺的状态机与验收证据，没有重跑已通过的 Sprint 7、MinIO、备份恢复、性能或其他无关集合；`dev` 推送后以对应 `backend-ci` 全部 job 成功作为最终远端门禁。
+
+### 已完成
+
+- 后端上传初始化新增 `target_node_id` 与 `expected_current_version_id`，桌面端可在既有节点上创建新版本；init 与 complete 都重新校验当前版本，竞争写入返回 `FILE_VERSION_CONFLICT`，不产生静默覆盖、重复容量流水或错误当前版本。
+- 新增 `20260803_0023_sprint8_sync_uploads.py`，为上传会话持久化目标节点和版本前置条件，并提供可逆约束迁移。
+- `drive-sync-engine` 使用 `notify` 监听本地创建、修改、删除、重命名和移动，消费服务端增量变更；SQLite 持久化操作队列、重试次数、下次执行时间、冲突和逐文件状态，进程重启后可恢复。
+- 双端同时修改会把本地内容移动为带设备名和 UTC 时间的冲突副本，原操作进入 `conflict`，远端新版本进入原路径；目录移动/重命名竞争同样保留本地完整目录树并终止旧操作，防止队列随后覆盖远端结果。
+- 设备会话吊销、过期、重用或失效会清除内存 token、停止全部 watcher、禁用全部同步根，并把待处理操作、传输任务和逐文件状态统一标记为对应错误；单根权限撤销只停止对应根。
+- 下载使用同目录 `.drivepart`，仅在版本、hash、持久化进度和实际临时文件长度全部一致时发送 Range；旧版本或未绑定临时文件会先清理，从零下载。hash 不匹配会删除临时文件并进入有界自动重试，完成后使用 Windows 原子替换。
+- 支持选择性同步、glob 忽略规则、带宽限制、1 至 16 并发传输、指数退避、逐文件状态和冲突列表；默认忽略 `.drivepart`，不跟随符号链接、junction 或 reparse point。
+- Windows 路径层集中处理大小写折叠、保留设备名、尾随点/空格、Unicode NFC、长路径和冲突文件名；同步根和相对路径均经过根目录逃逸检查。
+- 新增 `drive-update`：Ed25519 签名更新清单、签名包、SHA-256、目标平台/版本校验、暂存安装、健康标记和 watchdog 回退。仓库只包含更新公钥与公开代码签名证书，不包含私钥。
+- Tauri 后台每 5 秒恢复同步循环，界面新增逐文件状态、冲突记录、选择性同步、限速/并发、检查更新、安装和回退入口。
+- CI 新增 Windows Authenticode 签名、证书 DER SHA-256 指纹校验、更新清单/包签名与篡改拒绝、签名安装包及更新工件上传；签名材料只从 GitHub Secrets 注入。
+
+### 验证
+
+- Sprint 8 后端新增版本化上传用例：`2 passed`；此前尚未执行的受影响上传回归与 OpenAPI 契约：`17 passed`。
+- 空 PostgreSQL 16 已从零升级到 `20260803_0023`，并完成 `0023 -> 0022 -> 0023` 往返；新增列、成对约束和单一 migration head 均确认存在，临时容器已删除。
+- 此前 Sprint 8 Rust 核心专项 `16 passed`，覆盖 10,000 文件初始索引、离线操作/传输异常退出恢复、Windows 路径、冲突命名、原子替换、1 GiB 分片范围和更新签名篡改拒绝。
+- 本轮只新增并运行 8 个缺口用例：`drive-local-index` `1 passed`，覆盖多同步根操作/传输队列隔离；`drive-transfer` `4 passed`，覆盖 1 GiB 持久化 Range、进程重启续传、旧 `.drivepart` 清理和 hash 失败重试；`drive-sync-engine` `3 passed`，覆盖双端同时修改、目录移动/重命名冲突和设备吊销后停止全部同步。
+- 受本轮修改影响的 `drive-local-index`、`drive-transfer`、`drive-sync-engine` 已通过 GNU 工具链 Clippy `-D warnings`；`cargo fmt --all --check` 通过。
+- 后端 Ruff check/format、Mypy、JavaScript 语法和 GitHub Actions YAML 此前均已通过；本轮未修改这些已验证路径的业务语义。
+- 本机 MSVC shell 缺少 `link.exe`；此前完整 GNU workspace 测试只在 Tauri `cdylib` 链接阶段遇到 `export ordinal too large`。因此不重复运行本机全 workspace，核心 crate 已完成定向测试，Windows MSVC、release、NSIS、Authenticode 和更新工件由本次 CI 最终确认。
+- 已建立 `DRIVE_UPDATE_SIGNING_KEY_BASE64`、`DRIVE_WINDOWS_SIGNING_PFX_BASE64`、`DRIVE_WINDOWS_SIGNING_PFX_PASSWORD`；公开证书 DER SHA-256 为 `765e82aba7bd3276f18eeadddd7b33257a68b7a1ddcdac6d4fc7f7bc639a3ca5`。
+
+### 下一步
+
+1. 提交并推送 `dev`，只跟踪本次 `backend-ci`；若出现失败，只修复实际失败 job，不重跑无关本地集合。
+2. Sprint 8 远端门禁全绿后，产品开发顺序进入 Sprint 10 Web 用户端与管理后台；Sprint 9 后端核心产品闭环已经完成。
+3. 生产发布仍需真实 DNS/受信证书、MinIO 修复镜像和正式 `v0.4.0` tag/Release 门禁，不能用桌面签名工件替代这些外部证据。
+
+### 涉及文件
+
+- `backend/app/modules/upload/`
+- `backend/migrations/versions/20260803_0023_sprint8_sync_uploads.py`
+- `backend/tests/test_desktop_sprint8.py`
+- `desktop/crates/drive-sync-engine/`
+- `desktop/crates/drive-local-index/`
+- `desktop/crates/drive-transfer/`
+- `desktop/crates/drive-platform/`
+- `desktop/crates/drive-update/`
+- `desktop/apps/drive-desktop/`
+- `desktop/contracts/sprint8-openapi.json`
+- `desktop/update-public-key.txt`
+- `desktop/signing/`
+- `.github/workflows/backend-ci.yml`
+- `PROJECT_PLAN.md`
+- `PROJECT_STAGE_STATUS.md`
+- `README.md`
+- `desktop/README.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-08-03 Sprint 7 Rust 桌面基础交付
 
 ### 当前状态
@@ -35,7 +96,7 @@
 ### 下一步
 
 1. Sprint 7 已闭环，不再重复执行已通过的 Sprint 7 或无关测试。
-2. 后续按计划进入 Sprint 8：文件系统监听、双向同步、冲突副本、离线队列、签名安装包和更新回滚。
+2. 该 Sprint 7 记录形成时的下一步是 Sprint 8；现已由顶部 Sprint 8 交付记录闭环。
 3. 生产发布仍需真实 DNS/受信证书、MinIO 修复镜像和正式 `v0.4.0` tag/Release 门禁。
 
 ### 涉及文件

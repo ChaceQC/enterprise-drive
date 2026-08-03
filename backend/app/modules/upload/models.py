@@ -3,7 +3,16 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Uuid
+from sqlalchemy import (
+    BigInteger,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Uuid,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.security import utc_now
@@ -15,6 +24,13 @@ class UploadSession(Base):
     __table_args__ = (
         Index("idx_upload_sessions_uploader", "tenant_id", "uploader_id", "status"),
         Index("idx_upload_sessions_expires", "status", "expires_at"),
+        CheckConstraint(
+            (
+                "(target_node_id is null and expected_current_version_id is null) "
+                "or (target_node_id is not null and expected_current_version_id is not null)"
+            ),
+            name="ck_upload_sessions_version_target_pair",
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
@@ -35,6 +51,17 @@ class UploadSession(Base):
         ForeignKey("nodes.id", ondelete="RESTRICT"),
         nullable=False,
         index=True,
+    )
+    target_node_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("nodes.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    expected_current_version_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("file_versions.id", ondelete="RESTRICT"),
+        nullable=True,
     )
     uploader_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True),

@@ -5,6 +5,13 @@ function formValue(form, name) {
   return new FormData(form).get(name)?.toString().trim() ?? "";
 }
 
+function patternValues(value) {
+  return value
+    .split(/[;\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function notify(message) {
   const toast = byId("toast");
   toast.textContent = message;
@@ -146,12 +153,21 @@ byId("sync-form").addEventListener("submit", async (event) => {
         spaceId: formValue(form, "spaceId"),
         rootNodeId: formValue(form, "rootNodeId"),
         localPath: formValue(form, "localPath"),
+        deviceName: formValue(form, "deviceName"),
+        includePatterns: patternValues(formValue(form, "includePatterns")),
+        ignorePatterns: patternValues(formValue(form, "ignorePatterns")),
+        bandwidthLimitBps:
+          Number(formValue(form, "bandwidthMiB")) > 0
+            ? Number(formValue(form, "bandwidthMiB")) * 1024 * 1024
+            : null,
+        maxConcurrentTransfers: Number(formValue(form, "maxConcurrent")) || 4,
       },
     }),
   );
   byId("sync-result").textContent =
-    `快照 ${response.snapshot_nodes} 项，增量 ${response.applied_changes} 项，` +
-    `共 ${response.pages} 页`;
+    `快照 ${response.sync.snapshot_nodes} 项，增量 ${response.sync.applied_changes} 项，` +
+    `目录 ${response.materialized_folders}，待下载 ${response.queued_downloads}，` +
+    `冲突 ${response.conflicts}`;
 });
 
 byId("pull-sync").addEventListener("click", async () => {
@@ -163,6 +179,19 @@ byId("pull-sync").addEventListener("click", async () => {
   );
   byId("sync-result").textContent =
     `本次应用 ${response.applied_changes} 项；has_more=${response.has_more}`;
+});
+
+byId("run-sync-cycle").addEventListener("click", async () => {
+  const form = byId("sync-form");
+  const response = await execute(() =>
+    invoke("run_sync_cycle", {
+      request: { rootNodeId: formValue(form, "rootNodeId") },
+    }),
+  );
+  byId("sync-result").textContent =
+    `远端 ${response.remote_changes}，本地完成 ${response.local_operations_completed}，` +
+    `传输完成 ${response.transfer_tasks_completed}，重试 ${response.retries_scheduled}，` +
+    `冲突 ${response.conflicts_recorded}`;
 });
 
 byId("offline-list").addEventListener("click", async () => {
@@ -178,6 +207,40 @@ byId("offline-list").addEventListener("click", async () => {
   byId("sync-result").textContent = records
     .map((item) => `${item.node_type}: ${item.name ?? item.node_id}`)
     .join("\n");
+});
+
+byId("sync-status").addEventListener("click", async () => {
+  const form = byId("sync-form");
+  const records = await execute(() =>
+    invoke("list_sync_status", {
+      request: { rootNodeId: formValue(form, "rootNodeId") },
+    }),
+  );
+  byId("sync-result").textContent = records
+    .map(
+      (item) =>
+        `${item.status.padEnd(18)} ${item.kind.padEnd(6)} ${item.relative_path}` +
+        `${item.last_error_code ? ` · ${item.last_error_code}` : ""}`,
+    )
+    .join("\n");
+});
+
+byId("sync-conflicts").addEventListener("click", async () => {
+  const form = byId("sync-form");
+  const records = await execute(() =>
+    invoke("list_sync_conflicts", {
+      request: { rootNodeId: formValue(form, "rootNodeId") },
+    }),
+  );
+  byId("sync-result").textContent = records.length
+    ? records
+        .map(
+          (item) =>
+            `${item.kind}: ${item.original_relative_path}` +
+            `${item.conflict_relative_path ? ` → ${item.conflict_relative_path}` : ""}`,
+        )
+        .join("\n")
+    : "没有冲突记录";
 });
 
 byId("upload-form").addEventListener("submit", async (event) => {
@@ -214,6 +277,25 @@ byId("refresh-transfers").addEventListener("click", refreshTransfers);
 byId("export-diagnostics").addEventListener("click", async () => {
   const path = await execute(() => invoke("export_diagnostics"));
   notify(`诊断文件已导出：${path}`);
+});
+
+byId("check-update").addEventListener("click", async () => {
+  const staged = await execute(() => invoke("check_for_update"));
+  byId("update-result").textContent = staged
+    ? `已验证并暂存 v${staged.version}：${staged.package_path}`
+    : "当前已是最新版本";
+});
+
+byId("install-update").addEventListener("click", async () => {
+  const launched = await execute(() => invoke("install_staged_update"));
+  if (!launched) {
+    notify("没有已验证的更新包");
+  }
+});
+
+byId("rollback-update").addEventListener("click", async () => {
+  const launched = await execute(() => invoke("rollback_update"));
+  notify(launched ? "已启动上一版本安装包" : "没有可用的回退安装包");
 });
 
 execute(async () => {

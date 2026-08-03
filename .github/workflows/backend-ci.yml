@@ -407,6 +407,80 @@ jobs:
         shell: pwsh
         run: cargo install tauri-cli --version 2.11.4 --locked
 
+      - name: Prepare desktop signing material
+        if: github.event_name == 'push'
+        shell: pwsh
+        env:
+          DRIVE_WINDOWS_SIGNING_PFX_BASE64: ${{ secrets.DRIVE_WINDOWS_SIGNING_PFX_BASE64 }}
+          DRIVE_WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.DRIVE_WINDOWS_SIGNING_PFX_PASSWORD }}
+          DRIVE_UPDATE_SIGNING_KEY_BASE64: ${{ secrets.DRIVE_UPDATE_SIGNING_KEY_BASE64 }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          foreach ($name in @(
+            "DRIVE_WINDOWS_SIGNING_PFX_BASE64",
+            "DRIVE_WINDOWS_SIGNING_PFX_PASSWORD",
+            "DRIVE_UPDATE_SIGNING_KEY_BASE64"
+          )) {
+            if ([string]::IsNullOrWhiteSpace((Get-Item "Env:$name").Value)) {
+              throw "Missing required GitHub Actions secret: $name"
+            }
+          }
+
+          $pfxPath = Join-Path $env:RUNNER_TEMP "enterprise-drive-signing.pfx"
+          [IO.File]::WriteAllBytes(
+            $pfxPath,
+            [Convert]::FromBase64String($env:DRIVE_WINDOWS_SIGNING_PFX_BASE64)
+          )
+          $password = ConvertTo-SecureString `
+            $env:DRIVE_WINDOWS_SIGNING_PFX_PASSWORD `
+            -AsPlainText `
+            -Force
+          $certificate = Import-PfxCertificate `
+            -FilePath $pfxPath `
+            -CertStoreLocation Cert:\CurrentUser\My `
+            -Password $password `
+            -Exportable
+          if ($null -eq $certificate) {
+            throw "Desktop signing certificate import failed."
+          }
+          $cerPath = Join-Path $env:RUNNER_TEMP "enterprise-drive-signing.cer"
+          Export-Certificate -Cert $certificate -FilePath $cerPath -Force | Out-Null
+          Import-Certificate `
+            -FilePath $cerPath `
+            -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
+          Import-Certificate `
+            -FilePath $cerPath `
+            -CertStoreLocation Cert:\CurrentUser\TrustedPublisher | Out-Null
+          $certificateSha256 = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData(
+              $certificate.Export(
+                [Security.Cryptography.X509Certificates.X509ContentType]::Cert
+              )
+            )
+          ).ToLowerInvariant()
+          if (
+            $certificateSha256 -ne
+            "765e82aba7bd3276f18eeadddd7b33257a68b7a1ddcdac6d4fc7f7bc639a3ca5"
+          ) {
+            throw "Desktop signing certificate fingerprint mismatch."
+          }
+          $metadata = cargo metadata `
+            --manifest-path desktop/Cargo.toml `
+            --locked `
+            --no-deps `
+            --format-version 1 | ConvertFrom-Json
+          $version = (
+            $metadata.packages |
+              Where-Object { $_.name -eq "drive-desktop" } |
+              Select-Object -First 1
+          ).version
+          if ([string]::IsNullOrWhiteSpace($version)) {
+            throw "Desktop package version could not be resolved."
+          }
+          "DRIVE_SIGNING_PFX_PATH=$pfxPath" >> $env:GITHUB_ENV
+          "DRIVE_SIGNING_CERT_SHA256=$certificateSha256" >> $env:GITHUB_ENV
+          "DRIVE_DESKTOP_VERSION=$version" >> $env:GITHUB_ENV
+
       - name: Build Windows installer
         uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f
         env:
@@ -415,7 +489,113 @@ jobs:
           projectPath: desktop/apps/drive-desktop
           tauriScript: cargo tauri
           args: --target x86_64-pc-windows-msvc
-          uploadWorkflowArtifacts: true
+          uploadWorkflowArtifacts: false
+
+      - name: Sign and verify Windows update artifacts
+        if: github.event_name == 'push'
+        shell: pwsh
+        env:
+          DRIVE_WINDOWS_SIGNING_PFX_PASSWORD: ${{ secrets.DRIVE_WINDOWS_SIGNING_PFX_PASSWORD }}
+          DRIVE_UPDATE_SIGNING_KEY_BASE64: ${{ secrets.DRIVE_UPDATE_SIGNING_KEY_BASE64 }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $installer = Get-ChildItem `
+            -Path desktop/target `
+            -Recurse `
+            -File `
+            -Filter "*-setup.exe" |
+            Where-Object { $_.FullName -match "[\\/]bundle[\\/]nsis[\\/]" } |
+            Sort-Object LastWriteTimeUtc -Descending |
+            Select-Object -First 1
+          if ($null -eq $installer) {
+            throw "Tauri NSIS installer was not found."
+          }
+          $signtool = Get-Command signtool.exe -ErrorAction SilentlyContinue
+          if ($null -eq $signtool) {
+            $signtool = Get-ChildItem `
+              -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin" `
+              -Recurse `
+              -File `
+              -Filter signtool.exe |
+              Where-Object { $_.FullName -match "[\\/]x64[\\/]signtool\.exe$" } |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1
+          }
+          if ($null -eq $signtool) {
+            throw "signtool.exe was not found."
+          }
+          $signtoolPath = if ($signtool.Source) {
+            $signtool.Source
+          } else {
+            $signtool.FullName
+          }
+          & $signtoolPath sign `
+            /fd SHA256 `
+            /f $env:DRIVE_SIGNING_PFX_PATH `
+            /p $env:DRIVE_WINDOWS_SIGNING_PFX_PASSWORD `
+            $installer.FullName
+          if ($LASTEXITCODE -ne 0) {
+            throw "Authenticode signing failed."
+          }
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
+          if ($signature.Status -ne "Valid") {
+            throw "Authenticode verification failed: $($signature.Status)"
+          }
+          $signerSha256 = [Convert]::ToHexString(
+            [Security.Cryptography.SHA256]::HashData(
+              $signature.SignerCertificate.Export(
+                [Security.Cryptography.X509Certificates.X509ContentType]::Cert
+              )
+            )
+          ).ToLowerInvariant()
+          if ($signerSha256 -ne $env:DRIVE_SIGNING_CERT_SHA256) {
+            throw "Signed installer certificate fingerprint mismatch."
+          }
+
+          $artifactDir = Join-Path $PWD "desktop/dist/windows"
+          New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+          $signedInstaller = Join-Path $artifactDir $installer.Name
+          Copy-Item -LiteralPath $installer.FullName -Destination $signedInstaller -Force
+          $packageUrl = (
+            "https://github.com/${{ github.repository }}/releases/download/" +
+            "v$env:DRIVE_DESKTOP_VERSION/$($installer.Name)"
+          )
+          $manifestPath = Join-Path $artifactDir "latest.json"
+          cargo run `
+            --locked `
+            --manifest-path desktop/Cargo.toml `
+            -p drive-update `
+            --bin sign-update `
+            -- `
+            --package $signedInstaller `
+            --version $env:DRIVE_DESKTOP_VERSION `
+            --target x86_64-pc-windows-msvc `
+            --url $packageUrl `
+            --certificate-sha256 $env:DRIVE_SIGNING_CERT_SHA256 `
+            --output $manifestPath
+          cargo run `
+            --locked `
+            --manifest-path desktop/Cargo.toml `
+            -p drive-update `
+            --bin verify-update `
+            -- `
+            --manifest $manifestPath `
+            --package $signedInstaller `
+            --public-key desktop/update-public-key.txt
+          Copy-Item `
+            -LiteralPath desktop/signing/desktop-code-signing.pem `
+            -Destination $artifactDir
+          Copy-Item `
+            -LiteralPath desktop/update-public-key.txt `
+            -Destination $artifactDir
+
+      - name: Upload signed Windows desktop artifacts
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@v7
+        with:
+          name: enterprise-drive-windows-${{ github.sha }}
+          path: desktop/dist/windows
+          if-no-files-found: error
 
   minio-image-policy:
     runs-on: ubuntu-latest
