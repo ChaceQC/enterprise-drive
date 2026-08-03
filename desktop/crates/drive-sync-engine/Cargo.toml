@@ -7,9 +7,9 @@ rust-version.workspace = true
 
 [dependencies]
 chrono.workspace = true
-drive-api-client = { path = "../drive-api-client" }
-drive-local-index = { path = "../drive-local-index" }
-drive-platform = { path = "../drive-platform" }
+drive-api-client = { path = "../drive-api-client", version = "0.5.0" }
+drive-local-index = { path = "../drive-local-index", version = "0.5.0" }
+drive-platform = { path = "../drive-platform", version = "0.5.0" }
 serde.workspace = true
 thiserror.workspace = true
 uuid.workspace = true

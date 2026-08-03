@@ -15,13 +15,13 @@ tauri-build.workspace = true
 
 [dependencies]
 chrono.workspace = true
-drive-api-client = { path = "../../../crates/drive-api-client" }
-drive-device-session = { path = "../../../crates/drive-device-session" }
-drive-diagnostics = { path = "../../../crates/drive-diagnostics" }
-drive-local-index = { path = "../../../crates/drive-local-index" }
-drive-platform = { path = "../../../crates/drive-platform" }
-drive-sync-engine = { path = "../../../crates/drive-sync-engine" }
-drive-transfer = { path = "../../../crates/drive-transfer" }
+drive-api-client = { path = "../../../crates/drive-api-client", version = "0.5.0" }
+drive-device-session = { path = "../../../crates/drive-device-session", version = "0.5.0" }
+drive-diagnostics = { path = "../../../crates/drive-diagnostics", version = "0.5.0" }
+drive-local-index = { path = "../../../crates/drive-local-index", version = "0.5.0" }
+drive-platform = { path = "../../../crates/drive-platform", version = "0.5.0" }
+drive-sync-engine = { path = "../../../crates/drive-sync-engine", version = "0.5.0" }
+drive-transfer = { path = "../../../crates/drive-transfer", version = "0.5.0" }
 serde.workspace = true
 tauri.workspace = true
 uuid.workspace = true

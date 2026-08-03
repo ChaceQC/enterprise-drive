@@ -1,5 +1,12 @@
 [advisories]
 yanked = "deny"
+ignore = [
+  { id = "RUSTSEC-2025-0075", reason = "Tauri 2.11.5 transitive dependency; no safe upstream upgrade is available" },
+  { id = "RUSTSEC-2025-0080", reason = "Tauri 2.11.5 transitive dependency; no safe upstream upgrade is available" },
+  { id = "RUSTSEC-2025-0081", reason = "Tauri 2.11.5 transitive dependency; no safe upstream upgrade is available" },
+  { id = "RUSTSEC-2025-0098", reason = "Tauri 2.11.5 transitive dependency; no safe upstream upgrade is available" },
+  { id = "RUSTSEC-2025-0100", reason = "Tauri 2.11.5 transitive dependency; no safe upstream upgrade is available" },
+]
 
 [licenses]
 confidence-threshold = 0.8
