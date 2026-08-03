@@ -36,10 +36,10 @@ def test_route_security_matrix_exactly_matches_runtime_openapi(settings: Setting
     matrix_keys = _matrix_route_keys(ROUTE_SECURITY_MATRIX)
     openapi_keys = _openapi_route_keys(create_app(settings))
 
-    assert len(ROUTE_SECURITY_MATRIX) == 99
+    assert len(ROUTE_SECURITY_MATRIX) == 107
     assert len(matrix_keys) == len(ROUTE_SECURITY_MATRIX)
     assert matrix_keys == openapi_keys
-    assert len(matrix_keys - {("GET", "/api/v1/ping"), ("POST", "/api/v1/auth/login")}) == 97
+    assert len(matrix_keys - {("GET", "/api/v1/ping"), ("POST", "/api/v1/auth/login")}) == 105
 
 
 def test_route_security_matrix_metadata_is_consistent() -> None:
@@ -55,6 +55,8 @@ def test_route_security_matrix_metadata_is_consistent() -> None:
             assert case.authorization == "super_admin"
         if case.access_mode == "public":
             assert case.authorization in {"anonymous", "external_share"}
+        if case.access_mode == "device":
+            assert case.authorization == "device_session"
         if case.tenant_scope == "resource":
             assert case.access_mode in {"session", "admin"}
 
@@ -93,7 +95,7 @@ async def test_authenticated_mutations_require_csrf(
     await login(client)
     csrf_cases = [case for case in ROUTE_SECURITY_MATRIX if case.csrf_mode == "required"]
 
-    assert len(csrf_cases) == 53
+    assert len(csrf_cases) == 56
     for case in csrf_cases:
         response = await client.request(
             case.method,
@@ -142,7 +144,7 @@ async def test_authenticated_read_routes_pass_the_identity_gate(
         if case.access_mode in {"session", "admin"} and case.csrf_mode == "none"
     ]
 
-    assert len(read_cases) == 41
+    assert len(read_cases) == 43
     for case in read_cases:
         response = await client.request(
             case.method,

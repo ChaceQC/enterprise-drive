@@ -1,0 +1,12 @@
+[package]
+name = "drive-device-session"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+drive-api-client = { path = "../drive-api-client" }
+drive-platform = { path = "../drive-platform" }
+thiserror.workspace = true
+uuid.workspace = true

@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path, Request, Response, status
+from fastapi import APIRouter, Depends, Header, Path, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import (
@@ -31,12 +31,17 @@ from app.modules.permission.service import PermissionService
 from app.modules.quota.repository import QuotaRepository
 from app.modules.quota.service import QuotaService
 from app.modules.space.repository import SpaceRepository
+from app.modules.sync.client_operations import ClientOperationService
 from app.modules.upload.lifecycle import UploadLifecycleService
 from app.modules.upload.repository import UploadRepository
 from app.modules.upload.schemas import (
     AbortUploadResponse,
+    BatchPresignUploadPartsRequest,
+    BatchPresignUploadPartsResponse,
     CompleteUploadRequest,
     CompleteUploadResponse,
+    ConfirmUploadPartRequest,
+    ConfirmUploadPartResponse,
     InitUploadRequest,
     InitUploadResponse,
     UploadPartUrlResponse,
@@ -72,6 +77,7 @@ def get_upload_service(
         ),
         storage=storage,
         settings=settings,
+        client_operation_service=ClientOperationService(session),
         audit_service=AuditService(repository=AuditRepository(session)),
     )
 
@@ -99,6 +105,8 @@ def get_upload_lifecycle_service(
             policy_enabled=settings.quota_policy_enabled,
         ),
         storage=storage,
+        settings=settings,
+        client_operation_service=ClientOperationService(session),
         audit_service=AuditService(repository=AuditRepository(session)),
     )
 
@@ -111,6 +119,10 @@ async def init_upload(
     settings: Annotated[Settings, Depends(get_settings)],
     rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
     service: Annotated[UploadService, Depends(get_upload_service)],
+    client_operation_id: Annotated[
+        str | None,
+        Header(alias="X-Client-Operation-ID", min_length=1, max_length=128),
+    ] = None,
 ) -> InitUploadResponse:
     try:
         await enforce_rate_limit(
@@ -128,6 +140,7 @@ async def init_upload(
             content_hash=request.content_hash,
             hash_algo=request.hash_algo,
             mime_type=request.mime_type,
+            client_operation_id=client_operation_id,
             audit_context=build_audit_context(http_request),
         )
     except ApiError as exc:
@@ -182,6 +195,59 @@ async def presign_upload_part(
         raise
 
 
+@router.post(
+    "/{session_id}/parts/presign",
+    response_model=BatchPresignUploadPartsResponse,
+)
+async def presign_upload_parts(
+    session_id: UUID,
+    request: BatchPresignUploadPartsRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    service: Annotated[UploadService, Depends(get_upload_service)],
+) -> BatchPresignUploadPartsResponse:
+    try:
+        await enforce_rate_limit(
+            settings=settings,
+            rate_limiter=rate_limiter,
+            current_user=current_user,
+            action="upload.part_presign",
+            resource_key=f"session:{session_id}",
+        )
+        return await service.presign_upload_parts(
+            current_user=current_user,
+            session_id=session_id,
+            part_numbers=request.part_numbers,
+        )
+    except ApiError as exc:
+        record_upload_failure(stage="part_presign_batch", reason=exc.code)
+        raise
+    except Exception:
+        record_upload_failure(stage="part_presign_batch", reason="internal_error")
+        raise
+
+
+@router.post(
+    "/{session_id}/parts/{part_no}/confirm",
+    response_model=ConfirmUploadPartResponse,
+)
+async def confirm_upload_part(
+    session_id: UUID,
+    part_no: Annotated[int, Path(ge=1)],
+    request: ConfirmUploadPartRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[UploadService, Depends(get_upload_service)],
+) -> ConfirmUploadPartResponse:
+    return await service.confirm_upload_part(
+        current_user=current_user,
+        session_id=session_id,
+        part_no=part_no,
+        etag=request.etag,
+        size_bytes=request.size_bytes,
+    )
+
+
 @router.post("/{session_id}/complete", response_model=CompleteUploadResponse)
 async def complete_upload(
     http_request: Request,
@@ -191,6 +257,10 @@ async def complete_upload(
     current_user: Annotated[User, Depends(get_current_user)],
     settings: Annotated[Settings, Depends(get_settings)],
     service: Annotated[UploadLifecycleService, Depends(get_upload_lifecycle_service)],
+    client_operation_id: Annotated[
+        str | None,
+        Header(alias="X-Client-Operation-ID", min_length=1, max_length=128),
+    ] = None,
 ) -> CompleteUploadResponse:
     timings = (
         UploadCompleteTimings()
@@ -203,6 +273,7 @@ async def complete_upload(
             current_user=current_user,
             session_id=session_id,
             parts=request.parts,
+            client_operation_id=client_operation_id,
             audit_context=build_audit_context(http_request),
             timings=timings,
         )
@@ -224,11 +295,16 @@ async def abort_upload(
     session_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
     service: Annotated[UploadLifecycleService, Depends(get_upload_lifecycle_service)],
+    client_operation_id: Annotated[
+        str | None,
+        Header(alias="X-Client-Operation-ID", min_length=1, max_length=128),
+    ] = None,
 ) -> AbortUploadResponse:
     try:
         response = await service.abort_upload(
             current_user=current_user,
             session_id=session_id,
+            client_operation_id=client_operation_id,
             audit_context=build_audit_context(http_request),
         )
     except ApiError as exc:

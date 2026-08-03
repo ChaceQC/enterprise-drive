@@ -22,12 +22,14 @@ class CreateFolderRequest(BaseModel):
 
 class RenameNodeRequest(BaseModel):
     name: str = Field(min_length=1, max_length=255)
+    expected_current_version_id: UUID | None = None
 
 
 class MoveNodeRequest(BaseModel):
     target_parent_id: UUID
     new_name: str | None = Field(default=None, min_length=1, max_length=255)
     conflict_policy: ConflictPolicy = "fail"
+    expected_current_version_id: UUID | None = None
 
 
 class RestoreNodeRequest(BaseModel):
@@ -147,6 +149,8 @@ class FileDownloadUrlResponse(DriveTransferProtocolResponse):
     version_id: UUID
     file_name: str
     size_bytes: int
+    hash_algo: str
+    content_hash: str
     mime_type: str | None
     download_url: str
     expires_at: datetime

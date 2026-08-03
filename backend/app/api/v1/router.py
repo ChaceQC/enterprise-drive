@@ -9,12 +9,14 @@ from app.modules.admin.quota_router import router as admin_quota_router
 from app.modules.admin.router import router as admin_router
 from app.modules.admin.space_router import router as admin_space_router
 from app.modules.auth.router import router as auth_router
+from app.modules.device.router import router as device_router
 from app.modules.file.acl_router import router as file_acl_router
 from app.modules.file.router import router as file_router
 from app.modules.search.router import router as search_router
 from app.modules.share.router import public_router as public_share_router
 from app.modules.share.router import router as share_router
 from app.modules.space.router import router as space_router
+from app.modules.sync.router import router as sync_router
 from app.modules.upload.router import router as upload_router
 
 router = APIRouter()
@@ -37,10 +39,12 @@ router.include_router(
     tags=["admin-file-security"],
 )
 router.include_router(auth_router, prefix="/auth", tags=["auth"])
+router.include_router(device_router, prefix="/device-sessions", tags=["device-sessions"])
 router.include_router(space_router, prefix="/spaces", tags=["spaces"])
 router.include_router(file_acl_router, prefix="/files", tags=["file-acl"])
 router.include_router(file_router, prefix="/files", tags=["files"])
 router.include_router(search_router, prefix="/search", tags=["search"])
+router.include_router(sync_router, prefix="/sync", tags=["sync"])
 router.include_router(share_router, prefix="/shares", tags=["shares"])
 router.include_router(public_share_router, prefix="/public/shares", tags=["public-shares"])
 router.include_router(upload_router, prefix="/uploads", tags=["uploads"])

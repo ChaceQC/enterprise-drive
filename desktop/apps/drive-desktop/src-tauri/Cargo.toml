@@ -1,0 +1,27 @@
+[package]
+name = "drive-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+default-run = "drive-desktop"
+
+[lib]
+name = "drive_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build.workspace = true
+
+[dependencies]
+chrono.workspace = true
+drive-api-client = { path = "../../../crates/drive-api-client" }
+drive-device-session = { path = "../../../crates/drive-device-session" }
+drive-diagnostics = { path = "../../../crates/drive-diagnostics" }
+drive-local-index = { path = "../../../crates/drive-local-index" }
+drive-platform = { path = "../../../crates/drive-platform" }
+drive-sync-engine = { path = "../../../crates/drive-sync-engine" }
+drive-transfer = { path = "../../../crates/drive-transfer" }
+serde.workspace = true
+tauri.workspace = true
+uuid.workspace = true

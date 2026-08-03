@@ -22,7 +22,7 @@
 - 搜索：OpenSearch。
 - 异步任务：Celery。
 - 部署：正式目标为 Windows 11 + Docker Desktop（WSL2/Linux containers），使用仓库根 `compose.windows.yml` 编排；Nginx gateway 位于 Compose 内并且是唯一宿主端口入口。
-- 二期桌面客户端：Rust stable、Cargo workspace、Tauri 2，Windows 11 优先；同步、传输、本地索引、文件系统监听、凭据和更新校验使用 Rust 实现。
+- 桌面客户端：Rust stable、Cargo workspace、Tauri 2，Windows 11 优先；Sprint 7 已交付设备会话、服务端增量索引、单向传输、本地索引和系统凭据，文件系统监听、双向同步与更新校验继续由 Sprint 8 实现。
 - Web 用户端与管理后台：TypeScript、React、Vite、OpenAPI 生成客户端和 Playwright；默认目录为 `frontend/`，使用 BFF Cookie Session 和 CSRF，不在浏览器存储 bearer token。
 
 ## 3. 架构原则
@@ -113,13 +113,15 @@
 
 ### Sprint 7：Rust 桌面客户端基础（目标版本 `0.5.0`）
 
-- 在 `desktop/` 建立 Cargo workspace 和 Tauri 2 桌面应用，Windows 11 作为首发平台。
-- Rust crate 按职责拆分为 API client、设备会话、同步引擎、本地 SQLite 索引、传输队列、文件系统适配和系统凭据适配；界面层只消费状态和发送命令。
-- 后端新增桌面设备会话、设备列表与吊销、短期会话轮换；凭据只保存于 Windows Credential Manager 等系统凭据库，不写入普通配置文件或日志。
-- 后端新增按租户和用户隔离的增量变更游标、删除 tombstone、节点/版本前置条件和幂等客户端操作 ID，桌面端不通过高频全量目录轮询实现同步。
-- 固定 `Drive Transfer Protocol v1` 应用层契约：控制面使用版本化 HTTPS API，数据面使用短期预签名 HTTPS 直传 MinIO/S3；协议定义分片大小、并发提示、批量签名、断点状态、分片校验、整文件 SHA-256、幂等完成、取消和错误码，不自研 TCP/UDP、TLS 或可靠传输层。
-- 桌面 Alpha 首批功能包括登录、空间和目录浏览、上传/下载队列、暂停/继续/取消、任务栏托盘、同步目录选择、离线元数据浏览和错误诊断导出。
-- CI 增加 `cargo fmt --check`、Clippy、Rust 单元/集成测试、依赖许可证与漏洞门禁，以及 Windows 安装包构建。
+截至 2026-08-03，`DC-001` 至 `DC-006` 已完成：
+
+- 已在 `desktop/` 建立 Cargo workspace 和 Tauri 2 桌面应用，Windows 11 作为首发平台。
+- Rust crate 已按职责拆分为 API client、设备会话、服务端增量同步、SQLite 本地索引、DTP/1 传输队列、Windows 平台适配和脱敏诊断；界面层只消费状态和发送命令。
+- 后端已新增桌面设备会话、设备列表与吊销、短期会话轮换；设备 token 只保存于 Windows Credential Manager，不写入 SQLite、普通配置文件或日志。
+- 后端已新增按租户和用户隔离的增量变更游标、删除 tombstone、节点/版本前置条件和幂等客户端操作 ID，桌面端不通过高频全量目录轮询实现同步。
+- `Drive Transfer Protocol v1` 已补齐并发提示、批量签名、分片确认、断点状态、整文件 SHA-256、Range 下载、幂等完成和取消。
+- 桌面 Alpha 已提供登录、空间和目录浏览、上传/下载队列、暂停/继续/取消、任务栏托盘、同步目录选择、离线元数据浏览和错误诊断导出。
+- CI 已增加 Rust fmt、Clippy、单元/集成测试、依赖许可证与漏洞门禁、release build 和 Windows NSIS 安装包构建。
 
 ### Sprint 8：Rust 双向同步与桌面发布
 
@@ -188,7 +190,7 @@
 
 ## 5. 当前下一步
 
-2026-08-03 Sprint 6 剩余代码与治理入口已完成：`BE-044` 新增系统管理员空间 cursor CRUD、独立 `spaces.version`、owner/root/member/quota 原子创建和 owner/root 一致更新；`BE-045` 新增租户统计、九项维护状态与异步运行、审计/空间/用户 CSV 导出、短期下载和过期清理。运行时 OpenAPI 为 73 个路径、99 个操作，安全矩阵同步到 99 项，migration head 为 `20260803_0021`。根 Compose 新增不发布宿主端口的 Prometheus/Alertmanager/Grafana `monitoring` profile；Windows 管理入口新增备份轮换、计划任务、随机隔离恢复演练和真实公网 TLS JSON 验收。代码侧 Sprint 6 与 Sprint 9 已闭环；下一步只处理生产环境才能完成的 DNS/受信证书记录，以及 MinIO 修复镜像与正式 `v0.4.0` 发布门禁，随后进入桌面设备会话/增量同步契约。
+2026-08-03 Sprint 7 的 `DC-001` 至 `DC-006` 已完成：项目版本提升到 `0.5.0`，运行时 OpenAPI 为 80 个路径、107 个操作，migration head 为 `20260803_0022`；后端新增设备会话、增量游标/tombstone、版本前置条件和客户端操作幂等，`desktop/` 已建立 Rust/Tauri、SQLite 索引、DTP/1 队列、系统凭据与诊断导出。当前下一步是推送 `dev` 并使新增 Windows Rust/NSIS 与既有后端、部署、供应链 CI 全部通过；之后进入 Sprint 8 双向同步，同时继续保持真实 DNS、MinIO 修复镜像和正式 `v0.4.0` 发布门禁。
 
 2026-08-03 Sprint 5 剩余项已完成：新增创建者分享列表、“分享给我的”、接收人详情与 DTP/1 下载、`share_recipient_grants` 物化授权、部门/用户组成员变化后的异步重算、站内通知列表/已读/失效、过期分享维护任务；预览产物记录最后访问时间，并周期清理旧版本产物和超期孤儿对象；搜索 Worker 接入 Tesseract 图片/扫描 PDF OCR 和 LibreOffice 旧 Office/ODF 转换抽取，使用内容处理镜像、独立 tmpfs 和子进程回收边界。当时运行时 OpenAPI 为 64 个路径、85 个操作，migration head 为 `20260803_0020`；该阶段记录的下一项是 `BE-044` 剩余空间管理和 `BE-045` 统计、维护、导出管理 API，现已由上方 Sprint 6 记录闭环。
 
@@ -220,7 +222,7 @@
 
 2026-07-31 已把此前仅停留在接口示例、技术建议或“后续接入”的能力补成 Sprint 9 至 Sprint 13、工程任务和远期 Backlog。2026-08-03 Sprint 6 和 Sprint 9 的代码侧能力已完成；正式 `v0.4.0` 仍需生产 DNS/受信证书记录和 MinIO 修复镜像门禁。当前并行顺序为：外部发布门禁不伪造完成，同时开始桌面端依赖的设备会话与增量同步契约；随后推进 Sprint 7/8 Rust 桌面端、Web 用户端与管理后台、身份安全、规模治理和 `v1.0.0` 稳定发布。Web 页面不得反向定义后端业务规则。
 
-2026-07-31 已把 Rust 桌面客户端从笼统的二期增强项提升为 Sprint 7 和 Sprint 8 正式路线。当前仓库仍没有桌面客户端代码；Sprint 6 代码侧完成后，以 `0.5.0` 为桌面 Alpha 目标建立 `desktop/` Cargo workspace，不等待无法在本机伪造的生产 DNS 证据。开工顺序固定为：先提交桌面架构 ADR 和后端设备会话/增量同步契约，再实现 Rust API client、本地索引和单向传输，最后进入双向同步、冲突处理和签名发布；正式发布仍不得绕过 MinIO 风险门禁。
+2026-07-31 已把 Rust 桌面客户端从笼统的二期增强项提升为 Sprint 7 和 Sprint 8 正式路线。当时仓库仍没有桌面客户端代码；其后已按 `0.5.0` 目标完成 Sprint 7 的架构 ADR、后端设备会话/增量同步契约、Rust API client、本地索引和单向传输，下一阶段进入双向同步、冲突处理和签名发布；正式发布仍不得绕过 MinIO 风险门禁。
 
 2026-07-31 已正式启用 `Drive Transfer Protocol v1`（线协议标识 `DTP/1`）：新增 `docs/drive-transfer-protocol-v1.md`，上传、文件下载和外链下载公开可选 `X-Drive-Transfer-Protocol` 协商头，未知版本返回 HTTP 426，全部传输响应返回 `protocol_version=DTP/1`。协议自定义的是 HTTPS 之上的分片、断点、校验、幂等和错误状态机，数据面继续使用预签名 HTTPS 直达 MinIO/S3，不自研 TCP/UDP、TLS、QUIC 或私有加密。批量分片签名、服务端并发提示和 Rust 持久化传输队列继续由 `DC-006` 实现。
 

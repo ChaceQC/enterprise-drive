@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy.exc import IntegrityError
 
 from app.api.errors import ApiError
+from app.core.config import Settings
 from app.core.security import ensure_utc, utc_now
 from app.infrastructure.storage.base import CompletedUploadPart, StorageAdapter
 from app.modules.audit.schemas import AuditContext
@@ -19,6 +20,7 @@ from app.modules.preview.events import emit_preview_render_requested
 from app.modules.quota.service import QuotaService
 from app.modules.search.events import emit_search_extract_requested, emit_search_index_requested
 from app.modules.space.repository import SpaceRepository
+from app.modules.sync.client_operations import ClientOperationService
 from app.modules.upload.audit import (
     aborted_upload_metadata,
     completed_upload_metadata,
@@ -50,6 +52,8 @@ class UploadLifecycleService:
         permission_service: PermissionService,
         quota_service: QuotaService,
         storage: StorageAdapter,
+        settings: Settings,
+        client_operation_service: ClientOperationService,
         audit_service: AuditService | None = None,
     ) -> None:
         self.repository = repository
@@ -58,6 +62,8 @@ class UploadLifecycleService:
         self.permission_service = permission_service
         self.quota_service = quota_service
         self.storage = storage
+        self.settings = settings
+        self.client_operation_service = client_operation_service
         self.audit_service = audit_service
 
     async def complete_upload(
@@ -66,6 +72,7 @@ class UploadLifecycleService:
         current_user: User,
         session_id: UUID,
         parts: list[CompleteUploadPartRequest],
+        client_operation_id: str | None = None,
         audit_context: AuditContext | None = None,
         timings: UploadCompleteTimings | None = None,
     ) -> CompleteUploadResponse:
@@ -76,7 +83,30 @@ class UploadLifecycleService:
             session_id=session_id,
         )
         if upload_session.status == "completed":
-            return self._completed_response(upload_session)
+            operation = await self.client_operation_service.start(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                operation_id=client_operation_id,
+                action="upload.complete",
+                request_payload={
+                    "session_id": str(session_id),
+                    "parts": [part.model_dump(mode="json") for part in parts],
+                },
+                allow_pending_recovery=True,
+            )
+            if operation.replay_json is not None:
+                return CompleteUploadResponse.model_validate(operation.replay_json)
+            response = self._completed_response(
+                upload_session,
+                client_operation_id=client_operation_id,
+            )
+            self.client_operation_service.complete(
+                record=operation.record,
+                response=response,
+                response_status=200,
+            )
+            await self.repository.commit()
+            return response
         if upload_session.status == "completing":
             raise ApiError("UPLOAD_COMPLETING", "上传正在完成中", status_code=409)
         await self._ensure_active_upload_session(upload_session)
@@ -95,6 +125,19 @@ class UploadLifecycleService:
             file_name=upload_session.file_name,
             mime_type=upload_session.mime_type,
         )
+        operation = await self.client_operation_service.start(
+            tenant_id=tenant_id,
+            user_id=user_id,
+            operation_id=client_operation_id,
+            action="upload.complete",
+            request_payload={
+                "session_id": str(session_id),
+                "parts": [part.model_dump(mode="json") for part in parts],
+            },
+            allow_pending_recovery=True,
+        )
+        if operation.replay_json is not None:
+            return CompleteUploadResponse.model_validate(operation.replay_json)
         upload_session.status = "completing"
         await self.repository.commit()
 
@@ -159,7 +202,17 @@ class UploadLifecycleService:
         )
         try:
             if upload_session.status == "completed":
-                return self._completed_response(upload_session)
+                response = self._completed_response(
+                    upload_session,
+                    client_operation_id=client_operation_id,
+                )
+                self.client_operation_service.complete(
+                    record=operation.record,
+                    response=response,
+                    response_status=200,
+                )
+                await self.repository.commit()
+                return response
             if upload_session.status != "completing":
                 raise ApiError("UPLOAD_NOT_ACTIVE", "上传会话不可继续上传", status_code=409)
             now = utc_now()
@@ -256,6 +309,18 @@ class UploadLifecycleService:
                 blob_id=blob.id,
                 reason="upload_completed",
             )
+            response = CompleteUploadResponse(
+                session_id=upload_session.id,
+                node_id=node.id,
+                version_id=version.id,
+                blob_id=blob.id,
+                client_operation_id=client_operation_id,
+            )
+            self.client_operation_service.complete(
+                record=operation.record,
+                response=response,
+                response_status=200,
+            )
             await self.repository.commit()
             if should_delete_temp_object:
                 await self._delete_temp_object(
@@ -285,18 +350,14 @@ class UploadLifecycleService:
             )
             raise node_name_conflict_error() from exc
 
-        return CompleteUploadResponse(
-            session_id=upload_session.id,
-            node_id=node.id,
-            version_id=version.id,
-            blob_id=blob.id,
-        )
+        return response
 
     async def abort_upload(
         self,
         *,
         current_user: User,
         session_id: UUID,
+        client_operation_id: str | None = None,
         audit_context: AuditContext | None = None,
     ) -> AbortUploadResponse:
         upload_session = await self._get_upload_session_for_update(
@@ -304,7 +365,27 @@ class UploadLifecycleService:
             session_id=session_id,
         )
         if upload_session.status == "aborted":
-            return AbortUploadResponse(session_id=upload_session.id)
+            operation = await self.client_operation_service.start(
+                tenant_id=current_user.tenant_id,
+                user_id=current_user.id,
+                operation_id=client_operation_id,
+                action="upload.abort",
+                request_payload={"session_id": str(session_id)},
+                allow_pending_recovery=True,
+            )
+            if operation.replay_json is not None:
+                return AbortUploadResponse.model_validate(operation.replay_json)
+            response = AbortUploadResponse(
+                session_id=upload_session.id,
+                client_operation_id=client_operation_id,
+            )
+            self.client_operation_service.complete(
+                record=operation.record,
+                response=response,
+                response_status=200,
+            )
+            await self.repository.commit()
+            return response
         if upload_session.status == "completed":
             raise ApiError("UPLOAD_ALREADY_COMPLETED", "上传已完成，不能取消", status_code=409)
         if upload_session.status == "completing":
@@ -313,6 +394,16 @@ class UploadLifecycleService:
         provider_upload_id = upload_session.provider_upload_id
         storage_bucket = upload_session.storage_bucket
         storage_key = upload_session.storage_key
+        operation = await self.client_operation_service.start(
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+            operation_id=client_operation_id,
+            action="upload.abort",
+            request_payload={"session_id": str(session_id)},
+            allow_pending_recovery=True,
+        )
+        if operation.replay_json is not None:
+            return AbortUploadResponse.model_validate(operation.replay_json)
         upload_session.status = "aborted"
         await self.repository.commit()
 
@@ -346,8 +437,17 @@ class UploadLifecycleService:
             audit_context=audit_context,
             metadata=aborted_upload_metadata(upload_session=upload_session),
         )
+        response = AbortUploadResponse(
+            session_id=upload_session.id,
+            client_operation_id=client_operation_id,
+        )
+        self.client_operation_service.complete(
+            record=operation.record,
+            response=response,
+            response_status=200,
+        )
         await self.repository.commit()
-        return AbortUploadResponse(session_id=upload_session.id)
+        return response
 
     async def _mark_failed(
         self,
@@ -614,7 +714,12 @@ class UploadLifecycleService:
         if existing_sibling is not None:
             raise node_name_conflict_error()
 
-    def _completed_response(self, upload_session: UploadSession) -> CompleteUploadResponse:
+    def _completed_response(
+        self,
+        upload_session: UploadSession,
+        *,
+        client_operation_id: str | None = None,
+    ) -> CompleteUploadResponse:
         if (
             upload_session.completed_node_id is None
             or upload_session.completed_version_id is None
@@ -626,4 +731,5 @@ class UploadLifecycleService:
             node_id=upload_session.completed_node_id,
             version_id=upload_session.completed_version_id,
             blob_id=upload_session.completed_blob_id,
+            client_operation_id=client_operation_id,
         )

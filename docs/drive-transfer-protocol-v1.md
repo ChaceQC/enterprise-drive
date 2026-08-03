@@ -34,6 +34,8 @@ DTP/1 不定义新的 TCP、UDP、TLS、QUIC、加密算法或可靠传输实现
 | 初始化上传或秒传 | `POST /api/v1/uploads/init` |
 | 查询上传断点 | `GET /api/v1/uploads/{session_id}` |
 | 获取单个分片签名 | `POST /api/v1/uploads/{session_id}/parts/{part_no}/presign` |
+| 批量获取分片签名 | `POST /api/v1/uploads/{session_id}/parts/presign` |
+| 确认服务端可见分片 | `POST /api/v1/uploads/{session_id}/parts/{part_no}/confirm` |
 | 完成上传 | `POST /api/v1/uploads/{session_id}/complete` |
 | 取消上传 | `POST /api/v1/uploads/{session_id}/abort` |
 | 获取文件下载签名 | `GET /api/v1/files/{node_id}/download` |
@@ -148,19 +150,23 @@ init
 - `session_id`
 - `part_size_bytes`
 - `total_parts`
+- `max_parallelism`
+- `checksum_algorithm=sha256`
 - `expires_at`
 - `protocol_version`
+- `client_operation_id`
 
 `part_size_bytes` 和 `total_parts` 由服务端决定，客户端不得自行改变同一会话的分片边界。
 
 ## 7. 分片上传与断点恢复
 
 1. 客户端先查询上传状态，取得服务端确认的 `uploaded_parts`。
-2. 只为缺失分片申请预签名 URL。
+2. 只为缺失分片申请预签名 URL；单次批量签名最多 32 个分片。
 3. 按服务端返回的 `part_size_bytes` 切分文件。
-4. 每个分片失败时仅重试该分片，并遵守错误中的 `retry_after_seconds`。
-5. 签名过期时重新申请签名，不重新创建上传会话。
-6. 客户端退出前把本地文件标识、session ID、分片大小和已确认状态写入 Rust 本地传输队列；本地记录不是服务端完成状态的事实来源。
+4. 每个分片 PUT 成功后调用确认接口，提交 ETag 和实际分片字节数；只有对象存储 stat 与会话边界一致的分片才进入 `uploaded_parts`。
+5. 每个分片失败时仅重试该分片，并遵守错误中的 `retry_after_seconds`。
+6. 签名过期时重新申请签名，不重新创建上传会话。
+7. 客户端退出前把本地文件标识、session ID、分片大小和已确认状态写入 Rust 本地传输队列；本地记录不是服务端完成状态的事实来源。
 
 客户端可以并行上传多个分片，但必须支持：
 
@@ -171,6 +177,7 @@ init
 - 文件在传输期间发生变化时停止 complete。
 
 首个 Rust 客户端应从保守并发开始，并依据真实 PostgreSQL、MinIO、磁盘、网关和网络基准调整；协议不把固定并发数写死。
+服务端通过 `max_parallelism` 返回当前并发上限提示，客户端可以使用更低值，但不得超过该提示。
 
 ## 8. Complete
 
@@ -200,6 +207,8 @@ Multipart ETag 只作为对象存储分片完成参数，禁止把它当作整�
 - `version_id`
 - 文件名
 - 字节数
+- `hash_algo`
+- `content_hash`
 - MIME
 - 短期 `download_url`
 - `expires_at`

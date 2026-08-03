@@ -1,6 +1,6 @@
 # 后端工程
 
-> 适用项目版本：`v0.4.0`
+> 适用项目版本：`v0.5.0`
 
 本目录承载企业网盘后端，使用 Python 3.12+、uv、FastAPI、SQLAlchemy、PostgreSQL、Redis、S3 兼容对象存储、OpenSearch 和 Celery。
 
@@ -61,7 +61,7 @@ Copy-Item .env.windows.example .env.windows
 
 ### 备份、校验与隔离恢复
 
-`v0.4.0` 已通过根目录 `deploy/windows/manage.ps1` 提供 `backup`、`backup-verify`、`restore`、`backup-retention` 和 `restore-drill`。备份目录必须是仓库外的绝对专用目录，不得是卷根、仓库目录或仓库祖先；若既有目录非空，则必须已经使用本项目 restricted ACL，脚本不会直接重写任意宽范围目录 ACL。正式备份默认使用当前 Windows 用户证书存储中的 CMS 文档加密证书保护 `.env.windows`。轮换会先验证目录命名、manifest 和 checksum，再按保留天数与最少份数删除；恢复演练使用随机隔离 Compose project，完成后删除 target 容器/卷并写 restricted ACL JSON 记录。两类任务都支持 Windows 周期任务注册/删除。建议创建可导出私钥的专用证书，并把 PFX 单独保存在加密离线介质中：
+`v0.5.0` 已通过根目录 `deploy/windows/manage.ps1` 提供 `backup`、`backup-verify`、`restore`、`backup-retention` 和 `restore-drill`。备份目录必须是仓库外的绝对专用目录，不得是卷根、仓库目录或仓库祖先；若既有目录非空，则必须已经使用本项目 restricted ACL，脚本不会直接重写任意宽范围目录 ACL。正式备份默认使用当前 Windows 用户证书存储中的 CMS 文档加密证书保护 `.env.windows`。轮换会先验证目录命名、manifest 和 checksum，再按保留天数与最少份数删除；恢复演练使用随机隔离 Compose project，完成后删除 target 容器/卷并写 restricted ACL JSON 记录。两类任务都支持 Windows 周期任务注册/删除。建议创建可导出私钥的专用证书，并把 PFX 单独保存在加密离线介质中：
 
 备份、校验和恢复的临时容器统一使用 `--pull never`，默认限制为 `0.50 CPU`、`512m` 内存、无额外 swap 和 `128` 个 PID；卷归档与 `pg_dump` 默认使用压缩等级 `1`，避免 gzip 高压缩长时间占满 CPU。对应变量为 `DRIVE_BACKUP_HELPER_CPU_LIMIT`、`DRIVE_BACKUP_HELPER_MEMORY_LIMIT`、`DRIVE_BACKUP_HELPER_PIDS_LIMIT`、`DRIVE_BACKUP_GZIP_LEVEL` 和 `DRIVE_BACKUP_PG_DUMP_COMPRESSION_LEVEL`。
 
@@ -140,7 +140,7 @@ uv run pytest tests/test_route_security_matrix.py `
   tests/test_security_adversarial.py -q
 ```
 
-矩阵与运行时 OpenAPI 的 73 个路径、99 个操作完全对账，覆盖匿名、CSRF、管理员、内部分享接收人、真实跨租户资源和活跃会话撤权。对抗输入覆盖损坏/超大图片、OCR 页数/像素/体量边界、文档路径与扩展名注入、Range 权限、预签名 URL、用户/组织/空间/统计/维护/导出/配额/安全策略管理、不同 token 外链穷举、Trusted Host 和 CORS。
+矩阵与运行时 OpenAPI 的 80 个路径、107 个操作完全对账，覆盖匿名、CSRF、管理员、设备会话、增量同步、真实跨租户资源和活跃会话撤权。对抗输入覆盖损坏/超大图片、OCR 页数/像素/体量边界、文档路径与扩展名注入、Range 权限、预签名 URL、用户/组织/空间/统计/维护/导出/配额/安全策略管理、不同 token 外链穷举、Trusted Host 和 CORS。
 
 真实 Nginx 原始 HTTP 安全 smoke：
 

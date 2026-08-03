@@ -1,5 +1,56 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-03 Sprint 7 Rust 桌面基础交付
+
+### 当前状态
+
+- 分支：`dev`；目标版本已提升为 `0.5.0`。
+- Sprint 7 范围固定为 `DC-001` 至 `DC-006`，不包含 Sprint 8 的文件系统监听、双向同步、冲突副本、签名更新和失败回退。
+- 运行时 OpenAPI 为 80 个路径、107 个操作；migration head 为 `20260803_0022`。
+- 本地实现与定向验证已完成，正在提交、推送并跟踪新增 Windows Rust/NSIS 与既有后端、部署、供应链 CI。
+
+### 已完成
+
+- 后端新增独立桌面设备会话：注册、短期轮换、设备列表、单设备/全设备吊销、token hash 存储、轮换 token 重用后的 session family 吊销，以及 `Authorization: Device <opaque token>` 认证。
+- 后端新增按租户/用户/空间/根目录绑定的签名增量 cursor、变更日志、删除/移出根目录/权限撤销 tombstone、cursor 过期全量重建信号和 `X-Client-Operation-ID` 持久化重放。
+- 文件夹创建、重命名、移动、删除及上传 init/complete/abort 已接入客户端操作幂等；重命名、移动和删除新增当前文件版本前置条件，冲突返回 `FILE_VERSION_CONFLICT`。
+- DTP/1 新增批量分片签名、分片确认、服务端并发提示、上传状态已确认分片、下载 `hash_algo/content_hash` 和 Rust Range/SHA-256 传输队列。
+- 新增 `20260803_0022_sprint7_desktop_contracts.py`，创建 `desktop_devices`、`device_sessions`、`client_operations`、`sync_changes`。
+- 新增 `desktop/` Cargo workspace 和 8 个 package：Tauri 应用、API client、设备会话、SQLite 本地索引、增量同步、传输队列、Windows 平台适配和脱敏诊断。
+- Tauri Alpha 已接入设备登录、空间/目录浏览、同步根快照与增量、离线元数据、上传/下载队列、暂停/继续/取消、任务栏托盘和诊断导出；设备 token 只进入 Windows Credential Manager。
+- 新增锁定的 `Cargo.lock`、OpenAPI 契约快照、Rust 架构 ADR、确定性 Windows PNG/ICO、cargo-deny 策略和 CI Rust/NSIS job。
+
+### 验证
+
+- Sprint 7 后端、OpenAPI 契约和 health 版本定向集合：`5 passed`。
+- 受影响测试文件 Ruff check 与 format check 通过；`uv lock --check` 通过。
+- 空 PostgreSQL 16 从零升级到 `20260803_0022`，确认四张 Sprint 7 表存在，临时容器已删除。
+- `cargo fmt --all --check` 和 `cargo metadata --locked --no-deps` 通过，workspace 共 8 个 package。
+- 本机 PowerShell 未加载 MSVC `link.exe`，因此本地 `cargo check` 在 Rust build script 链接阶段停止；按用户要求不安装系统软件，Clippy、Rust tests、cargo-deny、release build 和 NSIS 由 Windows CI 验证。
+- 未重复运行已通过且未受后续修改影响的全量 pytest、安全矩阵、真实 MinIO、备份恢复或性能测试。
+
+### 下一步
+
+1. 审查差异并提交到 `dev`。
+2. 推送后跟踪 `backend-ci`；只修复真实失败项，直至所有 job 成功。
+3. CI 全绿后把本条记录和 `PROJECT_STAGE_STATUS.md` 更新为最终提交与 run 证据。
+
+### 涉及文件
+
+- `backend/app/modules/device/`
+- `backend/app/modules/sync/`
+- `backend/app/modules/file/`
+- `backend/app/modules/upload/`
+- `backend/migrations/versions/20260803_0022_sprint7_desktop_contracts.py`
+- `backend/tests/test_desktop_sprint7.py`
+- `backend/tests/test_desktop_openapi_contract.py`
+- `desktop/`
+- `.github/workflows/backend-ci.yml`
+- `docs/adr/0001-rust-desktop-sprint7.md`
+- `docs/drive-transfer-protocol-v1.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_STAGE_STATUS.md`
+
 ## 2026-08-03 Sprint 6 管理、监控与上线治理闭环
 
 ### 当前状态

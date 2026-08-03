@@ -47,6 +47,7 @@ class FileBatchService:
             handler=lambda node_id: self.file_service.delete_node_in_transaction(
                 current_user=current_user,
                 node_id=node_id,
+                expected_current_version_id=None,
                 audit_context=audit_context,
             ),
         )
@@ -79,6 +80,7 @@ class FileBatchService:
                 target_parent_id=target_parent_id,
                 new_name=new_name,
                 conflict_policy=conflict_policy,
+                expected_current_version_id=None,
                 audit_context=audit_context,
             ),
         )

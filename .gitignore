@@ -27,6 +27,7 @@ deploy/monitoring/secrets/*
 
 # Dependencies and build output
 node_modules/
+target/
 dist/
 build/
 *.egg-info/

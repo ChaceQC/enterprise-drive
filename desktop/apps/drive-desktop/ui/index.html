@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>企业网盘</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">Enterprise Drive</p>
+        <h1>桌面 Alpha</h1>
+      </div>
+      <div class="topbar-actions">
+        <span id="version">v0.5.0</span>
+        <button id="restore-session" class="quiet">恢复会话</button>
+        <button id="sign-out" class="quiet">退出凭据</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="panel login-panel">
+        <div>
+          <p class="section-kicker">设备会话</p>
+          <h2>使用独立设备凭据登录</h2>
+          <p class="muted">设备 token 仅写入 Windows Credential Manager。</p>
+        </div>
+        <form id="login-form" class="form-grid">
+          <label>租户<input name="tenantSlug" value="default" required /></label>
+          <label>用户名<input name="username" autocomplete="username" required /></label>
+          <label>密码<input name="password" type="password" autocomplete="current-password" required /></label>
+          <label>设备名<input name="deviceName" value="Windows 11 Desktop" required /></label>
+          <button type="submit">登录并注册设备</button>
+        </form>
+      </section>
+
+      <section class="workspace-grid">
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">远端浏览</p>
+              <h2>空间与目录</h2>
+            </div>
+            <button id="load-spaces">刷新空间</button>
+          </div>
+          <div id="spaces" class="list empty">尚未加载空间</div>
+          <form id="browse-form" class="compact-form">
+            <input name="spaceId" placeholder="space UUID" required />
+            <input name="parentId" placeholder="parent UUID（可空）" />
+            <button type="submit">浏览</button>
+          </form>
+          <div id="files" class="list empty">尚未加载目录</div>
+        </article>
+
+        <article class="panel">
+          <div class="section-head">
+            <div>
+              <p class="section-kicker">增量索引</p>
+              <h2>同步根与离线元数据</h2>
+            </div>
+          </div>
+          <form id="sync-form" class="stack-form">
+            <input name="spaceId" placeholder="space UUID" required />
+            <input name="rootNodeId" placeholder="root node UUID" required />
+            <input name="localPath" placeholder="C:\Enterprise Drive" required />
+            <button type="submit">建立同步根快照</button>
+          </form>
+          <div class="inline-actions">
+            <button id="pull-sync" class="quiet">拉取一次增量</button>
+            <button id="offline-list" class="quiet">查看离线目录</button>
+          </div>
+          <div id="sync-result" class="output">等待同步配置</div>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="section-head">
+          <div>
+            <p class="section-kicker">DTP/1</p>
+            <h2>上传与下载队列</h2>
+          </div>
+          <button id="refresh-transfers">刷新任务</button>
+        </div>
+        <div class="transfer-forms">
+          <form id="upload-form" class="stack-form">
+            <strong>上传</strong>
+            <input name="localPath" placeholder="本地文件绝对路径" required />
+            <input name="spaceId" placeholder="space UUID" required />
+            <input name="parentId" placeholder="parent UUID" required />
+            <button type="submit">加入上传队列</button>
+          </form>
+          <form id="download-form" class="stack-form">
+            <strong>下载</strong>
+            <input name="nodeId" placeholder="file node UUID" required />
+            <input name="destination" placeholder="下载目标绝对路径" required />
+            <button type="submit">加入下载队列</button>
+          </form>
+        </div>
+        <div id="transfers" class="list empty">尚无传输任务</div>
+      </section>
+
+      <section class="panel diagnostics">
+        <div>
+          <p class="section-kicker">诊断</p>
+          <h2>导出脱敏状态</h2>
+          <p class="muted">不包含设备 token、Cookie、文件正文或完整本地路径。</p>
+        </div>
+        <button id="export-diagnostics">导出 JSON</button>
+      </section>
+    </main>
+
+    <div id="toast" role="status" aria-live="polite"></div>
+    <script src="./app.js"></script>
+  </body>
+</html>

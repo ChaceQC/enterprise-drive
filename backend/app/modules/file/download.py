@@ -119,6 +119,8 @@ class FileDownloadService:
             version_id=source.version.id,
             file_name=source.node.name,
             size_bytes=source.version.size_bytes,
+            hash_algo=source.blob.hash_algo,
+            content_hash=source.blob.content_hash,
             mime_type=source.version.mime_type or source.blob.mime_type,
             download_url=presigned.download_url,
             expires_at=presigned.expires_at,

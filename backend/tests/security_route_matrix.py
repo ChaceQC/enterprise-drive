@@ -3,12 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-AccessMode = Literal["public", "session", "admin"]
+AccessMode = Literal["public", "session", "device", "admin"]
 TenantScope = Literal["none", "session", "tenant_slug", "resource"]
 CsrfMode = Literal["none", "optional_session", "required"]
 AuthorizationPolicy = Literal[
     "anonymous",
     "authenticated",
+    "device_session",
     "external_share",
     "file_tree_operation_owner",
     "internal_share",
@@ -44,6 +45,7 @@ _DEPARTMENT_ID = "00000000-0000-4000-8000-00000000000d"
 _GROUP_ID = "00000000-0000-4000-8000-00000000000e"
 _NOTIFICATION_ID = "00000000-0000-4000-8000-00000000000f"
 _ADMIN_JOB_ID = "00000000-0000-4000-8000-000000000010"
+_DEVICE_ID = "00000000-0000-4000-8000-000000000011"
 _RAW_SHARE_TOKEN = "0" * 32
 _CONTENT_HASH = "0" * 64
 
@@ -576,6 +578,65 @@ ROUTE_SECURITY_MATRIX: tuple[SecurityRouteCase, ...] = (
     ),
     SecurityRouteCase(
         method="POST",
+        template_path="/api/v1/device-sessions/register",
+        request_path="/api/v1/device-sessions/register",
+        access_mode="public",
+        tenant_scope="tenant_slug",
+        csrf_mode="none",
+        authorization="anonymous",
+        json_body={
+            "tenant_slug": "default",
+            "username": "missing-user",
+            "password": "missing-password",
+            "installation_id": _DEVICE_ID,
+            "device_name": "矩阵设备",
+            "platform": "windows",
+            "client_version": "0.5.0",
+        },
+        anonymous_status=401,
+        anonymous_code="AUTH_INVALID_CREDENTIALS",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/device-sessions/rotate",
+        request_path="/api/v1/device-sessions/rotate",
+        access_mode="device",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="device_session",
+        json_body={},
+        anonymous_status=401,
+        anonymous_code="DEVICE_SESSION_REQUIRED",
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/device-sessions",
+        request_path="/api/v1/device-sessions",
+        access_mode="session",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="authenticated",
+    ),
+    SecurityRouteCase(
+        method="DELETE",
+        template_path="/api/v1/device-sessions/{device_id}",
+        request_path=f"/api/v1/device-sessions/{_DEVICE_ID}",
+        access_mode="session",
+        tenant_scope="session",
+        csrf_mode="required",
+        authorization="authenticated",
+    ),
+    SecurityRouteCase(
+        method="DELETE",
+        template_path="/api/v1/device-sessions",
+        request_path="/api/v1/device-sessions",
+        access_mode="session",
+        tenant_scope="session",
+        csrf_mode="required",
+        authorization="authenticated",
+    ),
+    SecurityRouteCase(
+        method="POST",
         template_path="/api/v1/spaces",
         request_path="/api/v1/spaces",
         access_mode="session",
@@ -890,6 +951,16 @@ ROUTE_SECURITY_MATRIX: tuple[SecurityRouteCase, ...] = (
         query={"q": "matrix"},
     ),
     SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/sync/changes",
+        request_path="/api/v1/sync/changes",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="none",
+        authorization="node_list",
+        query={"space_id": _SPACE_ID, "root_node_id": _NODE_ID},
+    ),
+    SecurityRouteCase(
         method="POST",
         template_path="/api/v1/shares",
         request_path="/api/v1/shares",
@@ -1033,6 +1104,26 @@ ROUTE_SECURITY_MATRIX: tuple[SecurityRouteCase, ...] = (
         tenant_scope="resource",
         csrf_mode="required",
         authorization="upload_owner",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/uploads/{session_id}/parts/presign",
+        request_path=f"/api/v1/uploads/{_UPLOAD_SESSION_ID}/parts/presign",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="upload_owner",
+        json_body={"part_numbers": [1]},
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/uploads/{session_id}/parts/{part_no}/confirm",
+        request_path=f"/api/v1/uploads/{_UPLOAD_SESSION_ID}/parts/1/confirm",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="required",
+        authorization="upload_owner",
+        json_body={"etag": "matrix-etag", "size_bytes": 1},
     ),
     SecurityRouteCase(
         method="POST",

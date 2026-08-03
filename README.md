@@ -1,6 +1,6 @@
 # 企业网盘
 
-企业网盘工程，当前已实现的代码为版本 `0.4.0` 后端，目标是形成可试点上线的企业级文件管理服务；后续已规划 Rust 桌面客户端、Web 用户端与管理后台、企业身份和规模化治理。项目以《企业网盘开发者技术计划书.md》为技术基线，优先保障文件元数据、对象存储、权限、审计、搜索和异步任务之间的一致性。
+企业网盘工程，当前已实现的代码为版本 `0.5.0`，已包含后端主链路与 Windows 11 Rust/Tauri 桌面 Alpha；目标是形成可试点上线的企业级文件管理服务。项目以《企业网盘开发者技术计划书.md》为技术基线，优先保障文件元数据、对象存储、权限、审计、搜索和异步任务之间的一致性。
 
 ## 技术基线
 
@@ -18,7 +18,7 @@
 - Docker Desktop（WSL2 / Linux containers）
 - Docker Compose v2
 - Compose 内 Nginx gateway
-- Rust stable、Cargo workspace、Tauri 2（二期桌面客户端）
+- Rust stable、Cargo workspace、Tauri 2（Windows 11 桌面 Alpha）
 - TypeScript、React、Vite、OpenAPI 生成 client、Playwright（Web 用户端与管理后台）
 
 ## 一期范围
@@ -35,12 +35,12 @@
 
 ## 二期 Rust 桌面客户端
 
-当前仓库尚无桌面客户端代码。桌面端已正式纳入 Sprint 7 和 Sprint 8，目标版本为 `0.5.0`，采用 Rust stable、Cargo workspace 和 Tauri 2，Windows 11 优先交付。
+当前仓库已交付 Sprint 7 的 Windows 11 桌面 Alpha，目标版本为 `0.5.0`，采用 Rust stable、Cargo workspace 和 Tauri 2；Sprint 8 的双向同步与签名更新仍按计划保留。
 
-- Rust 负责 API client、设备会话、同步状态机、本地 SQLite 索引、文件系统监听、上传下载队列、系统凭据存储和更新签名校验。
+- Rust 负责 API client、设备会话、服务端增量同步、本地 SQLite 索引、上传下载队列、系统凭据存储和脱敏诊断导出。
 - 首个 Alpha 提供登录、空间与目录浏览、上传下载队列、同步目录选择、暂停/继续/取消、离线元数据和任务栏托盘。
-- 双向同步依赖后端先补齐设备会话、增量变更游标、删除 tombstone、版本前置条件和幂等客户端操作 ID。
-- 冲突保留双方内容并生成冲突副本，下载采用临时文件、hash 校验和原子替换，默认不跟随符号链接或 Windows junction。
+- 后端已补齐设备会话、增量变更游标、删除 tombstone、版本前置条件和幂等客户端操作 ID；文件系统监听、双向同步和冲突副本属于 Sprint 8。
+- 下载队列支持临时文件、Range 续传和 SHA-256 校验；冲突副本、完整原子替换和 Windows 路径监听策略属于 Sprint 8。
 - 首发平台为 Windows 11；签名安装包和更新验签稳定后，再推进 macOS 和 Linux。
 
 ## 后续产品路线
@@ -57,7 +57,7 @@
 
 ## 当前状态
 
-当前仓库已完成 Sprint 1 工程底座、Sprint 2 空间和文件树、Sprint 3 上传下载、Sprint 4 权限系统、Sprint 5 分享/预览/搜索，以及 Sprint 6 的代码侧管理与上线治理。当前运行时 OpenAPI 为 73 个路径、99 个操作，数据库 migration head 为 `20260803_0021`。已建立 `backend` 后端工程、uv 依赖锁定、FastAPI 应用入口、配置加载、带 request/task/trace 关联的 JSON 结构化日志、`X-Request-ID` 中间件、统一错误响应、健康检查、Prometheus 指标、OpenTelemetry FastAPI/Celery tracing、本地依赖 Compose 和后端 CI。认证基础能力已落地：租户、用户、`auth_sessions` 表，管理员 seed，本地账号登录、服务端 opaque session、HttpOnly Cookie、CSRF 校验、会话轮换和登出。基础审计、outbox 和 Celery audit 队列 dispatcher 已接入；管理面已覆盖审计、用户、部门、用户组、空间、配额、文件安全、统计、维护任务和异步 CSV 导出，全部按当前租户隔离并要求系统管理员权限，写操作使用实体 `version` 前置条件并写入审计。空间和文件树已具备 `spaces`、`nodes`、`file_blobs`、`file_versions` 元数据表，支持创建空间、创建文件夹、按游标列出目录节点、重命名、移动、删除到回收站、恢复、回收站根节点分页和四类批量文件操作。
+当前仓库已完成 Sprint 1 至 Sprint 7 的代码侧交付（Sprint 7 范围为 `DC-001` 至 `DC-006`）。运行时 OpenAPI 为 80 个路径、107 个操作，数据库 migration head 为 `20260803_0022`。桌面端目录包含 Tauri 2 应用、设备会话、增量同步、SQLite 索引、DTP/1 传输队列、Windows Credential Manager 适配和脱敏诊断导出；后端认证、权限、审计、搜索、管理 API、Compose 与 CI 基线保持不变。
 
 Sprint 3 上传主链路已包含 `upload_sessions`、multipart init/presign/complete/abort、秒传、服务端 SHA-256、最终对象归档、失败清理、过期会话回收、限流、下载、容量流水以及对象/回收站治理。multipart complete 使用标准 S3 HTTP 控制面；同 hash 首次上传在 PostgreSQL 中通过原子 upsert 只创建一个 blob，异常 complete 可从对象事实恢复，失败路径会清理受控 `uploads/...` 临时对象。
 
@@ -77,7 +77,7 @@ Sprint 2 剩余增强已闭环：创建文件夹、移动、恢复和对应批�
 
 `BE-027` 可观测性已完成：API `/metrics` 暴露路由模板维度的请求数/延迟、上传下载、权限、Outbox 和搜索延迟指标，正式 2-worker Uvicorn 使用 Prometheus multiprocess 聚合；5 个 Celery Worker 分别在 Compose 内部 `9100` 暴露 task 数量、状态、耗时及本进程业务指标。可选 `monitoring` profile 内置 Prometheus、Alertmanager 和 Grafana，两张预置看板通过 gateway `/grafana/` 访问，三项监控服务都不发布宿主端口。JSON 日志自动关联 `service`、`env`、`request_id`、`task_id`、`trace_id` 和 `span_id`；OpenTelemetry exporter 默认 `none`，可配置 Console 或 OTLP/HTTP。
 
-`BE-030` 已完成 API 与网络安全矩阵；当前运行时 OpenAPI 为 73 个路径、99 个操作，管理空间、统计、维护和导出路由已纳入匿名、CSRF、管理员和跨租户门禁。损坏/超大图片、OCR 页数/像素/体量边界、文档路径与扩展名注入、Range 权限、预签名 URL、用户/组织/空间/配额/安全策略管理和轮换 token 外链穷举也已覆盖。Trusted Host/CORS 已通过动态测试，真实 Nginx raw HTTP smoke 已验证未知 API/S3 Host、CL/TE 冲突、重复 Content-Length、API 请求体 413 与 storage 流式入口，并固化进 CI。
+`BE-030` 已完成 API 与网络安全矩阵；当前运行时 OpenAPI 为 80 个路径、107 个操作，管理空间、统计、维护、导出以及 Sprint 7 桌面路由已纳入相应认证、CSRF、管理员和跨租户门禁。损坏/超大图片、OCR 页数/像素/体量边界、文档路径与扩展名注入、Range 权限、预签名 URL、用户/组织/空间/配额/安全策略管理和轮换 token 外链穷举也已覆盖。Trusted Host/CORS 已通过动态测试，真实 Nginx raw HTTP smoke 已验证未知 API/S3 Host、CL/TE 冲突、重复 Content-Length、API 请求体 413 与 storage 流式入口，并固化进 CI。
 
 Sprint 4 权限系统已新增 `space_members` 基础表，创建空间时会自动写入当前用户的 `owner` 角色成员关系。空间列表、文件树、上传初始化、multipart complete 和下载已通过 `PermissionService` 做空间级成员角色检查：`viewer` 可列表和下载，`editor` 可上传与修改，`owner/admin` 可执行全部空间级动作。空间成员管理 API 已接入，支持 owner/admin 添加、调整和移除成员，权限变更会递增空间权限版本并写入审计。节点 ACL 已支持 `user`、`department`、`group` 三类主体，基于 org 事实表展开用户部门和用户组，支持 allow/deny、继承开关和 deny 优先，并已覆盖文件列表、创建文件夹、上传初始化、multipart complete 和下载入口；文件列表响应会通过批量权限评估返回每个子节点的常用动作权限，避免列表页逐项查询。系统管理员现可通过管理 API 完成用户生命周期、部门层级重命名/移动/停用、用户组状态以及部门/组成员变更；部门路径更新会原子改写子树并拒绝环路，所有修改使用版本前置条件、租户隔离和审计。空间成员和节点 ACL 变更都会写入 `permission.changed` outbox event，`permission.invalidate_cache` 会消费该事件并删除匹配的 Redis 权限缓存 key；部门/用户组成员或状态变化会写入租户级事件，按受影响用户或整个租户失效权限缓存。搜索 ACL 已新增 token builder 和 `search.acl_rebuild_requested` outbox event；秒传、multipart complete、重命名、移动、删除、恢复和彻底删除会写入 `search.index_requested`，上传完成还会写入 `search.extract_requested`。`search.dispatch_outbox` 会从 PostgreSQL 重新构建文件索引文档写入 OpenSearch，不再活跃或已彻底删除的文件会删除索引文档，并在 ACL 变更后按 space 或 node 子树保守重建索引 token；搜索抽取支持 UTF-8 文本、可复制正文 PDF、DOCX/PPTX/XLSX、图片 OCR、扫描 PDF OCR，以及 LibreOffice 转换后的旧 Office/ODF 文档。Tesseract OCR 受页数、像素、渲染字节、正文字符数和命令超时边界约束，抽取结果写入 `file_versions.search_text` 并刷新索引 `content` 字段。预览链路使用 Pillow、Poppler 和 LibreOffice 生成私有 WebP 产物；`GET /api/v1/files/{node_id}/preview` 会刷新 `last_accessed_at` 并返回短期私有 URL，`preview.cleanup_artifacts` 周期清理非当前旧版本产物和超期孤儿预览对象。`GET /api/v1/search` 已接入 allow/deny token、签名 cursor、HTML 编码高亮、限流和 `read_meta` 二次权限校验。最终对象的 DB 驱动清理由 `file.cleanup_unreferenced_blobs` 承担；对象存储中没有 DB 元数据的孤儿最终对象由 `file.cleanup_orphaned_objects` 承担。
 
@@ -182,7 +182,7 @@ GitHub `backend-ci` 同时启动临时 PostgreSQL 16 容器、执行 Alembic upg
 
 Compose 内的 Nginx gateway 是唯一宿主端口入口。默认本机模式继续使用 API `http://localhost:18080` 和 S3 外部端点 `http://localhost:19000`。公网 TLS 模式已提供 ACME HTTP-01 bootstrap、Certbot 证书卷、TLS server block、HTTP `308` 跳转、`80/443` 双域名 Host 分流、证书续期与 Nginx 热重载命令；生产使用 `https://drive.example.com`、`https://storage.example.com` 时，必须先配置真实 DNS、邮箱、API/MinIO CORS、Trusted Hosts、Secure Cookie 和 S3 公共端点，执行 `manage.ps1 tls-init -Tls` 后再运行 `manage.ps1 up -Tls -Build` 启动全部 Worker 和 beat。API、Worker、PostgreSQL、Redis、OpenSearch、MinIO API/Console 等内部服务不发布宿主端口；Worker metrics `9100` 也只暴露在 Compose 网络内。容器内 API/Worker 通过 `http://minio:9000` 访问对象存储，不能把内部服务名返回给浏览器。
 
-正式编排还包含真实 PostgreSQL `/readyz` 探针、独立 Celery beat、隔离的 Preview Worker、named volumes 和 `v0.4.0` 自动化备份恢复。`manage.ps1 backup` 会生成 PostgreSQL custom dump、MinIO/Redis/OpenSearch/TLS 停止状态卷归档、CMS 环境文件密文和严格 manifest；manifest 从 15 个无 profile 默认服务的实际 Compose 容器记录 image ID，并记录工件大小/SHA-256、精确 `compose.windows.yml` SHA-256、Git commit、项目版本、S3 bucket、OpenSearch index、`DRIVE_TLS_CERT_NAME` lineage 名称、Alembic revision 与 WAL LSN。`backup-verify` 要求当前 Git HEAD、Compose、项目版本、configuration lineage 和全部 15 个服务镜像与 manifest 精确一致，并在无网络、只读、drop capabilities 的临时容器/卷中预解包扫描 tar。`backup-retention` 按保留天数和最少份数轮换经过校验的托管备份，`restore-drill` 把最新或指定备份恢复到随机隔离 Compose project 并在结束后删除 target 容器/卷；两类操作都写入仓库外 restricted ACL JSON 记录，并支持 Windows 周期任务注册/删除。备份辅助容器默认限制为 `0.50 CPU / 512m memory / 512m memory-swap / 128 PIDs`，`pg_dump` 和 gzip 默认使用压缩等级 `1`；这些值可通过 `.env.windows` 中的 `DRIVE_BACKUP_*` 变量调整，但不得取消资源边界。
+正式编排还包含真实 PostgreSQL `/readyz` 探针、独立 Celery beat、隔离的 Preview Worker、named volumes 和 `v0.5.0` 自动化备份恢复。`manage.ps1 backup` 会生成 PostgreSQL custom dump、MinIO/Redis/OpenSearch/TLS 停止状态卷归档、CMS 环境文件密文和严格 manifest；manifest 从 15 个无 profile 默认服务的实际 Compose 容器记录 image ID，并记录工件大小/SHA-256、精确 `compose.windows.yml` SHA-256、Git commit、项目版本、S3 bucket、OpenSearch index、`DRIVE_TLS_CERT_NAME` lineage 名称、Alembic revision 与 WAL LSN。`backup-verify` 要求当前 Git HEAD、Compose、项目版本、configuration lineage 和全部 15 个服务镜像与 manifest 精确一致，并在无网络、只读、drop capabilities 的临时容器/卷中预解包扫描 tar。`backup-retention` 按保留天数和最少份数轮换经过校验的托管备份，`restore-drill` 把最新或指定备份恢复到随机隔离 Compose project 并在结束后删除 target 容器/卷；两类操作都写入仓库外 restricted ACL JSON 记录，并支持 Windows 周期任务注册/删除。备份辅助容器默认限制为 `0.50 CPU / 512m memory / 512m memory-swap / 128 PIDs`，`pg_dump` 和 gzip 默认使用压缩等级 `1`；这些值可通过 `.env.windows` 中的 `DRIVE_BACKUP_*` 变量调整，但不得取消资源边界。
 
 `backup` 和 `restore` 同时使用 project 级与逐 physical volume Windows mutex；备份根目录会拒绝卷根、仓库目录/祖先及未预先使用 restricted ACL 的既有非空目录，staging/正式备份、`-ForceRestore` rollback archive 和恢复后的 CMS 文件会自动应用只允许当前用户、SYSTEM、Administrators 的 restricted ACL。`restore` 只接受不同且已停止的 Compose project，并拒绝 source/target 卷重叠、错误卷标签、foreign attachment；使用 `-ForceRestore` 时会先归档原非空卷，失败后还原原非空卷、清空原空卷、删除新卷并停止 target，回滚异常则保留并报告归档路径。恢复提交后的 rollback cleanup 异常只报告维护失败，不会反向回滚已恢复数据。CMS 明文输出必须使用仓库和备份目录外的绝对新文件路径、已有父目录，并只在本次恢复模式全部门禁成功的末尾原子发布；若发布竞态中目标被其他进程创建，脚本保留该 foreign file。真实随机 source/target project 演练已验证数据库和对象回到同一备份点、CMS 环境文件解密、TLS lineage、Worker/beat、gateway 与健康检查。
 

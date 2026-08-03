@@ -22,6 +22,7 @@ from app.modules.preview.events import emit_preview_render_requested
 from app.modules.quota.service import QuotaService
 from app.modules.search.events import emit_search_extract_requested, emit_search_index_requested
 from app.modules.space.repository import SpaceRepository
+from app.modules.sync.client_operations import ClientOperationService, ClientOperationStart
 from app.modules.upload.audit import (
     instant_upload_metadata,
     multipart_upload_metadata,
@@ -31,6 +32,8 @@ from app.modules.upload.hash import ensure_supported_upload_hash_algo, normalize
 from app.modules.upload.models import UploadSession
 from app.modules.upload.repository import UploadRepository
 from app.modules.upload.schemas import (
+    BatchPresignUploadPartsResponse,
+    ConfirmUploadPartResponse,
     InitUploadResponse,
     InstantUploadResponse,
     MultipartUploadResponse,
@@ -51,6 +54,7 @@ class UploadService:
         quota_service: QuotaService,
         storage: StorageAdapter,
         settings: Settings,
+        client_operation_service: ClientOperationService,
         audit_service: AuditService | None = None,
     ) -> None:
         self.repository = repository
@@ -60,6 +64,7 @@ class UploadService:
         self.quota_service = quota_service
         self.storage = storage
         self.settings = settings
+        self.client_operation_service = client_operation_service
         self.audit_service = audit_service
 
     async def init_upload(
@@ -73,8 +78,28 @@ class UploadService:
         content_hash: str,
         hash_algo: str,
         mime_type: str | None,
+        client_operation_id: str | None = None,
         audit_context: AuditContext | None = None,
     ) -> InitUploadResponse:
+        operation = await self.client_operation_service.start(
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+            operation_id=client_operation_id,
+            action="upload.init",
+            request_payload={
+                "space_id": str(space_id),
+                "parent_id": str(parent_id),
+                "file_name": file_name,
+                "size_bytes": size_bytes,
+                "content_hash": content_hash,
+                "hash_algo": hash_algo,
+                "mime_type": mime_type,
+            },
+        )
+        if operation.replay_json is not None:
+            if operation.replay_json.get("mode") == "instant":
+                return InstantUploadResponse.model_validate(operation.replay_json)
+            return MultipartUploadResponse.model_validate(operation.replay_json)
         ensure_supported_upload_hash_algo(hash_algo)
         hash_algo = hash_algo.lower()
         content_hash = normalize_upload_hash(content_hash)
@@ -115,6 +140,8 @@ class UploadService:
                 blob_id=existing_blob.id,
                 size_bytes=size_bytes,
                 mime_type=mime_type or existing_blob.mime_type,
+                client_operation_id=client_operation_id,
+                operation=operation,
                 audit_context=audit_context,
             )
         existing_blob_any_status = await self.repository.get_blob_by_hash_any_status(
@@ -135,6 +162,8 @@ class UploadService:
             content_hash=content_hash,
             hash_algo=hash_algo,
             mime_type=mime_type,
+            client_operation_id=client_operation_id,
+            operation=operation,
             audit_context=audit_context,
         )
 
@@ -159,6 +188,7 @@ class UploadService:
             size_bytes=upload_session.size_bytes,
             part_size_bytes=upload_session.part_size_bytes,
             total_parts=upload_session.total_parts,
+            max_parallelism=self.settings.upload_max_parallelism,
             uploaded_parts=uploaded_parts,
             expires_at=upload_session.expires_at,
             completed_node_id=upload_session.completed_node_id,
@@ -204,6 +234,118 @@ class UploadService:
             headers=presigned.headers,
         )
 
+    async def presign_upload_parts(
+        self,
+        *,
+        current_user: User,
+        session_id: UUID,
+        part_numbers: list[int],
+    ) -> BatchPresignUploadPartsResponse:
+        if len(set(part_numbers)) != len(part_numbers):
+            raise ApiError("UPLOAD_PART_INVALID", "分片编号不能重复", status_code=422)
+        upload_session = await self._get_upload_session(
+            current_user=current_user,
+            session_id=session_id,
+        )
+        if upload_session.status not in {"initiated", "uploading"}:
+            raise ApiError("UPLOAD_NOT_ACTIVE", "上传会话不可继续上传", status_code=409)
+        if ensure_utc(upload_session.expires_at) <= utc_now():
+            upload_session.status = "expired"
+            await self.repository.commit()
+            raise ApiError("UPLOAD_SESSION_EXPIRED", "上传会话已过期", status_code=410)
+        if upload_session.provider_upload_id is None:
+            raise ApiError("UPLOAD_SESSION_INVALID", "上传会话缺少对象存储会话", status_code=500)
+        invalid_parts = [
+            part_no
+            for part_no in part_numbers
+            if part_no < 1 or part_no > upload_session.total_parts
+        ]
+        if invalid_parts:
+            raise ApiError(
+                "UPLOAD_PART_INVALID",
+                "分片编号不合法",
+                status_code=422,
+                details={"part_numbers": invalid_parts},
+            )
+
+        upload_session.status = "uploading"
+        await self.repository.flush()
+        items = [
+            UploadPartUrlResponse(
+                part_no=presigned.part_no,
+                upload_url=presigned.upload_url,
+                expires_at=presigned.expires_at,
+                headers=presigned.headers,
+            )
+            for presigned in [
+                await self.storage.presign_upload_part(
+                    bucket=upload_session.storage_bucket,
+                    storage_key=upload_session.storage_key,
+                    provider_upload_id=upload_session.provider_upload_id,
+                    part_no=part_no,
+                    expires_in_seconds=self.settings.upload_presign_expires_seconds,
+                )
+                for part_no in part_numbers
+            ]
+        ]
+        await self.repository.commit()
+        return BatchPresignUploadPartsResponse(
+            session_id=upload_session.id,
+            max_parallelism=self.settings.upload_max_parallelism,
+            items=items,
+        )
+
+    async def confirm_upload_part(
+        self,
+        *,
+        current_user: User,
+        session_id: UUID,
+        part_no: int,
+        etag: str,
+        size_bytes: int,
+    ) -> ConfirmUploadPartResponse:
+        upload_session = await self._get_upload_session(
+            current_user=current_user,
+            session_id=session_id,
+        )
+        if upload_session.status not in {"initiated", "uploading"}:
+            raise ApiError("UPLOAD_NOT_ACTIVE", "上传会话不可继续上传", status_code=409)
+        if ensure_utc(upload_session.expires_at) <= utc_now():
+            upload_session.status = "expired"
+            await self.repository.commit()
+            raise ApiError("UPLOAD_SESSION_EXPIRED", "上传会话已过期", status_code=410)
+        if part_no < 1 or part_no > upload_session.total_parts:
+            raise ApiError("UPLOAD_PART_INVALID", "分片编号不合法", status_code=422)
+
+        expected_size = min(
+            upload_session.part_size_bytes,
+            upload_session.size_bytes - (part_no - 1) * upload_session.part_size_bytes,
+        )
+        if size_bytes != expected_size:
+            raise ApiError(
+                "UPLOAD_PART_SIZE_INVALID",
+                "分片大小不匹配",
+                status_code=422,
+                details={"expected_size_bytes": expected_size},
+            )
+        upload_session.status = "uploading"
+        await self.repository.record_uploaded_parts(
+            tenant_id=current_user.tenant_id,
+            upload_session_id=upload_session.id,
+            parts=[(part_no, etag, size_bytes)],
+            uploaded_at=utc_now(),
+        )
+        uploaded_parts = await self.repository.list_uploaded_part_numbers(
+            tenant_id=current_user.tenant_id,
+            upload_session_id=upload_session.id,
+        )
+        await self.repository.commit()
+        return ConfirmUploadPartResponse(
+            session_id=upload_session.id,
+            part_no=part_no,
+            uploaded_parts=uploaded_parts,
+        )
+
     async def _instant_upload(
         self,
         *,
@@ -214,6 +356,8 @@ class UploadService:
         blob_id: UUID,
         size_bytes: int,
         mime_type: str | None,
+        client_operation_id: str | None,
+        operation: ClientOperationStart,
         audit_context: AuditContext | None,
     ) -> InstantUploadResponse:
         try:
@@ -283,6 +427,17 @@ class UploadService:
                 blob_id=blob_id,
                 reason="upload_instant",
             )
+            response = InstantUploadResponse(
+                node_id=node.id,
+                version_id=version.id,
+                blob_id=blob_id,
+                client_operation_id=client_operation_id,
+            )
+            self.client_operation_service.complete(
+                record=operation.record,
+                response=response,
+                response_status=201,
+            )
             await self.repository.commit()
         except ApiError:
             await self.repository.rollback()
@@ -291,7 +446,7 @@ class UploadService:
             await self.repository.rollback()
             raise node_name_conflict_error() from exc
 
-        return InstantUploadResponse(node_id=node.id, version_id=version.id, blob_id=blob_id)
+        return response
 
     async def _create_multipart_upload(
         self,
@@ -304,6 +459,8 @@ class UploadService:
         content_hash: str,
         hash_algo: str,
         mime_type: str | None,
+        client_operation_id: str | None,
+        operation: ClientOperationStart,
         audit_context: AuditContext | None,
     ) -> MultipartUploadResponse:
         part_size = self.settings.upload_part_size_bytes
@@ -345,6 +502,19 @@ class UploadService:
                 audit_context=audit_context,
                 metadata=multipart_upload_metadata(upload_session=upload_session),
             )
+            response = MultipartUploadResponse(
+                session_id=upload_session.id,
+                part_size_bytes=upload_session.part_size_bytes,
+                total_parts=upload_session.total_parts,
+                max_parallelism=self.settings.upload_max_parallelism,
+                expires_at=upload_session.expires_at,
+                client_operation_id=client_operation_id,
+            )
+            self.client_operation_service.complete(
+                record=operation.record,
+                response=response,
+                response_status=201,
+            )
             await self.repository.commit()
         except Exception:
             await self.repository.rollback()
@@ -354,12 +524,7 @@ class UploadService:
                 provider_upload_id=multipart_upload.provider_upload_id,
             )
             raise
-        return MultipartUploadResponse(
-            session_id=upload_session.id,
-            part_size_bytes=upload_session.part_size_bytes,
-            total_parts=upload_session.total_parts,
-            expires_at=upload_session.expires_at,
-        )
+        return response
 
     async def _get_owned_parent_folder(
         self,

@@ -1,0 +1,17 @@
+[package]
+name = "drive-platform"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+directories.workspace = true
+parking_lot.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+keyring.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

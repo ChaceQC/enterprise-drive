@@ -117,7 +117,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "企业网盘"
-    app_version: str = "0.4.0"
+    app_version: str = "0.5.0"
     service_name: str = "enterprise-drive-api"
     environment: Literal["local", "test", "staging", "production"] = "local"
     debug: bool = False
@@ -191,6 +191,7 @@ class Settings(BaseSettings):
     upload_session_ttl_minutes: int = 1440
     upload_part_size_bytes: int = 8 * 1024 * 1024
     upload_presign_expires_seconds: int = 900
+    upload_max_parallelism: int = Field(default=4, ge=1, le=32)
     download_presign_expires_seconds: int = 300
     download_proxy_enabled: bool = True
     download_proxy_max_range_bytes: int = Field(default=64 * 1024 * 1024, ge=1)
@@ -259,6 +260,8 @@ class Settings(BaseSettings):
     session_cookie_samesite: Literal["lax", "strict", "none"] = "lax"
     session_cookie_secure: bool = False
     session_days: int = 30
+    device_session_hours: int = Field(default=12, ge=1, le=168)
+    sync_cursor_ttl_days: int = Field(default=30, ge=1, le=365)
 
     admin_tenant_slug: str = "default"
     admin_tenant_name: str = "默认企业"

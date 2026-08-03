@@ -1,0 +1,15 @@
+[package]
+name = "drive-sync-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+chrono.workspace = true
+drive-api-client = { path = "../drive-api-client" }
+drive-local-index = { path = "../drive-local-index" }
+drive-platform = { path = "../drive-platform" }
+serde.workspace = true
+thiserror.workspace = true
+uuid.workspace = true

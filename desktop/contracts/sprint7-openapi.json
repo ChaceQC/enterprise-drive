@@ -1,0 +1,98 @@
+{
+  "version": "0.5.0",
+  "operations": [
+    ["POST", "/api/v1/device-sessions/register"],
+    ["POST", "/api/v1/device-sessions/rotate"],
+    ["GET", "/api/v1/device-sessions"],
+    ["DELETE", "/api/v1/device-sessions/{device_id}"],
+    ["DELETE", "/api/v1/device-sessions"],
+    ["GET", "/api/v1/spaces"],
+    ["GET", "/api/v1/files"],
+    ["POST", "/api/v1/files/folders"],
+    ["PATCH", "/api/v1/files/{node_id}"],
+    ["POST", "/api/v1/files/{node_id}/move"],
+    ["DELETE", "/api/v1/files/{node_id}"],
+    ["GET", "/api/v1/files/{node_id}/download"],
+    ["POST", "/api/v1/uploads/init"],
+    ["GET", "/api/v1/uploads/{session_id}"],
+    ["POST", "/api/v1/uploads/{session_id}/parts/presign"],
+    ["POST", "/api/v1/uploads/{session_id}/parts/{part_no}/confirm"],
+    ["POST", "/api/v1/uploads/{session_id}/complete"],
+    ["POST", "/api/v1/uploads/{session_id}/abort"],
+    ["GET", "/api/v1/sync/changes"]
+  ],
+  "required_error_codes": [
+    "AUTH_INVALID_CREDENTIALS",
+    "DEVICE_SESSION_INVALID",
+    "DEVICE_SESSION_REVOKED",
+    "DEVICE_SESSION_EXPIRED",
+    "DEVICE_SESSION_REUSED",
+    "SYNC_CURSOR_INVALID",
+    "SYNC_CURSOR_SCOPE_MISMATCH",
+    "SYNC_CURSOR_EXPIRED",
+    "SYNC_PERMISSION_REVOKED",
+    "FILE_VERSION_CONFLICT",
+    "CLIENT_OPERATION_ID_REUSED",
+    "UPLOAD_PART_INVALID",
+    "UPLOAD_PART_SIZE_INVALID"
+  ],
+  "required_schema_properties": {
+    "DeviceSessionResponse": [
+      "access_token",
+      "device",
+      "expires_at",
+      "token_type",
+      "user"
+    ],
+    "SyncChangeListResponse": [
+      "cursor_expires_at",
+      "has_more",
+      "items",
+      "next_cursor",
+      "root_node_id",
+      "space_id"
+    ],
+    "MultipartUploadResponse": [
+      "checksum_algorithm",
+      "client_operation_id",
+      "max_parallelism",
+      "part_size_bytes",
+      "protocol_version",
+      "session_id",
+      "total_parts"
+    ],
+    "UploadSessionStatusResponse": [
+      "checksum_algorithm",
+      "client_operation_id",
+      "completed_node_id",
+      "completed_version_id",
+      "max_parallelism",
+      "part_size_bytes",
+      "protocol_version",
+      "session_id",
+      "uploaded_parts"
+    ],
+    "BatchPresignUploadPartsResponse": [
+      "client_operation_id",
+      "items",
+      "max_parallelism",
+      "protocol_version",
+      "session_id"
+    ],
+    "ConfirmUploadPartResponse": [
+      "client_operation_id",
+      "part_no",
+      "protocol_version",
+      "session_id",
+      "uploaded_parts"
+    ],
+    "FileDownloadUrlResponse": [
+      "client_operation_id",
+      "content_hash",
+      "download_url",
+      "hash_algo",
+      "protocol_version",
+      "size_bytes"
+    ]
+  }
+}

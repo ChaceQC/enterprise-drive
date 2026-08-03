@@ -161,6 +161,8 @@ class FileVersionService:
             version_id=version.id,
             file_name=node.name,
             size_bytes=version.size_bytes,
+            hash_algo=blob.hash_algo,
+            content_hash=blob.content_hash,
             mime_type=version.mime_type or blob.mime_type,
             download_url=presigned.download_url,
             expires_at=presigned.expires_at,

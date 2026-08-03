@@ -1,0 +1,59 @@
+[workspace]
+members = [
+  "apps/drive-desktop/src-tauri",
+  "crates/drive-api-client",
+  "crates/drive-device-session",
+  "crates/drive-sync-engine",
+  "crates/drive-local-index",
+  "crates/drive-transfer",
+  "crates/drive-platform",
+  "crates/drive-diagnostics",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.5.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.92"
+authors = ["ChaceQC"]
+
+[workspace.dependencies]
+anyhow = "1.0.100"
+async-trait = "0.1.89"
+chrono = { version = "0.4.45", features = ["serde"] }
+directories = "6.0.0"
+futures-util = "0.3.33"
+hex = "0.4.3"
+keyring = { version = "4.1.6", default-features = false, features = ["v1"] }
+parking_lot = "0.12.5"
+reqwest = { version = "0.13.4", default-features = false, features = [
+  "json",
+  "rustls",
+  "stream",
+] }
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+sha2 = "0.11.0"
+tauri = { version = "2.11.5", features = ["tray-icon"] }
+tauri-build = "2.6.3"
+tempfile = "3.27.0"
+thiserror = "2.0.19"
+tokio = { version = "1.53.1", features = [
+  "fs",
+  "io-util",
+  "macros",
+  "rt-multi-thread",
+  "sync",
+  "time",
+] }
+url = { version = "2.5.7", features = ["serde"] }
+uuid = { version = "1.24.0", features = ["serde", "v4"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+panic = "abort"
+strip = true

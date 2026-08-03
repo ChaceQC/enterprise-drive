@@ -62,6 +62,38 @@ class AuthService:
         password: str,
         audit_context: AuditContext | None = None,
     ) -> IssuedSession:
+        user = await self.authenticate_password(
+            tenant_slug=tenant_slug,
+            username=username,
+            password=password,
+            audit_action="auth.login",
+            audit_context=audit_context,
+        )
+        issued_session = await self._issue_session(user=user, family_id=uuid4())
+        await self._record_auth_event(
+            AuditEvent(
+                tenant_id=user.tenant_id,
+                actor_id=user.id,
+                action="auth.login",
+                resource_type="user",
+                resource_id=user.id,
+                result="allowed",
+                metadata={"username": user.username},
+            ),
+            audit_context=audit_context,
+        )
+        await self.repository.commit()
+        return issued_session
+
+    async def authenticate_password(
+        self,
+        *,
+        tenant_slug: str,
+        username: str,
+        password: str,
+        audit_action: str,
+        audit_context: AuditContext | None = None,
+    ) -> User:
         tenant = await self.repository.get_tenant_by_slug(tenant_slug)
         if tenant is None:
             verify_password(password, _DUMMY_PASSWORD_HASH)
@@ -77,7 +109,7 @@ class AuthService:
                 AuditEvent(
                     tenant_id=tenant.id,
                     actor_id=user.id if user else None,
-                    action="auth.login",
+                    action=audit_action,
                     resource_type="user",
                     resource_id=user.id if user else None,
                     result="denied",
@@ -94,7 +126,7 @@ class AuthService:
                 AuditEvent(
                     tenant_id=tenant.id,
                     actor_id=user.id,
-                    action="auth.login",
+                    action=audit_action,
                     resource_type="user",
                     resource_id=user.id,
                     result="denied",
@@ -106,21 +138,7 @@ class AuthService:
             await self.repository.commit()
             raise self._invalid_credentials()
 
-        issued_session = await self._issue_session(user=user, family_id=uuid4())
-        await self._record_auth_event(
-            AuditEvent(
-                tenant_id=tenant.id,
-                actor_id=user.id,
-                action="auth.login",
-                resource_type="user",
-                resource_id=user.id,
-                result="allowed",
-                metadata={"username": user.username},
-            ),
-            audit_context=audit_context,
-        )
-        await self.repository.commit()
-        return issued_session
+        return user
 
     async def rotate_session(
         self,

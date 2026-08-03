@@ -458,12 +458,24 @@ async def test_internal_routes_hide_foreign_tenant_resources(
             f"/api/v1/uploads/{fixture.upload_session_id}/parts/1/presign",
             None,
         ),
+        ("POST", "/api/v1/uploads/{session_id}/parts/presign"): (
+            f"/api/v1/uploads/{fixture.upload_session_id}/parts/presign",
+            {"part_numbers": [1]},
+        ),
+        ("POST", "/api/v1/uploads/{session_id}/parts/{part_no}/confirm"): (
+            f"/api/v1/uploads/{fixture.upload_session_id}/parts/1/confirm",
+            {"etag": "foreign", "size_bytes": 1},
+        ),
         ("POST", "/api/v1/uploads/{session_id}/complete"): (
             f"/api/v1/uploads/{fixture.upload_session_id}/complete",
             {"parts": [{"part_no": 1, "etag": "foreign"}]},
         ),
         ("POST", "/api/v1/uploads/{session_id}/abort"): (
             f"/api/v1/uploads/{fixture.upload_session_id}/abort",
+            None,
+        ),
+        ("GET", "/api/v1/sync/changes"): (
+            "/api/v1/sync/changes",
             None,
         ),
     }
@@ -476,11 +488,15 @@ async def test_internal_routes_hide_foreign_tenant_resources(
     for method, template_path in cases:
         case = _matrix_case(method, template_path)
         request_path, body = cases[(method, template_path)]
-        query = (
-            {"space_id": str(fixture.space_id)}
-            if template_path in {"/api/v1/files", "/api/v1/files/trash"}
-            else None
-        )
+        if template_path in {"/api/v1/files", "/api/v1/files/trash"}:
+            query = {"space_id": str(fixture.space_id)}
+        elif template_path == "/api/v1/sync/changes":
+            query = {
+                "space_id": str(fixture.space_id),
+                "root_node_id": str(fixture.root_node_id),
+            }
+        else:
+            query = None
         headers = dict(case.headers)
         if case.csrf_mode == "required":
             headers["X-CSRF-Token"] = default_csrf

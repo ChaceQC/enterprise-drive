@@ -1,6 +1,6 @@
 # Windows 11 Docker 正式部署说明
 
-> 适用项目版本：`v0.4.0`
+> 适用项目版本：`v0.5.0`
 >
 > 当前代码基线：Windows 本机 HTTP `18080/19000`、公网 ACME/TLS `80/443`、可选 monitoring profile、备份轮换和隔离恢复演练均已落地；真实受信证书签发和双域名 HTTPS 记录仍需要生产 DNS/网络环境。
 

@@ -7,6 +7,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.pool import NullPool
 
 from app.core.config import Settings, get_settings
+from app.modules.sync.listeners import register_sync_change_listeners
+
+register_sync_change_listeners()
 
 
 def create_session_factory(settings: Settings) -> async_sessionmaker[AsyncSession]:

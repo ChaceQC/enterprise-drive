@@ -32,6 +32,8 @@ class MultipartUploadResponse(DriveTransferProtocolResponse):
     session_id: UUID
     part_size_bytes: int
     total_parts: int
+    max_parallelism: int
+    checksum_algorithm: Literal["sha256"] = "sha256"
     expires_at: datetime
 
 
@@ -49,6 +51,8 @@ class UploadSessionStatusResponse(DriveTransferProtocolResponse):
     size_bytes: int
     part_size_bytes: int
     total_parts: int
+    max_parallelism: int
+    checksum_algorithm: Literal["sha256"] = "sha256"
     uploaded_parts: list[int]
     expires_at: datetime
     completed_node_id: UUID | None
@@ -63,6 +67,27 @@ class CompleteUploadPartRequest(BaseModel):
 
 class CompleteUploadRequest(BaseModel):
     parts: list[CompleteUploadPartRequest] = Field(min_length=1)
+
+
+class BatchPresignUploadPartsRequest(BaseModel):
+    part_numbers: list[int] = Field(min_length=1, max_length=32)
+
+
+class BatchPresignUploadPartsResponse(DriveTransferProtocolResponse):
+    session_id: UUID
+    max_parallelism: int
+    items: list[UploadPartUrlResponse]
+
+
+class ConfirmUploadPartRequest(BaseModel):
+    etag: str = Field(min_length=1, max_length=255)
+    size_bytes: int = Field(ge=1)
+
+
+class ConfirmUploadPartResponse(DriveTransferProtocolResponse):
+    session_id: UUID
+    part_no: int
+    uploaded_parts: list[int]
 
 
 class CompleteUploadResponse(DriveTransferProtocolResponse):

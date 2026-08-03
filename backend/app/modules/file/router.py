@@ -62,6 +62,7 @@ from app.modules.preview.service import PreviewAccessService
 from app.modules.quota.repository import QuotaRepository
 from app.modules.quota.service import QuotaService
 from app.modules.space.repository import SpaceRepository
+from app.modules.sync.client_operations import ClientOperationService
 
 router = APIRouter()
 
@@ -87,6 +88,7 @@ def get_file_service(
             policy_enabled=settings.quota_policy_enabled,
         ),
         settings=settings,
+        client_operation_service=ClientOperationService(session),
         audit_service=AuditService(repository=AuditRepository(session)),
     )
 
@@ -183,6 +185,10 @@ async def create_folder(
     request: CreateFolderRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     service: Annotated[FileService, Depends(get_file_service)],
+    client_operation_id: Annotated[
+        str | None,
+        Header(alias="X-Client-Operation-ID", min_length=1, max_length=128),
+    ] = None,
 ) -> FileNodeResponse:
     return await service.create_folder(
         current_user=current_user,
@@ -190,6 +196,7 @@ async def create_folder(
         parent_id=request.parent_id,
         name=request.name,
         conflict_policy=request.conflict_policy,
+        client_operation_id=client_operation_id,
         audit_context=build_audit_context(http_request),
     )
 
@@ -235,11 +242,17 @@ async def rename_node(
     request: RenameNodeRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     service: Annotated[FileService, Depends(get_file_service)],
+    client_operation_id: Annotated[
+        str | None,
+        Header(alias="X-Client-Operation-ID", min_length=1, max_length=128),
+    ] = None,
 ) -> FileNodeResponse:
     return await service.rename_node(
         current_user=current_user,
         node_id=node_id,
         name=request.name,
+        expected_current_version_id=request.expected_current_version_id,
+        client_operation_id=client_operation_id,
         audit_context=build_audit_context(http_request),
     )
 
@@ -251,6 +264,10 @@ async def move_node(
     request: MoveNodeRequest,
     current_user: Annotated[User, Depends(get_current_user)],
     service: Annotated[FileService, Depends(get_file_service)],
+    client_operation_id: Annotated[
+        str | None,
+        Header(alias="X-Client-Operation-ID", min_length=1, max_length=128),
+    ] = None,
 ) -> FileNodeResponse:
     return await service.move_node(
         current_user=current_user,
@@ -258,6 +275,8 @@ async def move_node(
         target_parent_id=request.target_parent_id,
         new_name=request.new_name,
         conflict_policy=request.conflict_policy,
+        expected_current_version_id=request.expected_current_version_id,
+        client_operation_id=client_operation_id,
         audit_context=build_audit_context(http_request),
     )
 
@@ -378,10 +397,20 @@ async def delete_node(
     node_id: UUID,
     current_user: Annotated[User, Depends(get_current_user)],
     service: Annotated[FileService, Depends(get_file_service)],
+    expected_current_version_id: Annotated[
+        UUID | None,
+        Header(alias="X-Expected-Current-Version-ID"),
+    ] = None,
+    client_operation_id: Annotated[
+        str | None,
+        Header(alias="X-Client-Operation-ID", min_length=1, max_length=128),
+    ] = None,
 ) -> DeleteNodeResponse | FileTreeOperationResponse:
     result = await service.delete_node(
         current_user=current_user,
         node_id=node_id,
+        expected_current_version_id=expected_current_version_id,
+        client_operation_id=client_operation_id,
         audit_context=build_audit_context(http_request),
     )
     if isinstance(result, FileTreeOperationResponse):

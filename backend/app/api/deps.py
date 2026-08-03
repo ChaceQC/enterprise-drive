@@ -24,6 +24,8 @@ from app.modules.audit.schemas import AuditContext
 from app.modules.auth.models import User
 from app.modules.auth.repository import AuthRepository
 from app.modules.auth.service import AuthService
+from app.modules.device.repository import DeviceRepository
+from app.modules.device.service import DeviceSessionService
 
 
 @lru_cache
@@ -36,6 +38,27 @@ async def get_current_user(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     settings: Annotated[Settings, Depends(get_settings)],
 ) -> User:
+    device_token = _device_token_from_header(request)
+    if device_token is not None:
+        authenticated = await DeviceSessionService(
+            repository=DeviceRepository(session),
+            auth_service=AuthService(
+                repository=AuthRepository(session),
+                settings=settings,
+            ),
+            settings=settings,
+        ).authenticate(raw_token=device_token)
+        current_user = authenticated.user
+        request.state.auth_mode = "device"
+        request.state.device_id = authenticated.device.id
+        session.info["device_id"] = authenticated.device.id
+        session.info["actor_id"] = current_user.id
+        update_log_context(
+            tenant_id=str(current_user.tenant_id),
+            user_id=str(current_user.id),
+        )
+        return current_user
+
     session_token = request.cookies.get(settings.session_cookie_name)
     if session_token is None:
         raise ApiError("AUTH_REQUIRED", "请先登录", status_code=401)
@@ -48,6 +71,9 @@ async def get_current_user(
         csrf_token=_csrf_token_from_header(request=request, settings=settings),
         require_csrf=request.method.upper() in _CSRF_METHODS,
     )
+    request.state.auth_mode = "browser"
+    request.state.device_id = None
+    session.info["actor_id"] = current_user.id
     update_log_context(
         tenant_id=str(current_user.tenant_id),
         user_id=str(current_user.id),
@@ -56,6 +82,14 @@ async def get_current_user(
 
 
 _CSRF_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+def _device_token_from_header(request: Request) -> str | None:
+    authorization = request.headers.get("Authorization", "")
+    scheme, separator, token = authorization.partition(" ")
+    if separator == " " and scheme.casefold() == "device" and token.strip():
+        return token.strip()
+    return None
 
 
 def _csrf_token_from_header(*, request: Request, settings: Settings) -> str | None:

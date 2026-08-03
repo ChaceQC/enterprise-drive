@@ -50,6 +50,7 @@ from app.modules.quota.service import QuotaService
 from app.modules.search.events import emit_search_index_requested
 from app.modules.space.models import Space
 from app.modules.space.repository import SpaceRepository
+from app.modules.sync.client_operations import ClientOperationService
 
 
 class FileService:
@@ -61,6 +62,7 @@ class FileService:
         permission_service: PermissionService,
         quota_service: QuotaService,
         settings: Settings,
+        client_operation_service: ClientOperationService,
         audit_service: AuditService | None = None,
     ) -> None:
         self.repository = repository
@@ -68,6 +70,7 @@ class FileService:
         self.permission_service = permission_service
         self.quota_service = quota_service
         self.settings = settings
+        self.client_operation_service = client_operation_service
         self.audit_service = audit_service
 
     async def create_folder(
@@ -78,8 +81,23 @@ class FileService:
         parent_id: UUID | None,
         name: str,
         conflict_policy: str = "fail",
+        client_operation_id: str | None = None,
         audit_context: AuditContext | None = None,
     ) -> FileNodeResponse:
+        operation = await self.client_operation_service.start(
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+            operation_id=client_operation_id,
+            action="file.folder.create",
+            request_payload={
+                "space_id": str(space_id),
+                "parent_id": str(parent_id) if parent_id else None,
+                "name": name,
+                "conflict_policy": conflict_policy,
+            },
+        )
+        if operation.replay_json is not None:
+            return FileNodeResponse.model_validate(operation.replay_json)
         space = await self._get_active_space(current_user=current_user, space_id=space_id)
         parent_node = await self._get_parent_node(
             current_user=current_user,
@@ -120,6 +138,12 @@ class FileService:
                 folder=folder,
                 audit_context=audit_context,
             )
+            response = FileNodeResponse.model_validate(folder)
+            self.client_operation_service.complete(
+                record=operation.record,
+                response=response,
+                response_status=201,
+            )
             await self.repository.commit()
         except IntegrityError as exc:
             await self.repository.rollback()
@@ -128,7 +152,7 @@ class FileService:
             await self.repository.rollback()
             raise
 
-        return FileNodeResponse.model_validate(folder)
+        return response
 
     async def list_children(
         self,
@@ -257,14 +281,37 @@ class FileService:
         current_user: User,
         node_id: UUID,
         name: str,
+        expected_current_version_id: UUID | None = None,
+        client_operation_id: str | None = None,
         audit_context: AuditContext | None = None,
     ) -> FileNodeResponse:
+        operation = await self.client_operation_service.start(
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+            operation_id=client_operation_id,
+            action="file.rename",
+            request_payload={
+                "node_id": str(node_id),
+                "name": name,
+                "expected_current_version_id": (
+                    str(expected_current_version_id)
+                    if expected_current_version_id is not None
+                    else None
+                ),
+            },
+        )
+        if operation.replay_json is not None:
+            return FileNodeResponse.model_validate(operation.replay_json)
         node = await self._get_accessible_node(
             current_user=current_user,
             node_id=node_id,
             action=ACTION_UPDATE,
         )
         ensure_mutable_node(node)
+        self._ensure_expected_version(
+            node=node,
+            expected_current_version_id=expected_current_version_id,
+        )
         normalized_name = normalize_node_name(name)
         await self._ensure_name_available(
             tenant_id=current_user.tenant_id,
@@ -294,12 +341,18 @@ class FileService:
                 reason="file_renamed",
                 metadata={"root_node_id": str(node.id)},
             )
+            response = FileNodeResponse.model_validate(node)
+            self.client_operation_service.complete(
+                record=operation.record,
+                response=response,
+                response_status=200,
+            )
             await self.repository.commit()
         except IntegrityError as exc:
             await self.repository.rollback()
             raise node_name_conflict_error() from exc
 
-        return FileNodeResponse.model_validate(node)
+        return response
 
     async def move_node(
         self,
@@ -309,8 +362,29 @@ class FileService:
         target_parent_id: UUID,
         new_name: str | None,
         conflict_policy: str = "fail",
+        expected_current_version_id: UUID | None = None,
+        client_operation_id: str | None = None,
         audit_context: AuditContext | None = None,
     ) -> FileNodeResponse:
+        operation = await self.client_operation_service.start(
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+            operation_id=client_operation_id,
+            action="file.move",
+            request_payload={
+                "node_id": str(node_id),
+                "target_parent_id": str(target_parent_id),
+                "new_name": new_name,
+                "conflict_policy": conflict_policy,
+                "expected_current_version_id": (
+                    str(expected_current_version_id)
+                    if expected_current_version_id is not None
+                    else None
+                ),
+            },
+        )
+        if operation.replay_json is not None:
+            return FileNodeResponse.model_validate(operation.replay_json)
         try:
             response = await self.move_node_in_transaction(
                 current_user=current_user,
@@ -318,7 +392,13 @@ class FileService:
                 target_parent_id=target_parent_id,
                 new_name=new_name,
                 conflict_policy=conflict_policy,
+                expected_current_version_id=expected_current_version_id,
                 audit_context=audit_context,
+            )
+            self.client_operation_service.complete(
+                record=operation.record,
+                response=response,
+                response_status=200,
             )
             await self.repository.commit()
         except IntegrityError as exc:
@@ -334,13 +414,39 @@ class FileService:
         *,
         current_user: User,
         node_id: UUID,
+        expected_current_version_id: UUID | None = None,
+        client_operation_id: str | None = None,
         audit_context: AuditContext | None = None,
     ) -> DeleteNodeResponse | FileTreeOperationResponse:
+        operation = await self.client_operation_service.start(
+            tenant_id=current_user.tenant_id,
+            user_id=current_user.id,
+            operation_id=client_operation_id,
+            action="file.delete",
+            request_payload={
+                "node_id": str(node_id),
+                "expected_current_version_id": (
+                    str(expected_current_version_id)
+                    if expected_current_version_id is not None
+                    else None
+                ),
+            },
+        )
+        if operation.replay_json is not None:
+            if "operation_id" in operation.replay_json:
+                return FileTreeOperationResponse.model_validate(operation.replay_json)
+            return DeleteNodeResponse.model_validate(operation.replay_json)
         try:
             response = await self.delete_node_in_transaction(
                 current_user=current_user,
                 node_id=node_id,
+                expected_current_version_id=expected_current_version_id,
                 audit_context=audit_context,
+            )
+            self.client_operation_service.complete(
+                record=operation.record,
+                response=response,
+                response_status=202 if isinstance(response, FileTreeOperationResponse) else 200,
             )
             await self.repository.commit()
         except Exception:
@@ -403,6 +509,7 @@ class FileService:
         target_parent_id: UUID,
         new_name: str | None,
         conflict_policy: str,
+        expected_current_version_id: UUID | None,
         audit_context: AuditContext | None,
     ) -> FileNodeResponse:
         node = await self._get_accessible_node(
@@ -411,6 +518,10 @@ class FileService:
             action=ACTION_UPDATE,
         )
         ensure_mutable_node(node)
+        self._ensure_expected_version(
+            node=node,
+            expected_current_version_id=expected_current_version_id,
+        )
         target_parent = await self._get_active_folder(
             current_user=current_user,
             space_id=node.space_id,
@@ -471,6 +582,7 @@ class FileService:
         *,
         current_user: User,
         node_id: UUID,
+        expected_current_version_id: UUID | None,
         audit_context: AuditContext | None,
     ) -> DeleteNodeResponse | FileTreeOperationResponse:
         node = await self._get_accessible_node(
@@ -479,6 +591,10 @@ class FileService:
             action=ACTION_DELETE,
         )
         ensure_mutable_node(node)
+        self._ensure_expected_version(
+            node=node,
+            expected_current_version_id=expected_current_version_id,
+        )
         subtree_count = await self.repository.count_subtree_nodes(
             tenant_id=current_user.tenant_id,
             space_id=node.space_id,
@@ -1003,6 +1119,28 @@ class FileService:
         if existing_sibling is not None:
             raise node_name_conflict_error()
 
+    @staticmethod
+    def _ensure_expected_version(
+        *,
+        node: Node,
+        expected_current_version_id: UUID | None,
+    ) -> None:
+        if expected_current_version_id is None:
+            return
+        if node.current_version_id == expected_current_version_id:
+            return
+        raise ApiError(
+            "FILE_VERSION_CONFLICT",
+            "文件版本已变化，请刷新后重试",
+            status_code=409,
+            details={
+                "expected_current_version_id": str(expected_current_version_id),
+                "actual_current_version_id": (
+                    str(node.current_version_id) if node.current_version_id else None
+                ),
+            },
+        )
+
     async def _resolve_conflict_name(
         self,
         *,
@@ -1030,6 +1168,7 @@ class FileService:
             await self.delete_node_in_transaction(
                 current_user=current_user,
                 node_id=existing_sibling.id,
+                expected_current_version_id=None,
                 audit_context=audit_context,
             )
             return normalized_name
