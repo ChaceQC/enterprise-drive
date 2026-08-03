@@ -38,6 +38,7 @@ def test_beat_schedule_keeps_destructive_maintenance_in_safe_modes() -> None:
             file_tree_operation_interval_seconds=210,
             orphan_object_scan_interval_seconds=240,
             quota_reconciliation_interval_seconds=300,
+            admin_export_cleanup_interval_seconds=330,
         )
     )
 
@@ -49,6 +50,7 @@ def test_beat_schedule_keeps_destructive_maintenance_in_safe_modes() -> None:
     assert schedule["process-file-tree-operations"]["schedule"] == 210.0
     assert schedule["scan-orphaned-objects"]["schedule"] == 240.0
     assert schedule["report-quota-drift"]["schedule"] == 300.0
+    assert schedule["cleanup-expired-admin-exports"]["schedule"] == 330.0
     assert schedule["expire-upload-sessions"]["kwargs"] == {"limit": 23}
     assert schedule["cleanup-expired-trash"]["kwargs"] == {"limit": 23}
     assert schedule["expire-shares"]["kwargs"] == {"limit": 23}
@@ -69,4 +71,11 @@ def test_beat_schedule_keeps_destructive_maintenance_in_safe_modes() -> None:
         "limit": 23,
         "repair": False,
         "scan_all": True,
+    }
+    assert schedule["cleanup-expired-admin-exports"]["task"] == (
+        "admin.cleanup_expired_exports"
+    )
+    assert schedule["cleanup-expired-admin-exports"]["kwargs"] == {"limit": 23}
+    assert schedule["cleanup-expired-admin-exports"]["options"] == {
+        "queue": "maintenance"
     }

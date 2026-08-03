@@ -6,6 +6,7 @@ on:
       - "backend/**"
       - "compose.windows.yml"
       - ".env.windows.example"
+      - "deploy/monitoring/**"
       - "deploy/windows/**"
       - ".github/workflows/backend-ci.yml"
   pull_request:
@@ -13,6 +14,7 @@ on:
       - "backend/**"
       - "compose.windows.yml"
       - ".env.windows.example"
+      - "deploy/monitoring/**"
       - "deploy/windows/**"
       - ".github/workflows/backend-ci.yml"
 
@@ -112,6 +114,83 @@ jobs:
       - name: Validate Windows Docker Compose
         working-directory: .
         run: docker compose --profile tls-tools --env-file .env.windows.example -f compose.windows.yml config --quiet
+
+      - name: Validate monitoring profile and configurations
+        working-directory: .
+        run: |
+          set -euo pipefail
+          monitoring_config="$(
+            docker compose \
+              --profile monitoring \
+              --env-file .env.windows.example \
+              -f compose.windows.yml \
+              config --format json
+          )"
+          for service in prometheus alertmanager grafana; do
+            jq -e --arg service "${service}" '
+              .services[$service] != null
+              and ((.services[$service].ports // []) | length == 0)
+              and (.services[$service].networks | has("backend"))
+            ' <<<"${monitoring_config}" >/dev/null
+          done
+
+          prometheus_image="$(sed -n 's/^PROMETHEUS_IMAGE=//p' .env.windows.example)"
+          alertmanager_image="$(sed -n 's/^ALERTMANAGER_IMAGE=//p' .env.windows.example)"
+          grafana_image="$(sed -n 's/^GRAFANA_IMAGE=//p' .env.windows.example)"
+          test -n "${prometheus_image}"
+          test -n "${alertmanager_image}"
+          test -n "${grafana_image}"
+          docker pull "${prometheus_image}"
+          docker pull "${alertmanager_image}"
+          docker pull "${grafana_image}"
+
+          docker run --rm --pull never \
+            --mount "type=bind,source=${PWD}/deploy/monitoring,target=/workspace,readonly" \
+            --entrypoint /bin/sh \
+            "${prometheus_image}" \
+            -ec '
+              command -v wget >/dev/null
+              mkdir -p /tmp/prometheus/rules
+              cp /workspace/prometheus.yml /tmp/prometheus/prometheus.yml
+              cp /workspace/maintenance-alerts.yml /tmp/prometheus/rules/maintenance-alerts.yml
+              cp /workspace/platform-alerts.yml /tmp/prometheus/rules/platform-alerts.yml
+              sed -i "s#/etc/prometheus/rules#/tmp/prometheus/rules#g" /tmp/prometheus/prometheus.yml
+              promtool check config /tmp/prometheus/prometheus.yml
+              promtool check rules /tmp/prometheus/rules/maintenance-alerts.yml /tmp/prometheus/rules/platform-alerts.yml
+            '
+
+          docker run --rm --pull never \
+            --mount "type=bind,source=${PWD}/deploy/monitoring/alertmanager.yml,target=/etc/alertmanager/alertmanager.yml,readonly" \
+            --mount "type=bind,source=${PWD}/deploy/monitoring/secrets/alertmanager-webhook-url.example,target=/run/secrets/alertmanager-webhook-url,readonly" \
+            --entrypoint /bin/sh \
+            "${alertmanager_image}" \
+            -ec '
+              command -v wget >/dev/null
+              amtool check-config /etc/alertmanager/alertmanager.yml
+            '
+
+          docker run --rm --pull never \
+            --entrypoint /bin/sh \
+            "${grafana_image}" \
+            -ec 'command -v wget >/dev/null'
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          dashboards = sorted(
+              Path("deploy/monitoring/grafana/dashboards").glob("*.json")
+          )
+          assert dashboards, "No Grafana dashboards were found"
+          uids: set[str] = set()
+          for path in dashboards:
+              payload = json.loads(path.read_text(encoding="utf-8"))
+              uid = payload.get("uid")
+              assert isinstance(uid, str) and uid, path
+              assert uid not in uids, f"Duplicate dashboard UID: {uid}"
+              assert payload.get("panels"), f"Dashboard has no panels: {path}"
+              uids.add(uid)
+          PY
 
       - name: Validate public TLS Compose
         working-directory: .
@@ -391,10 +470,10 @@ jobs:
           set -euo pipefail
           case "${COMPONENT}" in
             server)
-              baseline=$'CVE-2026-10536\nCVE-2026-11856\nCVE-2026-8924\nCVE-2026-8927\nCVE-2026-9079\nGHSA-5cgq-3rg8-m6cv\nGHSA-5cx5-wh4m-82fh\nGHSA-89gr-r52h-f8rx\nGHSA-f5wc-c3c7-36mc\nGHSA-jppx-rxg9-jmrx\nGHSA-jv87-32hw-hh99\nGHSA-p77j-4mvh-x3m3\nGHSA-rm3j-f69w-wqmq\nGHSA-vgwf-h737-ff37\nGHSA-x527-x647-q7gg\nGO-2026-4337\nGO-2026-5005\nGO-2026-5019\nGO-2026-5020'
+              baseline=$'CVE-2026-10536\nCVE-2026-11856\nCVE-2026-8924\nCVE-2026-8927\nCVE-2026-9079\nGHSA-5cgq-3rg8-m6cv\nGHSA-5cx5-wh4m-82fh\nGHSA-89gr-r52h-f8rx\nGHSA-f5wc-c3c7-36mc\nGHSA-jppx-rxg9-jmrx\nGHSA-jv87-32hw-hh99\nGHSA-p77j-4mvh-x3m3\nGHSA-rm3j-f69w-wqmq\nGHSA-vgwf-h737-ff37\nGHSA-x527-x647-q7gg\nGO-2026-4337'
               ;;
             client)
-              baseline=$'GHSA-5cgq-3rg8-m6cv\nGHSA-89gr-r52h-f8rx\nGHSA-f5wc-c3c7-36mc\nGHSA-jppx-rxg9-jmrx\nGHSA-p77j-4mvh-x3m3\nGHSA-rm3j-f69w-wqmq\nGHSA-vgwf-h737-ff37\nGHSA-x527-x647-q7gg\nGO-2026-4337\nGO-2026-5005\nGO-2026-5019\nGO-2026-5020'
+              baseline=$'GHSA-5cgq-3rg8-m6cv\nGHSA-89gr-r52h-f8rx\nGHSA-f5wc-c3c7-36mc\nGHSA-jppx-rxg9-jmrx\nGHSA-p77j-4mvh-x3m3\nGHSA-rm3j-f69w-wqmq\nGHSA-vgwf-h737-ff37\nGHSA-x527-x647-q7gg\nGO-2026-4337'
               ;;
             *)
               echo "Unknown MinIO component: ${COMPONENT}" >&2
@@ -423,7 +502,7 @@ jobs:
             echo "- Image: \`${IMAGE}\`"
             echo "- SBOM: SPDX JSON generated by Syft v1.46.0"
             echo "- Scanner: Grype v0.115.0"
-            echo "- Audited Critical baseline (2026-07-15): ${baseline_count}"
+            echo "- Audited Critical baseline (2026-08-03): ${baseline_count}"
             echo "- Current Critical IDs: ${critical_count}"
             echo "- Newly discovered Critical IDs: ${new_count}"
             echo
@@ -506,6 +585,12 @@ jobs:
           $ErrorActionPreference = "Stop"
           .\deploy\windows\tests\backup-restore.smoke.ps1
 
+      - name: Run Windows governance smoke tests
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          .\deploy\windows\tests\governance.smoke.ps1
+
       - name: Validate Windows TLS fake Docker guards
         shell: powershell
         run: |
@@ -552,6 +637,28 @@ jobs:
           $env:OPENSEARCH_INITIAL_ADMIN_PASSWORD = "OpenSearch-Strong-Secret-2026"
           $env:DRIVE_ADMIN_PASSWORD = "Admin-Strong-Secret-2026"
           $env:CERTBOT_EMAIL = "ops@contoso.org"
+
+          .\deploy\windows\manage.ps1 config -Monitoring -EnvFile .env.windows.example -Quiet
+          if (
+              -not (
+                  Get-Content -LiteralPath $env:FAKE_DOCKER_LOG |
+                      Select-String -SimpleMatch "--profile monitoring config --quiet"
+              )
+          ) {
+              throw "Monitoring profile was not forwarded to Docker Compose"
+          }
+          try {
+              .\deploy\windows\manage.ps1 backup-retention `
+                  -EnvFile .env.windows.example `
+                  -BackupDirectory C:\EnterpriseDriveBackups `
+                  -Monitoring
+              throw "backup-retention accepted the unrelated -Monitoring switch"
+          }
+          catch {
+              if ($_.Exception.Message -notlike "*does not accept -Monitoring*") {
+                  throw
+              }
+          }
 
           .\deploy\windows\manage.ps1 config -Tls -EnvFile .env.windows.example -Quiet
           .\deploy\windows\manage.ps1 tls-renew -Tls -EnvFile .env.windows.example

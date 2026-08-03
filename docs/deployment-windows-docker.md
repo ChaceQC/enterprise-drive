@@ -2,7 +2,7 @@
 
 > 适用项目版本：`v0.4.0`
 >
-> 当前代码基线：Windows 本机 HTTP `18080/19000` 与公网 ACME/TLS `80/443` 双模式；真实受信证书签发和双域名 HTTPS 验收需要生产 DNS/网络环境。
+> 当前代码基线：Windows 本机 HTTP `18080/19000`、公网 ACME/TLS `80/443`、可选 monitoring profile、备份轮换和隔离恢复演练均已落地；真实受信证书签发和双域名 HTTPS 记录仍需要生产 DNS/网络环境。
 
 ## 1. 部署目标
 
@@ -66,6 +66,9 @@ docker info --format '{{.OSType}}'
 | `minio` | 私有 S3 兼容对象存储 | 不发布 |
 | `minio-init` | 一次性创建私有 bucket 并确认匿名访问关闭 | 不发布 |
 | `opensearch` | 可重建搜索索引 | 不发布 |
+| `prometheus` | `monitoring` profile 指标抓取、规则计算与时序数据 | 不发布 |
+| `alertmanager` | `monitoring` profile 告警聚合与企业 webhook 路由 | 不发布 |
+| `grafana` | `monitoring` profile 看板；仅经 gateway `/grafana/` 访问 | 不发布 |
 
 默认本机入口：
 
@@ -131,6 +134,8 @@ Copy-Item .env.windows.example .env.windows
 - Trusted Hosts。
 - API 外部地址。
 - S3 外部地址。
+- Grafana 独立管理员密码、`/grafana/` root URL 和 Alertmanager webhook URL 文件。
+- 仓库外治理记录根目录、备份保留天数和最少份数。
 - 公网 HTTPS 的 API/存储域名、Certbot 邮箱、证书名、HSTS、API/MinIO CORS、Trusted Hosts、Secure Cookie 和外部 S3 HTTPS URL。
 
 容器内连接使用 Compose 服务 DNS，例如：
@@ -166,6 +171,11 @@ DRIVE_LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
 DRIVE_OPENSEARCH_URL=http://opensearch:9200
 DRIVE_S3_ENDPOINT_URL=http://minio:9000
 DRIVE_S3_PUBLIC_ENDPOINT_URL=http://localhost:19000
+GRAFANA_ROOT_URL=http://localhost:18080/grafana/
+ALERTMANAGER_WEBHOOK_URL_FILE=D:\enterprise-drive-secrets\alertmanager-webhook-url
+DRIVE_BACKUP_RETENTION_DAYS=35
+DRIVE_BACKUP_RETENTION_COUNT=8
+DRIVE_GOVERNANCE_RECORD_ROOT=D:\enterprise-drive-governance
 ```
 
 写入 PostgreSQL 或 Redis URL 的密码若包含 `@`、`:`、`/`、`#`、`?` 等保留字符，必须先进行 URL 百分号编码，并保证独立的 `POSTGRES_PASSWORD`、`REDIS_PASSWORD` 与连接 URL 中的解码后密码一致。
@@ -188,9 +198,10 @@ DRIVE_TLS_HTTPS_PORT=443
 DRIVE_TLS_CERT_NAME=enterprise-drive
 DRIVE_TLS_HSTS_MAX_AGE=31536000
 CERTBOT_EMAIL=ops@example.com
+GRAFANA_ROOT_URL=https://drive.example.com/grafana/
 ```
 
-`manage.ps1 -Tls` 会用 `DRIVE_TLS_GATEWAY_BIND`、`DRIVE_TLS_HTTP_PORT`、`DRIVE_TLS_HTTPS_PORT` 覆盖本机端口，并切换到 ACME bootstrap 或 TLS 模板。公网 bind 只接受 `0.0.0.0` 或其他非回环 IPv4 地址；脚本不负责验证 DNS 解析和外部路由。不要手工同时启动本机 HTTP 和公网 TLS 两套 gateway；两种模式复用同一个 Compose service 和项目 named volumes。
+`manage.ps1 -Tls` 会用 `DRIVE_TLS_GATEWAY_BIND`、`DRIVE_TLS_HTTP_PORT`、`DRIVE_TLS_HTTPS_PORT` 覆盖本机端口，并切换到 ACME bootstrap 或 TLS 模板。公网 bind 只接受 `0.0.0.0` 或其他非回环 IPv4 地址。`config -Tls` 负责静态配置门禁，生产服务上线后由 `tls-validate-public` 验证真实 DNS、公网地址、HTTP `308`、HTTPS readiness、证书链和剩余有效期。不要手工同时启动本机 HTTP 和公网 TLS 两套 gateway；两种模式复用同一个 Compose service 和项目 named volumes。
 
 ### S3 内外端点分离
 
@@ -206,13 +217,28 @@ CERTBOT_EMAIL=ops@example.com
 
 - API `/metrics` 只暴露 API 进程内的 HTTP 请求数/延迟、上传、下载、权限判断、Outbox 状态和搜索索引延迟指标。HTTP 标签使用完整路由模板，避免原始 URL、路径参数、用户/租户 ID、request_id 或 token 形成高基数。
 - API 默认 `DRIVE_API_WORKERS=2`，通过 `PROMETHEUS_MULTIPROC_DIR=/tmp/enterprise-drive/prometheus` 聚合。后端 runtime entrypoint 在容器每次启动前清理旧 metric `.db` 文件，然后 `exec` 原 API/migration/seed/Worker/beat 命令；在线 worker 不执行目录清理。
-- Worker 是独立容器，各自内部 `9100` 端口只提供本容器的 `worker_tasks_total`、`worker_task_duration_seconds`、预览失败和维护任务指标。maintenance Worker 还暴露连续失败、告警状态、stale、最近完成时间和任务返回计数。后续 Prometheus Server 必须把 5 个 Worker 配成 5 个 scrape target，不能假设 API `/metrics` 会跨容器聚合。
+- Worker 是独立容器，各自内部 `9100` 端口只提供本容器的 `worker_tasks_total`、`worker_task_duration_seconds`、预览失败和维护任务指标。maintenance Worker 还暴露连续失败、告警状态、stale、最近完成时间和任务返回计数。可选 `monitoring` profile 已把 5 个 Worker 配成 5 个 scrape target，不能假设 API `/metrics` 会跨容器聚合。
 - JSON 日志自动带 `service`、`env`、`request_id`、`task_id`、`trace_id`、`span_id`；HTTP 请求结束日志包含 route/method/status/latency，Celery task 结束日志包含 task/queue/status/latency。
 - OpenTelemetry exporter 默认 `none`，不会向外部发送 span。生产接入 collector 时使用 `DRIVE_TRACING_EXPORTER=otlp_http`，把 `DRIVE_TRACING_OTLP_ENDPOINT` 设为完整 traces endpoint，例如 `http://otel-collector:4318/v1/traces`。`DRIVE_TRACING_OTLP_HEADERS` 必须是 JSON 对象，认证信息只放在未提交的 `.env.windows` 或受控 secret 管理中。
 - `outbox_pending_total` 和 `search_index_lag_seconds` 在 API scrape 时以短超时刷新。PostgreSQL 不可用时 `/metrics` 仍返回已有进程指标，但数据库 gauge 可能短暂保留上次成功值。
 - `DRIVE_RATE_LIMIT_ENABLED` 默认必须保持 `true`；根 Compose 会把该值传入 API 和 Worker。只有隔离容量基准可以临时设为 `false`，并应通过 `PERF_RATE_LIMIT_MODE` 写入性能报告，不能把关闭限流的测试配置直接用于生产。
 - 登录同时按来源 IP 和规范化账号标识限流；账号 key 只保存哈希，不保存原始用户名。默认分别为每分钟 `30` 和 `10` 次，正式环境可收紧但不能关闭；阶梯延迟、临时锁定和验证码由 Sprint 11 继续实现。
 - `DRIVE_ENVIRONMENT=production` 会触发应用内 `Settings` fail-fast 校验，覆盖 API、Worker、beat、migration 和 seed。即使绕过 `manage.ps1`，示例/过短 secret、无强密码数据库或 Redis/Celery URL、关闭限流、Wildcard Trusted Hosts、带凭据或路径的公共端点，以及非回环 HTTP CORS/S3 或未启用 Secure Cookie 的公网配置也会阻断进程启动。默认本机 HTTP 模式只有在全部公共 Host 均为 localhost/回环地址时才允许。
+
+### 可选 monitoring profile
+
+监控 profile 不属于 15 个默认业务服务，也不进入业务备份 manifest。启用前必须：
+
+1. 把 `GRAFANA_ADMIN_PASSWORD` 改成至少 16 字符的独立非示例密码。
+2. 把示例 webhook 文件复制到仓库外或 `.gitignore` 覆盖的 secret 路径，内容为单行可达 HTTP(S) URL。
+3. 本机模式使用 `GRAFANA_ROOT_URL=http://localhost:18080/grafana/`；公网 TLS 使用 API 域名的 `https://.../grafana/`。
+
+```powershell
+.\deploy\windows\manage.ps1 config -Monitoring -EnvFile .env.windows -Quiet
+.\deploy\windows\manage.ps1 up -Monitoring -EnvFile .env.windows
+```
+
+Prometheus、Alertmanager、Grafana 只加入 `backend` 内网并使用独立 named volumes。Grafana 由 gateway 代理；未启用 profile 时 gateway 仍能启动。配置、规则、看板和排障详见 `docs/maintenance-monitoring.md`。
 
 ## 5. PowerShell 管理入口
 
@@ -228,6 +254,7 @@ CERTBOT_EMAIL=ops@example.com
 | --- | --- |
 | `config [-Quiet]` | 使用示例或实际环境文件校验 Compose 渲染结果 |
 | `up [-Build]` | 启动服务；默认 `--no-build --pull never`，只有显式 `-Build` 才构建项目镜像，migration、MinIO 初始化和 seed 由 Compose 依赖链执行 |
+| `config/up/down/status/logs -Monitoring` | 启用可选 Prometheus、Alertmanager、Grafana profile；`up` 会校验非示例 Grafana 密码和 webhook 文件 |
 | `config -Tls [-Quiet]` | 校验公网域名格式、HTTPS S3 URL、Secure Cookie、API/MinIO CORS、Trusted Hosts 和 TLS Compose 渲染 |
 | `up -Tls [-Build]` | 使用已有证书启动或更新公网 TLS gateway |
 | `status` | 查看全部容器与健康状态 |
@@ -235,15 +262,20 @@ CERTBOT_EMAIL=ops@example.com
 | `backup -BackupDirectory PATH -ConfigEncryptionCertificateThumbprint THUMBPRINT` | 静默 source 写入面并创建 PostgreSQL、MinIO、Redis、OpenSearch、TLS 和 CMS 环境文件备份 |
 | `backup-verify -BackupPath PATH` | 校验 manifest、工件、PostgreSQL dump、隔离 tar 预扫描、精确代码/configuration lineage 及 15 个默认服务 image reference/actual image ID |
 | `restore -BackupPath PATH` | 把已校验备份恢复到不同且已停止的 Compose project，支持受限 ACL ForceRestore rollback |
+| `backup-retention -BackupDirectory PATH [-ApplyRetention]` | 校验托管备份后按保留天数与最少份数预览或执行轮换，并写 JSON 记录 |
+| `backup-retention-register/unregister` | 注册或幂等删除每日备份轮换 Windows 计划任务 |
+| `restore-drill -BackupDirectory PATH` | 选择最新托管备份，恢复到随机隔离 Compose project，验证清理并写 JSON 记录；也可用 `-BackupPath` 指定 |
+| `restore-drill-register/unregister` | 注册或幂等删除每周隔离恢复演练 Windows 计划任务 |
 | `tls-init -Tls [-TlsEmail EMAIL] [-TlsStaging]` | 用 ACME webroot bootstrap 首次签发双域名证书并切换到 TLS gateway |
 | `tls-renew -Tls [-ForceRenewal]` | 执行 Certbot 续期，随后校验并热重载 Nginx |
 | `tls-certificates -Tls` | 查看 Certbot 管理的证书和到期时间 |
 | `tls-register-renewal -Tls [-TlsRenewalAt HH:mm]` | 确认 Certbot renewal lineage 后，为当前 Windows 用户注册每日续期计划任务 |
 | `tls-unregister-renewal [-TlsRenewalTaskName NAME]` | 幂等删除续期计划任务，不依赖环境文件或 Docker CLI |
+| `tls-validate-public` | 验证双域名仅解析到公网地址、HTTP 精确 `308`、HTTPS readiness、受信证书链和至少 14 天有效期，并写 JSON 记录 |
 | `down` | 停止服务并保留 named volumes |
-| `down -Volumes` | 显式销毁全部业务/TLS named volumes，并删除同名续期计划任务；仅限确认备份后的环境清理 |
+| `down -Volumes` | 显式销毁业务/TLS/监控 named volumes，并删除 TLS 续期、备份轮换和恢复演练计划任务；仅限确认备份后的环境清理 |
 
-脚本默认 `down` 不删除 volumes；`-Volumes` 是显式破坏性开关，并会删除 PostgreSQL、MinIO、OpenSearch、Redis、TLS/Certbot volumes 和对应续期计划任务。`.env.windows`、证书私钥或备份内容不得写入 Git。普通 `up`、TLS 辅助 `run` 和内部恢复启动路径都禁止隐式拉取镜像；第三方镜像拉取、runtime/preview 构建、服务启动和备份恢复测试必须拆成独立步骤，便于看到具体耗时并避免一次命令同时占满 CPU、内存和磁盘。
+脚本默认 `down` 不删除 volumes；`-Volumes` 是显式破坏性开关，并会删除 PostgreSQL、MinIO、OpenSearch、Redis、TLS/Certbot 和监控 volumes，以及三类对应计划任务。`.env.windows`、证书私钥、webhook 文件或备份内容不得写入 Git。普通 `up`、TLS 辅助 `run` 和内部恢复启动路径都禁止隐式拉取镜像；第三方镜像拉取、runtime/preview 构建、服务启动和备份恢复测试必须拆成独立步骤，便于看到具体耗时并避免一次命令同时占满 CPU、内存和磁盘。
 
 ### 首次公网证书签发
 
@@ -263,7 +295,7 @@ CERTBOT_EMAIL=ops@example.com
 .\deploy\windows\manage.ps1 config -Tls -EnvFile .env.windows -Quiet
 ```
 
-公网校验只检查域名语法，DNS 解析和外部可达性必须按前置条件单独验证。校验会拒绝回环/非 IPv4 gateway bind、`change-me` 示例密钥、过短 secret、关键 secret/连接 URL 中的 `${...}` 间接插值、数据库或 Redis URL 与独立密码不一致、含通配符的 Trusted Hosts、HTTP API CORS origin、与 API CORS 不完全一致或包含非 HTTPS 项的 MinIO CORS、带凭据/非 443 端口的 S3 URL 和不安全的证书名。URL 中的密码包含保留字符时仍须百分号编码，脚本会解码后与 `POSTGRES_PASSWORD`、`REDIS_PASSWORD` 比较。`tls-init` 还会拒绝 `example.com`、`.invalid`、`.test` 等示例邮箱域名。
+`config -Tls` 只执行静态配置校验；它会拒绝回环/非 IPv4 gateway bind、`change-me` 示例密钥、过短 secret、关键 secret/连接 URL 中的 `${...}` 间接插值、数据库或 Redis URL 与独立密码不一致、含通配符的 Trusted Hosts、HTTP API CORS origin、与 API CORS 不完全一致或包含非 HTTPS 项的 MinIO CORS、带凭据/非 443 端口的 S3 URL 和不安全的证书名。URL 中的密码包含保留字符时仍须百分号编码，脚本会解码后与 `POSTGRES_PASSWORD`、`REDIS_PASSWORD` 比较。`tls-init` 还会拒绝 `example.com`、`.invalid`、`.test` 等示例邮箱域名。DNS 与公网可达性由上线后的 `tls-validate-public` 完成。
 
 可选先使用 ACME staging 验证 challenge 链路。staging 会使用独立的 `<DRIVE_TLS_CERT_NAME>-staging` 证书名，把 HSTS `max-age` 强制为 0，且浏览器不会信任该证书：
 
@@ -277,7 +309,10 @@ CERTBOT_EMAIL=ops@example.com
 .\deploy\windows\manage.ps1 tls-init -Tls -EnvFile .env.windows
 .\deploy\windows\manage.ps1 up -Tls -Build -EnvFile .env.windows
 .\deploy\windows\manage.ps1 tls-certificates -Tls -EnvFile .env.windows
+.\deploy\windows\manage.ps1 tls-validate-public -EnvFile .env.windows
 ```
+
+`tls-validate-public` 会拒绝回环、私网、CGNAT、benchmark、documentation、multicast 和 reserved 地址；两个域名任一解析结果含非公网地址即失败。它还要求 API 和 S3 HTTP 地址精确返回同 Host 的 `308`，HTTPS `/readyz` 与 MinIO live probe 返回 200，TLS 握手通过系统信任链/主机名校验且证书至少还有 14 天有效期。成功或失败记录写到 `DRIVE_GOVERNANCE_RECORD_ROOT\tls-validations`，也可通过 `-TlsValidationDirectory` 覆盖。
 
 `tls-init` 会记录已有 gateway 是否正在运行并先停止但保留其容器，再用同一 `gateway` service 启动临时 one-off ACME bootstrap 容器。bootstrap 期间只有 `/gateway-healthz` 和 `/.well-known/acme-challenge/` 可用，其他请求返回 `503`；证书签发与 TLS 模板 `nginx -t` 成功后，脚本删除临时容器并强制重建正式 gateway。签发、SAN 或模板检查失败时，脚本删除临时 bootstrap 并重新启动原 gateway，避免扩域或重签失败后中断已有公网入口。`tls-init` 只保证签发所需依赖和 gateway 就绪，首次正式部署随后必须执行 `up -Tls -Build`，确保 Preview 镜像、全部 Worker 和 Celery beat 一并启动。
 
@@ -417,13 +452,14 @@ docker compose -f compose.windows.yml --env-file .env.windows exec worker-search
 - OpenSearch 索引。
 - Certbot 证书、账户和续期状态。
 - ACME webroot、Certbot work/log。
+- 可选 Prometheus、Alertmanager、Grafana 数据。
 
 原则：
 
 - named volumes 由 Compose 管理，不写入 Git 工作区。
 - 停止、重建 API/Worker/gateway 不删除数据卷。
 - `docker compose down` 默认保留数据。
-- 破坏性清理统一使用 `manage.ps1 down -Volumes`；底层 `docker compose down -v` 若未带 `--profile tls-tools` 会遗漏 Certbot work/log volumes，也不会删除 Windows 续期计划任务。
+- 破坏性清理统一使用 `manage.ps1 down -Volumes`；启用监控时同时带 `-Monitoring`。底层 `docker compose down -v` 若缺少 profile 会遗漏对应 volumes，也不会删除 Windows TLS 续期、备份轮换和恢复演练计划任务。
 - OpenSearch 索引以 PostgreSQL 为事实来源，仍应保留重建索引脚本和演练流程。
 - Preview 临时目录属于可清理数据，不作为原文件或唯一预览事实来源。
 
@@ -434,6 +470,7 @@ gateway 必须负责：
 - 当前默认本机 HTTP `18080/19000` 入口。
 - 公网模式通过 `-Tls` 使用 ACME bootstrap、证书只读挂载、TLS server block、HTTP 到 HTTPS 跳转和 `80/443` Host 分流。
 - API 与存储请求分流。
+- 仅在 API Host 下代理 `/grafana/`，不发布 Grafana 端口。
 - 保留存储请求原始 Host。
 - WebSocket upgrade。
 - HTTP Range。
@@ -460,13 +497,13 @@ gateway 必须负责：
 
 - 代码已经覆盖本机 HTTP `18080/19000` 和公网 TLS `80/443` 两种模板。
 - Certbot 证书、账户和续期配置位于 named volumes，gateway 只读挂载证书；私钥不进入仓库或镜像。
-- HTTP-01 challenge 只允许 `/.well-known/acme-challenge/`，未知 Host 在 TLS 模板中直接拒绝。
+- HTTP-01 challenge 只允许 `/.well-known/acme-challenge/`；本机 API/S3 与 TLS 模板都拒绝未知 Host，本机 S3 仅额外允许 `localhost`/`127.0.0.1`。
 - 续期由宿主 PowerShell 命令或同一 Windows 用户的计划任务触发，不向容器挂载 Docker socket。
 - 当前机器已用自签名双域名证书在标准宿主 `80/443` 启动完整正式编排，验证 HTTP `308`、API `/healthz`/`/readyz`、HSTS、MinIO CORS、S3v4 对象往返、未知 Host 拒绝、临时 one-off bootstrap、原 gateway 恢复、大小写无关计划任务删除和全部卷/端口清理。真实受信证书、外部 DNS/网络、浏览器信任链和 Certbot renewal lineage 实际续期仍需在生产网络验收。
 
-## 11. 自动化备份、校验与隔离恢复
+## 11. 自动化备份、校验、轮换与隔离恢复
 
-`v0.4.0` 已通过 `deploy/windows/manage.ps1` 交付 `backup`、`backup-verify` 和 `restore`。脚本从 `docker compose config --format json` 获取真实 project、network、service image 和 physical volume name，不手工拼接 Compose 资源名。备份、恢复、`up`、`down` 和 TLS 写操作共用按 project 名称派生的 Windows named mutex；`backup`、`restore` 还会按每个 source/target physical volume name 获取独立 mutex，防止不同 Compose project 通过同一物理卷并发维护。
+`v0.4.0` 已通过 `deploy/windows/manage.ps1` 交付 `backup`、`backup-verify`、`restore`、`backup-retention` 和 `restore-drill`。脚本从 `docker compose config --format json` 获取真实 project、network、service image 和 physical volume name，不手工拼接 Compose 资源名。备份、恢复、`up`、`down` 和 TLS 写操作共用按 project 名称派生的 Windows named mutex；`backup`、`restore` 还会按每个 source/target physical volume name 获取独立 mutex，防止不同 Compose project 通过同一物理卷并发维护。
 
 ### 11.1 备份内容与一致性
 
@@ -582,15 +619,68 @@ Copy-Item .env.windows .env.restore.windows
 
 未使用 `-NoStartAfterRestore` 时，脚本会启动完整 target Compose project 并等待健康，再逐项核对 15 个默认服务实际容器 image ID。恢复中途失败后，脚本会执行 Compose down、删除本轮新建卷、把原本为空的既有卷清回空状态，并从 rollback archive 还原 `-ForceRestore` 前的原非空卷；卷回滚失败时会保留并报告受限 ACL rollback archive 绝对路径。target 不会以半恢复状态继续对外提供服务。
 
-### 11.5 安全与兼容边界
+### 11.5 备份轮换与周期恢复演练
+
+轮换先完整读取托管备份目录名、`manifest.json`、`manifest.sha256` 和 manifest 内 backup ID；目录名与 manifest 不一致、checksum 损坏、reparse point 或 ACL 不合格时立即失败。默认保留最近 8 份，并保留所有 35 天内的备份；只有同时超出最少份数和保留天数的目录才进入删除候选。
+
+预览与执行：
+
+```powershell
+.\deploy\windows\manage.ps1 backup-retention `
+    -EnvFile .env.windows `
+    -BackupDirectory "D:\enterprise-drive-backups"
+
+.\deploy\windows\manage.ps1 backup-retention `
+    -EnvFile .env.windows `
+    -BackupDirectory "D:\enterprise-drive-backups" `
+    -ApplyRetention
+```
+
+可通过 `-RetentionDays`、`-RetentionCount` 覆盖 `.env.windows` 的默认值。每次执行都会在备份根的 `.governance` 子目录写 restricted ACL JSON，记录扫描、保留、候选和实际删除路径。
+
+隔离演练默认选择与当前 Compose project 匹配的最新托管备份：
+
+```powershell
+.\deploy\windows\manage.ps1 restore-drill `
+    -EnvFile .env.windows `
+    -BackupDirectory "D:\enterprise-drive-backups"
+```
+
+也可传入 `-BackupPath` 指定一个备份；两者必须且只能提供一个。演练使用随机 `enterprise-drive-restore-drill-*` target project，调用同一完整恢复门禁并保持 target 停止，随后执行 Compose down、删除 target volumes，并确认没有残留 target 容器/卷。成功或失败都写入 `DRIVE_GOVERNANCE_RECORD_ROOT\restore-drills`；异常会在错误消息中返回记录路径。
+
+注册计划任务：
+
+```powershell
+.\deploy\windows\manage.ps1 backup-retention-register `
+    -EnvFile .env.windows `
+    -BackupDirectory "D:\enterprise-drive-backups" `
+    -BackupRetentionAt 02:13
+
+.\deploy\windows\manage.ps1 restore-drill-register `
+    -EnvFile .env.windows `
+    -BackupDirectory "D:\enterprise-drive-backups" `
+    -RestoreDrillAt 04:21 `
+    -RestoreDrillDayOfWeek Sunday
+```
+
+删除：
+
+```powershell
+.\deploy\windows\manage.ps1 backup-retention-unregister
+.\deploy\windows\manage.ps1 restore-drill-unregister
+```
+
+计划任务使用当前 Windows 用户和当前 PowerShell executable；执行恢复演练时 Docker Desktop Linux engine 必须可用。仓库移动、环境文件/备份目录变化或运行用户变化后，应删除并重新注册。
+
+### 11.6 安全与兼容边界
 
 - Windows CMS 只加密 `.env.windows`。PostgreSQL dump、MinIO/Redis/OpenSearch 原始卷 tar 和包含 TLS 私钥的证书卷 tar 不具备完整包级应用层加密，必须依赖备份宿主 BitLocker、脚本自动应用的 restricted NTFS ACL 和加密外部介质。
 - `manifest.sha256` 和工件 SHA-256 只校验完整性，不认证备份制作者身份。需要认证来源时，应另外使用受保护签名、受控传输和可审计保管链。
 - Redis/OpenSearch 使用停止状态原始卷归档，只支持相同 image reference、相同 image ID、单节点同拓扑。跨版本或拓扑变化应使用 Redis/OpenSearch 支持的迁移、导出或快照机制。
 - `-ForceRestore` rollback archive 是失败时的尽力恢复机制；底层卷驱动、磁盘或 Docker 故障仍可能需要人工处理，因此发现回滚异常后不得删除脚本报告的受限 ACL 归档。
 - PostgreSQL 是核心事实来源；Redis 主要保存缓存、限流和队列状态，OpenSearch 索引可由 PostgreSQL 与对象存储重建，但仍应记录重建步骤和耗时。
-- 当前固定 MinIO Server/Client 镜像仍有 19/12 个 Critical 基线。供应链门禁只阻断新增 Critical，正式上线前仍需升级到修复镜像或完成可审计的自建修复镜像替换。
-- 备份目录必须设置保留期、容量告警、最小权限 ACL、离线副本和周期隔离恢复演练。
+- 当前固定 MinIO Server/Client 镜像仍有 16/9 个 Critical 唯一 ID 基线。供应链门禁只阻断允许集之外的新 Critical；正式 `v0.4.0` tag/Release 在受支持修复镜像或可审计补丁镜像完成替换与重扫前保持阻塞，详见 `docs/minio-security-risk.md`。
+- 备份轮换和恢复演练已经自动化，但离线副本、容量告警、备份来源签名和完整包加密仍需后续治理。
 
 ## 12. 发布与更新
 

@@ -10,11 +10,18 @@ param(
         "backup",
         "backup-verify",
         "restore",
+        "backup-retention",
+        "backup-retention-register",
+        "backup-retention-unregister",
+        "restore-drill",
+        "restore-drill-register",
+        "restore-drill-unregister",
         "tls-init",
         "tls-renew",
         "tls-certificates",
         "tls-register-renewal",
-        "tls-unregister-renewal"
+        "tls-unregister-renewal",
+        "tls-validate-public"
     )]
     [string]$Action = "status",
 
@@ -33,9 +40,23 @@ param(
 
     [switch]$Tls,
 
+    [switch]$Monitoring,
+
     [string]$BackupDirectory,
 
     [string]$BackupPath,
+
+    [ValidateRange(0, 3650)]
+    [int]$RetentionDays = 0,
+
+    [ValidateRange(0, 1000)]
+    [int]$RetentionCount = 0,
+
+    [switch]$ApplyRetention,
+
+    [string]$RestoreDrillDirectory,
+
+    [string]$TlsValidationDirectory,
 
     [ValidatePattern("^[A-Fa-f0-9]{40}$")]
     [string]$ConfigEncryptionCertificateThumbprint,
@@ -61,7 +82,30 @@ param(
     [string]$TlsRenewalTaskName = "EnterpriseDriveTlsRenewal",
 
     [ValidatePattern("^(?:[01]\d|2[0-3]):[0-5]\d$")]
-    [string]$TlsRenewalAt = "03:17"
+    [string]$TlsRenewalAt = "03:17",
+
+    [ValidatePattern("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")]
+    [string]$BackupRetentionTaskName = "EnterpriseDriveBackupRetention",
+
+    [ValidatePattern("^(?:[01]\d|2[0-3]):[0-5]\d$")]
+    [string]$BackupRetentionAt = "02:13",
+
+    [ValidatePattern("^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")]
+    [string]$RestoreDrillTaskName = "EnterpriseDriveRestoreDrill",
+
+    [ValidatePattern("^(?:[01]\d|2[0-3]):[0-5]\d$")]
+    [string]$RestoreDrillAt = "04:21",
+
+    [ValidateSet(
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday"
+    )]
+    [string]$RestoreDrillDayOfWeek = "Sunday"
 )
 
 Set-StrictMode -Version Latest
@@ -77,15 +121,41 @@ $Utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 $OutputEncoding = $Utf8NoBom
 $env:PYTHONUTF8 = "1"
 
-if ($Action -eq "tls-unregister-renewal") {
+$UnregisterTaskParameterName = switch ($Action) {
+    "tls-unregister-renewal" { "TlsRenewalTaskName" }
+    "backup-retention-unregister" { "BackupRetentionTaskName" }
+    "restore-drill-unregister" { "RestoreDrillTaskName" }
+    default { $null }
+}
+if ($null -ne $UnregisterTaskParameterName) {
+    foreach ($ParameterName in $InvocationParameters.Keys) {
+        if (
+            $ParameterName -notin @(
+                "Action",
+                "EnvFile",
+                $UnregisterTaskParameterName
+            )
+        ) {
+            throw "$Action does not accept -$ParameterName."
+        }
+    }
+}
+
+$UnregisterTaskName = switch ($Action) {
+    "tls-unregister-renewal" { $TlsRenewalTaskName }
+    "backup-retention-unregister" { $BackupRetentionTaskName }
+    "restore-drill-unregister" { $RestoreDrillTaskName }
+    default { $null }
+}
+if ($null -ne $UnregisterTaskName) {
     Import-Module ScheduledTasks -ErrorAction Stop
     $ExistingTask = Get-ScheduledTask -TaskPath "\" |
-        Where-Object { $_.TaskName -eq $TlsRenewalTaskName }
+        Where-Object { $_.TaskName -eq $UnregisterTaskName }
     if ($null -ne $ExistingTask) {
         $ExistingTask | Unregister-ScheduledTask -Confirm:$false
     }
     else {
-        Write-Output "Scheduled task does not exist: $TlsRenewalTaskName"
+        Write-Output "Scheduled task does not exist: $UnregisterTaskName"
     }
     return
 }
@@ -177,6 +247,84 @@ function Get-ConfigValue {
     return $DefaultValue
 }
 
+function Get-ConfigInteger {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name,
+
+        [Parameter(Mandatory = $true)]
+        [int]$DefaultValue,
+
+        [Parameter(Mandatory = $true)]
+        [int]$Minimum,
+
+        [Parameter(Mandatory = $true)]
+        [int]$Maximum
+    )
+
+    $Text = Get-ConfigValue `
+        -Name $Name `
+        -DefaultValue $DefaultValue.ToString(
+            [System.Globalization.CultureInfo]::InvariantCulture
+        )
+    $Value = 0
+    if (
+        -not [int]::TryParse(
+            $Text,
+            [System.Globalization.NumberStyles]::Integer,
+            [System.Globalization.CultureInfo]::InvariantCulture,
+            [ref]$Value
+        ) -or
+        $Value -lt $Minimum -or
+        $Value -gt $Maximum
+    ) {
+        throw "$Name must be an integer from $Minimum to $Maximum."
+    }
+    return $Value
+}
+
+if ($InvocationParameters.ContainsKey("RetentionDays")) {
+    if ($RetentionDays -lt 1) {
+        throw "RetentionDays must be from 1 to 3650."
+    }
+}
+else {
+    $RetentionDays = Get-ConfigInteger `
+        -Name "DRIVE_BACKUP_RETENTION_DAYS" `
+        -DefaultValue 35 `
+        -Minimum 1 `
+        -Maximum 3650
+}
+
+if ($InvocationParameters.ContainsKey("RetentionCount")) {
+    if ($RetentionCount -lt 1) {
+        throw "RetentionCount must be from 1 to 1000."
+    }
+}
+else {
+    $RetentionCount = Get-ConfigInteger `
+        -Name "DRIVE_BACKUP_RETENTION_COUNT" `
+        -DefaultValue 8 `
+        -Minimum 1 `
+        -Maximum 1000
+}
+
+$GovernanceRecordRoot = Get-ConfigValue `
+    -Name "DRIVE_GOVERNANCE_RECORD_ROOT" `
+    -DefaultValue ""
+if (
+    [string]::IsNullOrWhiteSpace($RestoreDrillDirectory) -and
+    -not [string]::IsNullOrWhiteSpace($GovernanceRecordRoot)
+) {
+    $RestoreDrillDirectory = Join-Path $GovernanceRecordRoot "restore-drills"
+}
+if (
+    [string]::IsNullOrWhiteSpace($TlsValidationDirectory) -and
+    -not [string]::IsNullOrWhiteSpace($GovernanceRecordRoot)
+) {
+    $TlsValidationDirectory = Join-Path $GovernanceRecordRoot "tls-validations"
+}
+
 function Set-ProcessEnvironmentValue {
     param(
         [Parameter(Mandatory = $true)]
@@ -194,16 +342,112 @@ function Set-ProcessEnvironmentValue {
 }
 
 function Assert-ActionParameters {
-    $BackupParameterNames = @(
+    $ScopedParameterNames = @(
+        "Service",
+        "Tail",
+        "Build",
+        "Volumes",
+        "Quiet",
+        "Tls",
+        "Monitoring",
         "BackupDirectory",
         "BackupPath",
+        "RetentionDays",
+        "RetentionCount",
+        "ApplyRetention",
+        "RestoreDrillDirectory",
+        "TlsValidationDirectory",
         "ConfigEncryptionCertificateThumbprint",
         "SkipEnvironmentBackup",
         "RestoreEnvironmentOutput",
         "ForceRestore",
         "NoStartAfterRestore",
-        "QuiesceTimeoutSeconds"
+        "QuiesceTimeoutSeconds",
+        "TlsEmail",
+        "TlsStaging",
+        "ForceRenewal",
+        "TlsRenewalTaskName",
+        "TlsRenewalAt",
+        "BackupRetentionTaskName",
+        "BackupRetentionAt",
+        "RestoreDrillTaskName",
+        "RestoreDrillAt",
+        "RestoreDrillDayOfWeek"
     )
+
+    $AllowedParameterNames = switch ($Action) {
+        "config" { @("Quiet", "Tls", "Monitoring") }
+        "up" { @("Build", "Tls", "Monitoring") }
+        "down" { @("Volumes", "Tls", "Monitoring") }
+        "status" { @("Tls", "Monitoring") }
+        "logs" { @("Service", "Tail", "Tls", "Monitoring") }
+        "backup" {
+            @(
+                "BackupDirectory",
+                "ConfigEncryptionCertificateThumbprint",
+                "SkipEnvironmentBackup",
+                "QuiesceTimeoutSeconds"
+            )
+        }
+        "backup-verify" { @("BackupPath") }
+        "restore" {
+            @(
+                "BackupPath",
+                "RestoreEnvironmentOutput",
+                "ForceRestore",
+                "NoStartAfterRestore"
+            )
+        }
+        "backup-retention" {
+            @(
+                "BackupDirectory",
+                "RetentionDays",
+                "RetentionCount",
+                "ApplyRetention"
+            )
+        }
+        "backup-retention-register" {
+            @(
+                "BackupDirectory",
+                "RetentionDays",
+                "RetentionCount",
+                "BackupRetentionTaskName",
+                "BackupRetentionAt"
+            )
+        }
+        "restore-drill" {
+            @(
+                "BackupDirectory",
+                "BackupPath",
+                "RestoreDrillDirectory"
+            )
+        }
+        "restore-drill-register" {
+            @(
+                "BackupDirectory",
+                "RestoreDrillDirectory",
+                "RestoreDrillTaskName",
+                "RestoreDrillAt",
+                "RestoreDrillDayOfWeek"
+            )
+        }
+        "tls-init" { @("Tls", "TlsEmail", "TlsStaging") }
+        "tls-renew" { @("Tls", "ForceRenewal") }
+        "tls-certificates" { @("Tls") }
+        "tls-register-renewal" {
+            @("Tls", "TlsRenewalTaskName", "TlsRenewalAt")
+        }
+        "tls-validate-public" { @("Tls", "TlsValidationDirectory") }
+        default { @() }
+    }
+    foreach ($Name in $ScopedParameterNames) {
+        if (
+            $InvocationParameters.ContainsKey($Name) -and
+            $Name -notin $AllowedParameterNames
+        ) {
+            throw "$Action does not accept -$Name."
+        }
+    }
 
     switch ($Action) {
         "backup" {
@@ -225,42 +469,58 @@ function Assert-ActionParameters {
             ) {
                 throw "-SkipEnvironmentBackup cannot be combined with -ConfigEncryptionCertificateThumbprint."
             }
-            foreach ($Name in @("RestoreEnvironmentOutput", "ForceRestore", "NoStartAfterRestore")) {
-                if ($InvocationParameters.ContainsKey($Name)) {
-                    throw "backup does not accept -$Name."
-                }
-            }
         }
         "backup-verify" {
             if ([string]::IsNullOrWhiteSpace($BackupPath)) {
                 throw "backup-verify requires -BackupPath."
-            }
-            foreach ($Name in $BackupParameterNames) {
-                if ($Name -ne "BackupPath" -and $InvocationParameters.ContainsKey($Name)) {
-                    throw "backup-verify does not accept -$Name."
-                }
             }
         }
         "restore" {
             if ([string]::IsNullOrWhiteSpace($BackupPath)) {
                 throw "restore requires -BackupPath."
             }
-            foreach ($Name in @(
-                "BackupDirectory",
-                "ConfigEncryptionCertificateThumbprint",
-                "SkipEnvironmentBackup",
-                "QuiesceTimeoutSeconds"
-            )) {
-                if ($InvocationParameters.ContainsKey($Name)) {
-                    throw "restore does not accept -$Name."
-                }
+        }
+        "backup-retention" {
+            if ([string]::IsNullOrWhiteSpace($BackupDirectory)) {
+                throw "backup-retention requires -BackupDirectory."
             }
         }
-        default {
-            foreach ($Name in $BackupParameterNames) {
-                if ($InvocationParameters.ContainsKey($Name)) {
-                    throw "$Action does not accept -$Name."
-                }
+        "backup-retention-register" {
+            if ([string]::IsNullOrWhiteSpace($BackupDirectory)) {
+                throw "backup-retention-register requires -BackupDirectory."
+            }
+        }
+        "restore-drill" {
+            if (
+                [string]::IsNullOrWhiteSpace($BackupPath) -eq
+                [string]::IsNullOrWhiteSpace($BackupDirectory)
+            ) {
+                throw "restore-drill requires exactly one of -BackupPath or -BackupDirectory."
+            }
+            if ([string]::IsNullOrWhiteSpace($RestoreDrillDirectory)) {
+                throw (
+                    "restore-drill requires -RestoreDrillDirectory or " +
+                    "DRIVE_GOVERNANCE_RECORD_ROOT."
+                )
+            }
+        }
+        "restore-drill-register" {
+            if ([string]::IsNullOrWhiteSpace($BackupDirectory)) {
+                throw "restore-drill-register requires -BackupDirectory."
+            }
+            if ([string]::IsNullOrWhiteSpace($RestoreDrillDirectory)) {
+                throw (
+                    "restore-drill-register requires -RestoreDrillDirectory or " +
+                    "DRIVE_GOVERNANCE_RECORD_ROOT."
+                )
+            }
+        }
+        "tls-validate-public" {
+            if ([string]::IsNullOrWhiteSpace($TlsValidationDirectory)) {
+                throw (
+                    "tls-validate-public requires -TlsValidationDirectory or " +
+                    "DRIVE_GOVERNANCE_RECORD_ROOT."
+                )
             }
         }
     }
@@ -606,6 +866,94 @@ function Assert-TlsConfiguration {
     }
 }
 
+function Assert-MonitoringConfiguration {
+    $AdminUser = Get-ConfigValue -Name "GRAFANA_ADMIN_USER" -DefaultValue "admin"
+    if ([string]::IsNullOrWhiteSpace($AdminUser) -or $AdminUser.Length -gt 128) {
+        throw "GRAFANA_ADMIN_USER must contain 1-128 characters."
+    }
+
+    $AdminPassword = Get-ConfigValue -Name "GRAFANA_ADMIN_PASSWORD"
+    if (
+        [string]::IsNullOrWhiteSpace($AdminPassword) -or
+        $AdminPassword.Length -lt 16 -or
+        $AdminPassword -match "(?i)change[-_ ]?me" -or
+        $AdminPassword.Contains('$')
+    ) {
+        throw "Monitoring requires a non-example GRAFANA_ADMIN_PASSWORD of at least 16 characters."
+    }
+
+    $RootUrlText = Get-ConfigValue -Name "GRAFANA_ROOT_URL"
+    $RootUrl = $null
+    if (
+        -not [System.Uri]::TryCreate(
+            $RootUrlText,
+            [System.UriKind]::Absolute,
+            [ref]$RootUrl
+        ) -or
+        $RootUrl.Scheme -notin @("http", "https") -or
+        -not [string]::IsNullOrEmpty($RootUrl.UserInfo) -or
+        $RootUrl.AbsolutePath -ne "/grafana/" -or
+        -not [string]::IsNullOrEmpty($RootUrl.Query) -or
+        -not [string]::IsNullOrEmpty($RootUrl.Fragment)
+    ) {
+        throw "GRAFANA_ROOT_URL must be an HTTP(S) URL ending in /grafana/ without user info, query, or fragment."
+    }
+    if ($TlsMode) {
+        $ApiHost = Get-ConfigValue -Name "DRIVE_SERVER_NAME"
+        if (
+            $RootUrl.Scheme -ne "https" -or
+            -not $RootUrl.Host.Equals(
+                $ApiHost,
+                [System.StringComparison]::OrdinalIgnoreCase
+            ) -or
+            -not $RootUrl.IsDefaultPort
+        ) {
+            throw "TLS monitoring requires GRAFANA_ROOT_URL to use the API HTTPS origin on port 443."
+        }
+    }
+
+    $WebhookPathText = Get-ConfigValue -Name "ALERTMANAGER_WEBHOOK_URL_FILE"
+    if ([string]::IsNullOrWhiteSpace($WebhookPathText)) {
+        throw "Monitoring requires ALERTMANAGER_WEBHOOK_URL_FILE."
+    }
+    $WebhookPath = if ([System.IO.Path]::IsPathRooted($WebhookPathText)) {
+        [System.IO.Path]::GetFullPath($WebhookPathText)
+    }
+    else {
+        [System.IO.Path]::GetFullPath((Join-Path $RepoRoot $WebhookPathText))
+    }
+    $ExampleWebhookPath = [System.IO.Path]::GetFullPath(
+        (Join-Path $RepoRoot "deploy\monitoring\secrets\alertmanager-webhook-url.example")
+    )
+    if ($WebhookPath.Equals(
+        $ExampleWebhookPath,
+        [System.StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw "Monitoring requires a non-example Alertmanager webhook URL file."
+    }
+    if (-not (Test-Path -LiteralPath $WebhookPath -PathType Leaf)) {
+        throw "Alertmanager webhook URL file does not exist: $WebhookPath"
+    }
+    $StrictUtf8 = New-Object System.Text.UTF8Encoding($false, $true)
+    $WebhookText = [System.IO.File]::ReadAllText(
+        $WebhookPath,
+        $StrictUtf8
+    ).Trim()
+    $WebhookUri = $null
+    if (
+        -not [System.Uri]::TryCreate(
+            $WebhookText,
+            [System.UriKind]::Absolute,
+            [ref]$WebhookUri
+        ) -or
+        $WebhookUri.Scheme -notin @("http", "https") -or
+        -not [string]::IsNullOrEmpty($WebhookUri.UserInfo) -or
+        $WebhookUri.Host -in @("localhost", "127.0.0.1", "::1")
+    ) {
+        throw "Alertmanager webhook URL file must contain one reachable HTTP(S) URL without user info."
+    }
+}
+
 if ($TlsMode) {
     Enable-TlsComposeMode
 }
@@ -616,6 +964,9 @@ $ComposeBaseArguments = @(
     "--env-file", $EnvFile,
     "--file", $ComposeFile
 )
+if ($Monitoring) {
+    $ComposeBaseArguments += @("--profile", "monitoring")
+}
 
 function Invoke-Compose {
     param(
@@ -860,10 +1211,14 @@ function Register-TlsRenewalTask {
 }
 
 $BackupRestoreScript = Join-Path $PSScriptRoot "backup-restore.ps1"
-if (-not (Test-Path -LiteralPath $BackupRestoreScript -PathType Leaf)) {
-    throw "Backup and restore helper does not exist: $BackupRestoreScript"
+$GovernanceScript = Join-Path $PSScriptRoot "governance.ps1"
+foreach ($HelperScript in @($BackupRestoreScript, $GovernanceScript)) {
+    if (-not (Test-Path -LiteralPath $HelperScript -PathType Leaf)) {
+        throw "Windows deployment helper does not exist: $HelperScript"
+    }
 }
 . $BackupRestoreScript
+. $GovernanceScript
 Assert-ActionParameters
 
 $DeploymentMutex = $null
@@ -897,6 +1252,9 @@ try {
                 Assert-TlsConfiguration -RequireStandardPorts -RequirePublicDeployment
                 Assert-CertificateMatchesDomains
             }
+            if ($Monitoring) {
+                Assert-MonitoringConfiguration
+            }
             $Arguments = @("up", "--detach", "--remove-orphans")
             if ($Build) {
                 $Arguments += "--build"
@@ -916,17 +1274,23 @@ try {
             }
             $Arguments += @("down", "--remove-orphans")
             if ($Volumes) {
-                Write-Warning "This removes database, object, index, Redis, and TLS certificate named volumes."
+                Write-Warning "This removes database, object, index, Redis, TLS, and monitoring named volumes."
                 $Arguments += "--volumes"
             }
             Invoke-Compose -Arguments $Arguments
             if ($Volumes) {
                 Import-Module ScheduledTasks -ErrorAction Stop
-                $ExistingTask = Get-ScheduledTask -TaskPath "\" |
-                    Where-Object { $_.TaskName -eq $TlsRenewalTaskName }
-                if ($null -ne $ExistingTask) {
-                    $ExistingTask | Unregister-ScheduledTask -Confirm:$false
-                    Write-Warning "Removed TLS renewal scheduled task: $TlsRenewalTaskName"
+                foreach ($TaskName in @(
+                    $TlsRenewalTaskName,
+                    $BackupRetentionTaskName,
+                    $RestoreDrillTaskName
+                )) {
+                    $ExistingTask = Get-ScheduledTask -TaskPath "\" |
+                        Where-Object { $_.TaskName -eq $TaskName }
+                    if ($null -ne $ExistingTask) {
+                        $ExistingTask | Unregister-ScheduledTask -Confirm:$false
+                        Write-Warning "Removed deployment scheduled task: $TaskName"
+                    }
                 }
             }
         }
@@ -989,6 +1353,56 @@ try {
                 $RestoreArguments["RestoreEnvironmentOutput"] = $RestoreEnvironmentOutput
             }
             Invoke-WindowsRestore @RestoreArguments
+        }
+        "backup-retention" {
+            $Result = Invoke-WindowsBackupRetention `
+                -RepoRoot $RepoRoot `
+                -ComposeBaseArguments $ComposeBaseArguments `
+                -BackupDirectory $BackupDirectory `
+                -RetentionDays $RetentionDays `
+                -RetentionCount $RetentionCount `
+                -Apply:$ApplyRetention
+            $Result | ConvertTo-Json -Depth 8
+        }
+        "backup-retention-register" {
+            Register-WindowsBackupRetentionTask `
+                -RepoRoot $RepoRoot `
+                -ManageScript $PSCommandPath `
+                -EnvFile $EnvFile `
+                -BackupDirectory $BackupDirectory `
+                -RetentionDays $RetentionDays `
+                -RetentionCount $RetentionCount `
+                -TaskName $BackupRetentionTaskName `
+                -At $BackupRetentionAt
+        }
+        "restore-drill" {
+            Assert-DockerEngine
+            $RestoreDrillArguments = @{
+                RepoRoot = $RepoRoot
+                ComposeFile = $ComposeFile
+                EnvFile = $EnvFile
+                ComposeBaseArguments = $ComposeBaseArguments
+                RecordDirectory = $RestoreDrillDirectory
+            }
+            if (-not [string]::IsNullOrWhiteSpace($BackupPath)) {
+                $RestoreDrillArguments["BackupPath"] = $BackupPath
+            }
+            else {
+                $RestoreDrillArguments["BackupDirectory"] = $BackupDirectory
+            }
+            $Result = Invoke-WindowsRestoreDrill @RestoreDrillArguments
+            $Result | ConvertTo-Json -Depth 8
+        }
+        "restore-drill-register" {
+            Register-WindowsRestoreDrillTask `
+                -RepoRoot $RepoRoot `
+                -ManageScript $PSCommandPath `
+                -EnvFile $EnvFile `
+                -BackupDirectory $BackupDirectory `
+                -RecordDirectory $RestoreDrillDirectory `
+                -TaskName $RestoreDrillTaskName `
+                -At $RestoreDrillAt `
+                -DayOfWeek $RestoreDrillDayOfWeek
         }
         "tls-init" {
             Assert-DockerEngine
@@ -1164,6 +1578,21 @@ try {
             Assert-CertbotRenewalLineage
             Assert-TlsGatewayReady
             Register-TlsRenewalTask
+        }
+        "tls-validate-public" {
+            Assert-TlsConfiguration `
+                -RequireStandardPorts `
+                -RequirePublicDeployment
+            $Result = Invoke-WindowsPublicTlsValidation `
+                -RepoRoot $RepoRoot `
+                -ApiHost (
+                    Get-ConfigValue -Name "DRIVE_SERVER_NAME"
+                ) `
+                -StorageHost (
+                    Get-ConfigValue -Name "DRIVE_STORAGE_SERVER_NAME"
+                ) `
+                -RecordDirectory $TlsValidationDirectory
+            $Result | ConvertTo-Json -Depth 12
         }
     }
 }

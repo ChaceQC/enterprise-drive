@@ -1,5 +1,86 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-03 Sprint 6 管理、监控与上线治理闭环
+
+### 当前状态
+
+- `PROJECT_STAGE_STATUS.md` 中 Sprint 6 的空间、统计、维护、导出、Alertmanager/Grafana、周期恢复演练和备份轮换代码侧剩余项已完成；Sprint 9 的 `BE-044`、`BE-045` 同步闭环。
+- 运行时 OpenAPI 为 73 个路径、99 个操作；安全矩阵同步为 99 项，数据库 migration head 为 `20260803_0021`。
+- 生产 DNS/受信证书和 MinIO 修复镜像不在当前本机环境内，正式 `v0.4.0` tag/Release 保持阻塞，不使用示例域名、自签名证书或“新增 Critical=0”冒充生产验收。
+
+### 已完成
+
+- 新增 `/api/v1/admin/spaces`：按状态、类型、owner 和关键字筛选，支持签名 cursor、详情、原子创建、乐观更新和停用。创建在同一事务中写入空间、root 节点、owner 成员和空间配额；主 owner 变更同步更新根节点 owner、成员角色、权限版本事件和管理审计。
+- 新增 `/api/v1/admin/stats/overview`，按当前租户统计用户、空间、节点、版本、空间配额、分享、上传和 Outbox；空间/member/node 汇总子查询显式带租户条件。
+- 新增 `/api/v1/admin/maintenance/tasks` 与 `/maintenance/runs`，查询九个周期任务的连续失败/stale 状态，并以 `admin_jobs` 持久化租户范围异步运行、Celery task ID、结果和失败码。
+- 新增 `/api/v1/admin/exports`，异步导出审计、空间和用户 CSV 到私有 `exports/{tenant_id}/{job_id}/`，支持筛选、状态、短期预签名下载、CSV formula 防护、最大行数显式失败和保留期清理。对象删除不在数据库事务中执行，过期成功后写入审计。
+- 新增 `20260803_0021_admin_management.py`，为 `spaces` 增加独立 `version` 和管理列表索引，创建 JSONB `admin_jobs`。
+- 根 Compose 新增固定 digest 的 Prometheus、Alertmanager、Grafana `monitoring` profile；三项服务只在 Compose 内网，Grafana 经 gateway `/grafana/` 访问，预置运行概览与维护治理看板。
+- Nginx 本机 API/S3 与 TLS 模板都拒绝未知 Host；本机 S3 继续允许 `localhost`/`127.0.0.1`，未启用 monitoring profile 时 gateway 仍可启动。
+- `deploy/windows/manage.ps1` 新增 `-Monitoring` 生命周期支持、`backup-retention`、轮换计划任务注册/删除、`restore-drill`、恢复演练计划任务注册/删除和 `tls-validate-public`。
+- 备份轮换校验目录名、manifest ID 和 SHA-256，按保留天数与最少份数执行；恢复演练使用随机隔离 Compose project，始终清理 target 容器/卷并写 restricted ACL JSON。公网 TLS 验收拒绝私网、CGNAT、benchmark、documentation 和 reserved 地址，记录 DNS、HTTP `308`、HTTPS readiness、证书链和剩余天数。
+- 收尾差异审查修正两处监控语义：Outbox backlog 按 pending/failed/processing 总和判断，Grafana maintenance 看板使用 metric-name selector 合并 alert/stale，避免 PromQL `or` 左侧遮蔽 stale。
+- 管理任务结果审查把容量校准明细恢复为既有 1,000 项上限；job 仍保留受限明细，完成审计只复制标量摘要、列表计数和嵌套键名，避免把大批空间明细重复写入审计 metadata。
+- CI 路径纳入 `deploy/monitoring/**`，新增 Compose/端口、promtool、amtool、dashboard JSON、healthcheck binary 和 Windows governance smoke；MinIO Critical 允许集已从先前较宽的基线收紧到当前实际观测的 Server/Client 16/9 个唯一 ID。
+- 新增 `docs/minio-security-risk.md`：登记两个 MinIO 自身 Critical、当前 OIDC/LDAP/Console 可达性缓解和正式发布 blocker。
+
+### 验证
+
+- 管理 API 首轮定向：`3 passed`；完成 CSV/事务边界修复后只重跑受影响导出生命周期和两个新增 owner transfer/CSV 防护用例，结果 `3 passed`。
+- 管理模块、admin Worker、migration、网关 smoke 和测试共 28 个文件 Ruff/format 通过；管理模块与 admin Worker 共 25 个源码文件 Mypy 通过。
+- 新建临时 PostgreSQL 16，从空库升级到 `20260803_0021 (head)`；查询确认 `admin_jobs.parameters_json=jsonb`、`spaces.version NOT NULL` 和 `idx_spaces_admin_list`，临时容器已删除。
+- `governance.ps1`、`manage.ps1` 和新增 smoke 保持 ASCII、无 BOM、PowerShell 5.1 parser 通过；治理 smoke 通过。
+- Prometheus 3.13.1 `promtool`、Alertmanager 0.33.1 `amtool`、Grafana dashboard JSON 和三镜像 `wget` healthcheck 可用性通过。
+- 监控语义修正后仅重跑受影响的 `platform-alerts.yml`：`promtool check rules` 通过并识别 8 条规则；maintenance dashboard JSON 重新解析通过，确认 alert/stale selector 已更新。
+- 管理任务审计摘要修正后只运行对应安全防护用例，结果 `1 passed`；受影响 Worker/测试 Ruff 与 format 通过，Worker 定向 Mypy 通过。
+- 本机/TLS Nginx 模板 `nginx -t` 通过；真实 raw HTTP smoke 验证未知 API/S3 Host、CL/TE、重复 Content-Length、API 413、S3 streaming 和本机 Host 兼容。
+- `docker compose --profile monitoring --profile tls-tools ... config` 通过，确认只有 gateway 发布宿主端口；GitHub Actions YAML 可解析。
+- 未重复运行全量 pytest、旧 Sprint 集合、真实 MinIO、完整备份恢复或 Sprint 3 性能测试；这些未受本轮代码路径影响，继续复用已有通过证据。推送后只跟踪 `backend-ci`，若失败仅修复对应失败项。
+
+### 阻塞与风险
+
+- 当前工作区没有真实 `.env.windows`、生产 DNS、可公开访问的 80/443 或受信证书，`tls-validate-public` 尚未执行真实生产验收。
+- 固定社区版 MinIO Server/Client 当前仍有 16/9 个 Critical 唯一 ID；关闭 OIDC/LDAP/Console 只降低可达性，不是镜像修复。
+- 备份轮换和隔离演练已自动化；来源签名、完整包加密、离线副本和容量告警继续后续治理。
+
+### 下一步
+
+1. 推送 `dev` 并跟踪本次 `backend-ci` 到全部 job 成功，只处理真实失败项。
+2. 在生产环境执行 `tls-validate-public` 并保存 JSON 记录。
+3. 更换受支持修复镜像或可审计补丁镜像，重新生成 SBOM/Grype 并运行真实 MinIO 与备份恢复兼容门禁。
+4. 发布 blocker 解除后创建 `v0.4.0` tag/Release；并行进入桌面设备会话和增量同步契约。
+
+### 涉及文件
+
+- `backend/app/modules/admin/`
+- `backend/app/workers/admin_tasks.py`
+- `backend/migrations/versions/20260803_0021_admin_management.py`
+- `backend/tests/test_admin_sprint6_management.py`
+- `backend/tests/security_route_matrix.py`
+- `backend/tests/test_route_security_matrix.py`
+- `backend/tests/test_celery_schedule.py`
+- `backend/app/core/maintenance_health.py`
+- `backend/app/infrastructure/queue/`
+- `compose.windows.yml`
+- `.env.windows.example`
+- `backend/.env.example`
+- `deploy/monitoring/`
+- `deploy/windows/manage.ps1`
+- `deploy/windows/governance.ps1`
+- `deploy/windows/tests/governance.smoke.ps1`
+- `deploy/windows/nginx/`
+- `.github/workflows/backend-ci.yml`
+- `README.md`
+- `backend/README.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `PROJECT_STAGE_STATUS.md`
+- `AGENT.md`
+- `docs/deployment-windows-docker.md`
+- `docs/maintenance-monitoring.md`
+- `docs/minio-security-risk.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-08-03 Sprint 5 分享、预览与搜索闭环
 
 ### 当前状态
@@ -34,7 +115,7 @@
 
 - OCR 已覆盖图片、扫描 PDF 与旧 Office/ODF 转换抽取，但不是通用内容分类或复杂 DLP；legal hold、外链代理流和历史版本专用水印继续后续治理。
 - 预览生命周期当前按全局保留天数清理；租户级策略、legal hold、治理页面和手工恢复工作流继续 `BE-047` 的扩展边界。
-- 根 Compose 仍不包含 Prometheus、Alertmanager 和 Grafana；生产需要抓取 Worker 指标并加载现有告警规则。
+- 该 Sprint 5 收尾记录形成时，根 Compose 尚未纳入 Prometheus、Alertmanager 和 Grafana；本轮 Sprint 6 已由可选 `monitoring` profile 补齐，生产仍需配置真实 webhook 并验收告警链路。
 
 ### 下一步
 
@@ -74,7 +155,7 @@
 
 - `PROJECT_STAGE_STATUS.md` 中 Sprint 4 原剩余的完整用户、部门和用户组管理 API 已完成，Sprint 4 尚未完成项现为空。
 - 运行时 OpenAPI 为 58 个路径、79 个操作；安全矩阵同步为 79 项，数据库 migration head 为 `20260803_0019`。
-- `BE-044` 当前为部分完成：用户、部门、用户组和配额管理子集已落地，空间管理继续后续交付；统计、维护和导出仍属于 `BE-045`。
+- 该 Sprint 4 收尾记录形成时，`BE-044` 只完成用户、部门、用户组和配额管理子集；空间管理以及 `BE-045` 的统计、维护和导出现已由顶部 Sprint 6 记录闭环。
 
 ### 已完成
 
@@ -465,7 +546,7 @@
 
 ### 边界
 
-- 根 Compose 仍不内置 Prometheus Server/Alertmanager；生产监控必须抓取 `worker-maintenance:9100`、加载规则并接入企业值班通知。
+- 该 `BE-035` 阶段当时尚未把 Prometheus Server/Alertmanager 纳入根 Compose；Sprint 6 已由可选 `monitoring` profile 补齐，生产监控仍需配置真实企业值班接收端。
 - Redis 只保存运行监控状态，不替代 PostgreSQL、对象存储和审计事实；Redis 数据丢失会重置失败 streak，但不会改变业务数据。
 - 当前告警覆盖既有五个维护任务；过期分享、预览产物和后续生命周期任务接入时必须加入同一任务清单和调度间隔映射。
 
@@ -479,7 +560,7 @@
 
 1. 只运行一次维护监控定向 Ruff、Mypy 和 observability/schedule 测试后提交推送。
 2. 进入 `BE-036`，实现文件版本列表、指定版本下载和回滚为新版本，并复用权限、容量和审计服务。
-3. 外部 Alertmanager、Grafana 看板和通知路由在部署监控系统时加载本轮规则，不阻塞后端工程顺序。
+3. 该阶段规划由部署治理补齐 Alertmanager、Grafana 看板和通知路由；Sprint 6 现已完成 profile、规则和看板，真实接收端继续由生产环境配置。
 
 ### 涉及文件
 
@@ -1506,7 +1587,7 @@
 - Windows CMS 只保护 `.env.windows`；PostgreSQL dump、MinIO/Redis/OpenSearch 原始卷和含 TLS 私钥的归档仍依赖 BitLocker、受限 NTFS ACL、加密外部介质和受控保管链。
 - `manifest.sha256` 和工件 SHA-256 只提供完整性检查，不认证备份制作者身份；来源认证仍需受保护签名或受控传输与保管链。
 - Redis/OpenSearch 原始卷恢复限定相同 image reference、相同实际 image ID 和单节点同拓扑；跨版本或拓扑变化必须使用对应产品支持的迁移/快照机制。
-- MinIO Server/Client 仍有已记录的 19/12 个 Critical 基线；CI 只阻断新增 Critical，正式上线前仍需升级到修复镜像或替换为可审计的自建修复镜像。
+- 该次备份恢复收尾时记录的是先前较宽的 MinIO Critical 基线；2026-08-03 已复核为 Server/Client 16/9 个唯一 ID，其中两个 MinIO 自身 Critical 尚无社区版 patched version，正式上线前仍需采用受支持修复镜像或可审计补丁镜像。
 - `-ForceRestore` 回滚属于尽力恢复；回滚异常时会保留受限 ACL rollback archive 并报告路径，仍需人工确认数据状态。
 - 真实公网 DNS、受信证书签发、外部双域名 HTTPS 和实际 Certbot renewal lineage 续期仍属于生产环境验收项。
 

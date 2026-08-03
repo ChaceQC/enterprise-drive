@@ -70,6 +70,10 @@ x-app-environment: &app-environment
   DRIVE_MAINTENANCE_STATE_TTL_SECONDS: "${DRIVE_MAINTENANCE_STATE_TTL_SECONDS:-2592000}"
   DRIVE_MAINTENANCE_STATE_REDIS_TIMEOUT_SECONDS: "${DRIVE_MAINTENANCE_STATE_REDIS_TIMEOUT_SECONDS:-1.0}"
   DRIVE_MAINTENANCE_HEALTH_REFRESH_SECONDS: "${DRIVE_MAINTENANCE_HEALTH_REFRESH_SECONDS:-30}"
+  DRIVE_ADMIN_EXPORT_MAX_ROWS: "${DRIVE_ADMIN_EXPORT_MAX_ROWS:-50000}"
+  DRIVE_ADMIN_EXPORT_PRESIGN_EXPIRES_SECONDS: "${DRIVE_ADMIN_EXPORT_PRESIGN_EXPIRES_SECONDS:-300}"
+  DRIVE_ADMIN_EXPORT_RETENTION_DAYS: "${DRIVE_ADMIN_EXPORT_RETENTION_DAYS:-30}"
+  DRIVE_ADMIN_EXPORT_CLEANUP_INTERVAL_SECONDS: "${DRIVE_ADMIN_EXPORT_CLEANUP_INTERVAL_SECONDS:-86400}"
   DRIVE_DEFAULT_SPACE_QUOTA_BYTES: "${DRIVE_DEFAULT_SPACE_QUOTA_BYTES:-1099511627776}"
   DRIVE_DEFAULT_USER_QUOTA_BYTES: "${DRIVE_DEFAULT_USER_QUOTA_BYTES:-0}"
   DRIVE_DEFAULT_TENANT_QUOTA_BYTES: "${DRIVE_DEFAULT_TENANT_QUOTA_BYTES:-0}"
@@ -529,6 +533,132 @@ services:
     mem_limit: "${BEAT_MEMORY_LIMIT:-512m}"
     pids_limit: ${BEAT_PIDS_LIMIT:-128}
 
+  prometheus:
+    image: "${PROMETHEUS_IMAGE:-prom/prometheus:v3.13.1@sha256:3c42b892cf723fa54d2f262c37a0e1f80aa8c8ddb1da7b9b0df9455a35a7f893}"
+    profiles:
+      - monitoring
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - "--storage.tsdb.retention.time=${PROMETHEUS_RETENTION_TIME:-30d}"
+      - "--storage.tsdb.retention.size=${PROMETHEUS_RETENTION_SIZE:-20GB}"
+      - --web.enable-lifecycle
+    volumes:
+      - type: bind
+        source: ./deploy/monitoring/prometheus.yml
+        target: /etc/prometheus/prometheus.yml
+        read_only: true
+      - type: bind
+        source: ./deploy/monitoring/maintenance-alerts.yml
+        target: /etc/prometheus/rules/maintenance-alerts.yml
+        read_only: true
+      - type: bind
+        source: ./deploy/monitoring/platform-alerts.yml
+        target: /etc/prometheus/rules/platform-alerts.yml
+        read_only: true
+      - type: volume
+        source: prometheus-data
+        target: /prometheus
+    networks:
+      - backend
+    depends_on:
+      api:
+        condition: service_healthy
+      worker-maintenance:
+        condition: service_healthy
+      alertmanager:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9090/-/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    cpus: "${PROMETHEUS_CPU_LIMIT:-1.00}"
+    mem_limit: "${PROMETHEUS_MEMORY_LIMIT:-1g}"
+    pids_limit: ${PROMETHEUS_PIDS_LIMIT:-256}
+    security_opt:
+      - no-new-privileges:true
+    logging: *json-logging
+
+  alertmanager:
+    image: "${ALERTMANAGER_IMAGE:-prom/alertmanager:v0.33.1@sha256:9e082985f56f4c8c9f724e18f2288c6708f472e56a5286b8863d080434ea065d}"
+    profiles:
+      - monitoring
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/alertmanager/alertmanager.yml
+      - --storage.path=/alertmanager
+    volumes:
+      - type: bind
+        source: ./deploy/monitoring/alertmanager.yml
+        target: /etc/alertmanager/alertmanager.yml
+        read_only: true
+      - type: bind
+        source: "${ALERTMANAGER_WEBHOOK_URL_FILE:-./deploy/monitoring/secrets/alertmanager-webhook-url.example}"
+        target: /run/secrets/alertmanager-webhook-url
+        read_only: true
+      - type: volume
+        source: alertmanager-data
+        target: /alertmanager
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:9093/-/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    cpus: "${ALERTMANAGER_CPU_LIMIT:-0.50}"
+    mem_limit: "${ALERTMANAGER_MEMORY_LIMIT:-512m}"
+    pids_limit: ${ALERTMANAGER_PIDS_LIMIT:-128}
+    security_opt:
+      - no-new-privileges:true
+    logging: *json-logging
+
+  grafana:
+    image: "${GRAFANA_IMAGE:-grafana/grafana:13.1.0@sha256:121a7a9ece6dc10b969f1f96eed64b4f07dfac0d0b8abc070f7cb83bbde86f63}"
+    profiles:
+      - monitoring
+    restart: unless-stopped
+    environment:
+      GF_SERVER_ROOT_URL: "${GRAFANA_ROOT_URL:-http://localhost:18080/grafana/}"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
+      GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-change-me-grafana-password}"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    volumes:
+      - type: bind
+        source: ./deploy/monitoring/grafana/provisioning
+        target: /etc/grafana/provisioning
+        read_only: true
+      - type: bind
+        source: ./deploy/monitoring/grafana/dashboards
+        target: /var/lib/grafana/dashboards
+        read_only: true
+      - type: volume
+        source: grafana-data
+        target: /var/lib/grafana
+    networks:
+      - backend
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    cpus: "${GRAFANA_CPU_LIMIT:-1.00}"
+    mem_limit: "${GRAFANA_MEMORY_LIMIT:-1g}"
+    pids_limit: ${GRAFANA_PIDS_LIMIT:-256}
+    security_opt:
+      - no-new-privileges:true
+    logging: *json-logging
+
   postgres:
     image: "${POSTGRES_IMAGE:-postgres:16-bookworm}"
     restart: unless-stopped
@@ -706,3 +836,6 @@ volumes:
   tls-acme-webroot:
   tls-certbot-work:
   tls-certbot-logs:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:

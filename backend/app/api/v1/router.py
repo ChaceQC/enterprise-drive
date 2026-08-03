@@ -3,9 +3,11 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 
 from app.modules.admin.file_security_router import router as admin_file_security_router
+from app.modules.admin.governance_router import router as admin_governance_router
 from app.modules.admin.organization_router import router as admin_organization_router
 from app.modules.admin.quota_router import router as admin_quota_router
 from app.modules.admin.router import router as admin_router
+from app.modules.admin.space_router import router as admin_space_router
 from app.modules.auth.router import router as auth_router
 from app.modules.file.acl_router import router as file_acl_router
 from app.modules.file.router import router as file_router
@@ -18,11 +20,17 @@ from app.modules.upload.router import router as upload_router
 router = APIRouter()
 router.include_router(admin_router, prefix="/admin", tags=["admin"])
 router.include_router(
+    admin_governance_router,
+    prefix="/admin",
+    tags=["admin-governance"],
+)
+router.include_router(
     admin_organization_router,
     prefix="/admin",
     tags=["admin-organization"],
 )
 router.include_router(admin_quota_router, prefix="/admin/quotas", tags=["admin-quotas"])
+router.include_router(admin_space_router, prefix="/admin/spaces", tags=["admin-spaces"])
 router.include_router(
     admin_file_security_router,
     prefix="/admin/file-security",

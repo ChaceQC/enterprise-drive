@@ -22,6 +22,8 @@ htmlcov/
 *.key
 *.crt
 *.p12
+deploy/monitoring/secrets/*
+!deploy/monitoring/secrets/alertmanager-webhook-url.example
 
 # Dependencies and build output
 node_modules/

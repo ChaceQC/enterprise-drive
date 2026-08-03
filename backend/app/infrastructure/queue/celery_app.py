@@ -27,6 +27,7 @@ celery_app = Celery(
     broker=settings.celery_broker_url,
     backend=settings.celery_result_backend,
     include=[
+        "app.workers.admin_tasks",
         "app.workers.audit_tasks",
         "app.workers.file_tasks",
         "app.workers.permission_tasks",
@@ -42,6 +43,9 @@ celery_app.conf.update(
     task_default_queue="maintenance",
     task_routes={
         "audit.dispatch_outbox": {"queue": "audit"},
+        "admin.execute_maintenance_run": {"queue": "maintenance"},
+        "admin.generate_export": {"queue": "maintenance"},
+        "admin.cleanup_expired_exports": {"queue": "maintenance"},
         "permission.invalidate_cache": {"queue": "permission"},
         "preview.dispatch_outbox": {"queue": "preview"},
         "preview.cleanup_artifacts": {"queue": "maintenance"},

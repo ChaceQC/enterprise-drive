@@ -787,10 +787,20 @@ class FileRepository:
         )
         return result.scalar_one_or_none()
 
-    async def list_runnable_tree_operation_ids(self, *, limit: int) -> list[UUID]:
+    async def list_runnable_tree_operation_ids(
+        self,
+        *,
+        limit: int,
+        tenant_id: UUID | None = None,
+    ) -> list[UUID]:
+        conditions: list[ColumnElement[bool]] = [
+            FileTreeOperation.status.in_(["pending", "running"])
+        ]
+        if tenant_id is not None:
+            conditions.append(FileTreeOperation.tenant_id == tenant_id)
         result = await self.session.execute(
             select(FileTreeOperation.id)
-            .where(FileTreeOperation.status.in_(["pending", "running"]))
+            .where(*conditions)
             .order_by(FileTreeOperation.created_at, FileTreeOperation.id)
             .limit(limit)
         )

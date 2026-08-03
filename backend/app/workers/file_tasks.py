@@ -105,14 +105,26 @@ def cleanup_orphaned_objects(
 celery_app.task(name="file.cleanup_orphaned_objects")(cleanup_orphaned_objects)
 
 
-def process_tree_operations(limit: int = 100) -> dict[str, int]:
-    return asyncio.run(_process_tree_operations(limit=limit))
+def process_tree_operations(
+    limit: int = 100,
+    tenant_id: str | None = None,
+) -> dict[str, int]:
+    return asyncio.run(
+        _process_tree_operations(
+            limit=limit,
+            tenant_id=UUID(tenant_id) if tenant_id else None,
+        )
+    )
 
 
 celery_app.task(name="file.process_tree_operations")(process_tree_operations)
 
 
-async def _process_tree_operations(*, limit: int) -> dict[str, int]:
+async def _process_tree_operations(
+    *,
+    limit: int,
+    tenant_id: UUID | None,
+) -> dict[str, int]:
     settings = get_settings()
     session_factory = get_session_factory()
     async with session_factory() as session:
@@ -127,7 +139,7 @@ async def _process_tree_operations(*, limit: int) -> dict[str, int]:
             ),
             batch_size=settings.file_tree_operation_batch_size,
             audit_service=AuditService(repository=AuditRepository(session)),
-        ).process_pending(limit=limit)
+        ).process_pending(limit=limit, tenant_id=tenant_id)
 
 
 async def _cleanup_expired_trash(

@@ -9,6 +9,7 @@
 - 正式部署使用 Docker Desktop 的 WSL2 后端和 Linux containers，仓库根目录 `compose.windows.yml` 是唯一正式编排入口；`backend/docker-compose.yml` 仅保留为本地依赖开发清单。
 - `deploy/windows/manage.ps1 up` 默认只能使用已经存在的本地镜像，必须带 `--no-build --pull never`；镜像拉取和项目镜像构建要作为独立、显式、可观察的步骤执行，只有用户明确执行 `up -Build` 时才允许构建，禁止把构建、下载、全栈启动和备份恢复测试串成一个黑盒命令。
 - 正式部署的 Nginx gateway 运行在 `compose.windows.yml` 中，并且是唯一允许发布宿主端口的服务；默认本机入口由 gateway 发布 API `18080` 和 S3 外部端点 `19000`。公网模式使用 `manage.ps1 -Tls`、ACME HTTP-01 bootstrap、Certbot 证书卷和 TLS Nginx 模板映射 `80/443`；启用前必须配置真实 DNS、受信证书邮箱、HTTPS 外部端点、CORS、Trusted Hosts 和 Secure Cookie，并完成双域名实测。API、Worker、PostgreSQL、Redis、OpenSearch、MinIO API/Console 等内部服务只加入 Compose 网络。
+- 可选监控统一使用根 Compose 的 `monitoring` profile；Prometheus、Alertmanager、Grafana 不发布宿主端口，Grafana 只能由 gateway `/grafana/` 代理。正式 `up -Monitoring` 必须拒绝示例 Grafana 密码、仓库内示例 webhook 和 localhost webhook。
 - 后端技术基线：Python 3.12+、uv、FastAPI、SQLAlchemy 2.x、PostgreSQL 16+、Redis、S3 兼容对象存储、OpenSearch、Celery。
 - 二期桌面客户端技术基线：Rust stable、Cargo workspace、Tauri 2；Windows 11 优先交付，再评估 macOS 和 Linux。同步引擎、传输队列、本地索引、文件系统监听、凭据存储和更新签名校验必须由 Rust 实现，界面层不得成为同步状态的事实来源。
 - Web 用户端与管理后台技术基线：TypeScript、React、Vite、npm 锁文件、OpenAPI 生成 client 和 Playwright；默认目录为 `frontend/`。浏览器认证继续使用 BFF Cookie Session 和 CSRF，禁止把 session、JWT、refresh token 或等价 bearer 凭据写入 Web Storage。
@@ -20,6 +21,7 @@
 - Rust 桌面客户端在一期后端与 Sprint 6 上线治理闭环后进入实现，默认目录为 `desktop/`。桌面端开工前必须先固定设备会话、增量变更游标、删除 tombstone、版本前置条件和冲突处理等后端契约，不得通过高频全量扫描模拟同步协议。
 - 项目正式文件传输契约使用 `Drive Transfer Protocol v1`（线协议标识 `DTP/1`）：控制面使用版本化 HTTPS API，数据面使用短期预签名 HTTPS 直达 MinIO/S3，上传复用秒传、multipart、断点状态、幂等 complete/abort 和服务端 SHA-256，下载使用短期签名与 HTTP Range；禁止自研 TCP/UDP、TLS、QUIC、私有加密或可靠传输层。协议规范以 `docs/drive-transfer-protocol-v1.md` 为准。
 - Windows 备份、校验和恢复使用的临时 Docker 容器必须统一设置 CPU、memory、memory-swap 和 PID 上限，默认使用低压缩等级并禁止隐式拉取镜像；真实集成测试必须先执行本地镜像 preflight，默认只启动恢复后的数据服务，完整 target 全栈恢复只能通过显式开关执行。
+- Windows 备份轮换只处理目录名、manifest ID 和 checksum 均通过的托管备份，必须同时保留配置的最少份数和保留期内备份；周期恢复演练使用随机隔离 Compose project，结束后必须确认 target 容器/卷为零，并把成功或失败 JSON 写到仓库外 restricted ACL 目录。
 - Web 页面必须使用生成的 TypeScript API client、服务端权限枚举和统一错误码；前端路由守卫、按钮隐藏、浏览器缓存和本地状态只用于体验，不得复制权限、容量、分享、版本或生命周期业务规则。
 - 本地开发服务避免使用常见端口；如无项目内配置，API 默认避免使用 `3000`、`5173`、`8000` 等常见开发端口，端口应放入环境变量或配置文件。
 - 后端依赖和命令必须通过 uv 管理，禁止直接使用系统 Python 或全局 Python 启动项目。
@@ -58,6 +60,7 @@
 - 初始仓库优先创建为私有仓库，确认可公开后再调整可见性。
 - 每次完成可验证改动后必须 commit。
 - 每次 commit 后必须 push 到 GitHub。
+- 正式 tag/Release 必须满足对应版本的生产证书、依赖/镜像风险和恢复门禁；当前 MinIO blocker 未解除前不得创建 `v0.4.0` tag 或 GitHub Release。
 - 提交前必须检查 `git status`，避免混入无关改动。
 - 提交前必须先检查本次改动是否影响 `README.md`、`PROJECT_PLAN.md`、`PROJECT_PROGRESS.md`、`AGENT.md`、《企业网盘开发者技术计划书.md》或子目录 README；受影响文档未同步时，不得先提交代码。
 - 必须维护 `.gitignore`，禁止提交 `.env`、密钥、证书私钥、依赖目录、构建产物、上传文件、对象存储数据目录、数据库数据目录、OpenSearch 数据目录、日志和备份文件。
@@ -424,7 +427,7 @@ Windows Docker Compose 要求：
 - API 使用可配置的 SQLAlchemy QueuePool；Celery Worker 因同步任务入口会通过 `asyncio.run()` 建立独立事件循环，必须在 Compose 中使用 `DRIVE_DATABASE_POOL_MODE=null`，禁止跨任务事件循环复用 asyncpg 连接池。
 - S3 必须区分容器内访问端点和浏览器可访问的外部端点：内部端点用于 API/Worker 访问 `http://minio:9000`；默认外部端点为 gateway 提供的 `http://localhost:19000`，公网 TLS 模式使用 `https://storage.example.com` 等独立 Host。外部端点不得使用 `/s3` 等 base path，也不能把内部服务名返回给浏览器；公网模式的 `MINIO_CORS_ALLOWED_ORIGIN` 必须与 `DRIVE_CORS_ORIGINS` 精确一致且只包含 HTTPS origin，禁止通配符和遗留 origin。
 - PostgreSQL、Redis、MinIO 和 OpenSearch 使用 named volumes；备份输出使用明确的 Windows 宿主目录或专用备份卷。Celery beat 当前把可重建 schedule 文件放在容器临时目录，不能把它当作任务事实来源。
-- `deploy/windows/manage.ps1` 是宿主机管理入口，提供 `config`、`up`、`down`、`status`、`logs`、`backup`、`backup-verify`、`restore`、`tls-init`、`tls-renew`、`tls-certificates`、`tls-register-renewal` 和幂等的 `tls-unregister-renewal`；构建使用 `up -Build`，公网操作使用 `-Tls`，删除卷必须显式使用 `down -Volumes`，并同步删除对应续期计划任务。`tls-init` 必须保留已有 gateway 容器，用同一 service 的临时 one-off bootstrap 容器完成签发；签发失败时恢复原 gateway，不得把已有公网入口停在 bootstrap 或 stopped 状态。`tls-renew` 和计划任务注册必须确认 `DRIVE_TLS_CERT_NAME` 对应的 Certbot renewal lineage 存在，手工挂载或自签名证书不得伪装成可自动续期证书。
+- `deploy/windows/manage.ps1` 是宿主机管理入口，提供 `config`、`up`、`down`、`status`、`logs`、`backup`、`backup-verify`、`restore`、备份轮换/计划任务、隔离恢复演练/计划任务、`tls-init`、`tls-renew`、`tls-certificates`、TLS 续期计划任务和 `tls-validate-public`；生命周期命令可用 `-Monitoring` 启用监控 profile。构建使用 `up -Build`，公网操作使用 `-Tls`，删除卷必须显式使用 `down -Volumes`，并同步删除 TLS 续期、备份轮换和恢复演练计划任务。`tls-init` 必须保留已有 gateway 容器，用同一 service 的临时 one-off bootstrap 容器完成签发；签发失败时恢复原 gateway，不得把已有公网入口停在 bootstrap 或 stopped 状态。`tls-renew` 和计划任务注册必须确认 `DRIVE_TLS_CERT_NAME` 对应的 Certbot renewal lineage 存在，手工挂载或自签名证书不得伪装成可自动续期证书。`tls-validate-public` 必须拒绝非公网 DNS 结果，验证 HTTP `308`、HTTPS readiness、系统信任链和证书剩余天数，并保存记录。
 - `backup` 的输出根目录必须是仓库外的绝对专用目录，不得是卷根、仓库目录或仓库祖先；既有非空目录必须已经使用本项目 restricted ACL，脚本不得直接重写任意宽范围目录 ACL。正式备份默认要求 `Cert:\CurrentUser\My` 中的 Windows CMS 文档加密证书。脚本从 Compose JSON 读取真实 project、network、service image 和 physical volume name，记录 15 个无 profile 默认服务的实际容器 image ID，静默 gateway、API、beat、Worker 及相关依赖写入面，使用 PostgreSQL custom-format `pg_dump`，并归档停止状态的 MinIO、Redis、OpenSearch 和 TLS 证书卷；失败后必须恢复 source project 原运行、退出与健康状态，通过校验的 `.partial-*` staging 才能原子发布为正式备份目录。
 - `backup` 和 `restore` 必须持有与 `up`、`down`、TLS 写操作相同的 project 级 Windows named mutex，并按每个 source/target physical volume name 获取独立 mutex，避免不同 Compose project 通过同一物理卷并发维护。备份根目录、staging/正式备份、`-ForceRestore` rollback archive 和恢复后的 CMS 明文文件必须自动应用受保护的 restricted ACL，只允许当前用户、SYSTEM 和 Administrators 完全控制，并关闭继承。
 - `backup-verify` 必须校验 `manifest.sha256`、全部工件大小和 SHA-256、PostgreSQL dump 列表、路径边界、15 个默认服务的 image reference/实际 image ID，以及当前 `compose.windows.yml` 的精确 SHA-256、Git commit、项目版本、S3 bucket、OpenSearch index 和 `DRIVE_TLS_CERT_NAME` lineage 名称。卷 tar 在用于恢复前必须先放入无网络、只读根文件系统、只读备份挂载、drop all capabilities 和 `no-new-privileges` 的临时容器/临时卷中预解包扫描，拒绝绝对路径、父目录穿越、硬链接、特殊文件、悬空链接和指向临时卷外的符号链接。
@@ -434,7 +437,7 @@ Windows Docker Compose 要求：
 - `manifest.sha256` 和各工件 SHA-256 只用于完整性校验，不认证备份制作者身份；来源认证必须通过受保护签名、受控传输和保管链完成。
 - Redis/OpenSearch 使用停止后的原始卷归档，恢复只支持相同 image reference、相同 image ID、单节点同拓扑；跨版本或拓扑变化必须改用对应产品支持的迁移或快照机制。
 - `-ForceRestore` rollback archive 是失败时的尽力恢复机制；发生卷驱动、磁盘或 Docker 故障时仍可能需要人工处理，脚本必须保留受限 ACL 归档并报告绝对路径。
-- 当前固定 MinIO Server/Client 镜像仍有 19/12 个 Critical 基线；CI 阻断新增 Critical 并不消除现有风险，正式上线前必须升级到修复镜像或完成可审计的自建修复镜像替换。
+- 当前固定 MinIO Server/Client 镜像仍有 16/9 个 Critical 唯一 ID 基线，其中两个 MinIO 自身 Critical 在固定社区镜像中没有 patched version；CI 阻断允许集之外的新 Critical 并不消除现有风险。正式发布前必须采用受支持修复镜像或完成可审计补丁镜像、SBOM/Grype 重扫、真实 MinIO 和备份恢复兼容验证，风险登记以 `docs/minio-security-risk.md` 为准。
 - 周期维护任务由独立 `beat` 容器运行 Celery beat，至少覆盖过期上传、无引用 blob、孤儿最终对象和容量校准；调度不得与 API 进程混跑。
 - Nginx gateway 必须处理 WebSocket、Range、上传大小限制、超时、真实客户端 IP、安全响应头，以及 API 与外部 S3 端点的分流；公网模板还必须保持证书只读挂载、TLS 1.2/1.3、HTTP 到 HTTPS 跳转、ACME challenge 路径、未知 Host 拒绝和 HSTS。正式发布前必须完成受信证书与双域名 HTTPS 实测。
 

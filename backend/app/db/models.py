@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from app.modules.admin import models as admin_models
 from app.modules.audit import models as audit_models
 from app.modules.auth import models as auth_models
 from app.modules.file import models as file_models
@@ -13,6 +14,7 @@ from app.modules.space import models as space_models
 from app.modules.upload import models as upload_models
 
 __all__ = [
+    "admin_models",
     "audit_models",
     "auth_models",
     "file_models",

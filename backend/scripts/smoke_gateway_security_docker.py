@@ -121,6 +121,9 @@ def run_smoke(*, image: str, template_path: Path) -> dict[str, object]:
 
     container_name = f"enterprise-drive-gateway-security-{uuid4().hex[:12]}"
     host_port = _free_local_port()
+    storage_host_port = _free_local_port()
+    while storage_host_port == host_port:
+        storage_host_port = _free_local_port()
     results: dict[str, int] = {}
     started = False
 
@@ -176,6 +179,8 @@ def run_smoke(*, image: str, template_path: Path) -> dict[str, object]:
                 "DRIVE_PROXY_SEND_TIMEOUT=1s",
                 "--publish",
                 f"127.0.0.1:{host_port}:8080",
+                "--publish",
+                f"127.0.0.1:{storage_host_port}:9000",
                 image,
             ],
             timeout=60,
@@ -190,6 +195,22 @@ def run_smoke(*, image: str, template_path: Path) -> dict[str, object]:
         ):
             if header.lower() not in health_response.lower():
                 raise RuntimeError(f"Missing gateway security header: {header.decode()}")
+
+        unknown_api_status, _ = _send_raw_http(
+            host_port,
+            (b"GET / HTTP/1.1\r\nHost: unexpected.security.test\r\nConnection: close\r\n\r\n"),
+            probe_name="unknown_api_host",
+            allow_empty_rejection=True,
+        )
+        _assert_status(results, "unknown_api_host", unknown_api_status, {0})
+
+        unknown_storage_status, _ = _send_raw_http(
+            storage_host_port,
+            (b"GET / HTTP/1.1\r\nHost: unexpected.security.test\r\nConnection: close\r\n\r\n"),
+            probe_name="unknown_storage_host",
+            allow_empty_rejection=True,
+        )
+        _assert_status(results, "unknown_storage_host", unknown_storage_status, {0})
 
         cl_te_status, _ = _send_raw_http(
             host_port,
@@ -254,6 +275,20 @@ def run_smoke(*, image: str, template_path: Path) -> dict[str, object]:
             probe_name="storage_streaming_body_headers",
         )
         _assert_status(results, "storage_streaming_body_headers", storage_large_status, {100})
+
+        local_storage_status, _ = _send_raw_http(
+            storage_host_port,
+            (
+                b"PUT /large-object HTTP/1.1\r\n"
+                b"Host: localhost\r\n"
+                b"Content-Type: application/octet-stream\r\n"
+                + f"Content-Length: {len(large_body)}\r\n".encode()
+                + b"Expect: 100-continue\r\n"
+                + b"Connection: close\r\n\r\n"
+            ),
+            probe_name="local_storage_host",
+        )
+        _assert_status(results, "local_storage_host", local_storage_status, {100})
     finally:
         if started:
             _run(["docker", "rm", "--force", container_name], check=False)
@@ -275,6 +310,7 @@ def run_smoke(*, image: str, template_path: Path) -> dict[str, object]:
         "image": image,
         "template": str(resolved_template),
         "host_port": host_port,
+        "storage_host_port": storage_host_port,
         "resource_limits": {
             "cpus": "0.25",
             "memory": "128m",

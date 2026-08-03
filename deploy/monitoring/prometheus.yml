@@ -1,0 +1,64 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    service: enterprise-drive
+    environment: production
+
+rule_files:
+  - /etc/prometheus/rules/maintenance-alerts.yml
+  - /etc/prometheus/rules/platform-alerts.yml
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+scrape_configs:
+  - job_name: enterprise-drive-api
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - api:18080
+        labels:
+          component: api
+
+  - job_name: enterprise-drive-workers
+    metrics_path: /metrics
+    static_configs:
+      - targets:
+          - worker-audit:9100
+        labels:
+          component: worker-audit
+          queue: audit
+      - targets:
+          - worker-permission:9100
+        labels:
+          component: worker-permission
+          queue: permission
+      - targets:
+          - worker-search:9100
+        labels:
+          component: worker-search
+          queue: search
+      - targets:
+          - worker-maintenance:9100
+        labels:
+          component: worker-maintenance
+          queue: maintenance
+      - targets:
+          - worker-preview:9100
+        labels:
+          component: worker-preview
+          queue: preview
+
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - 127.0.0.1:9090
+
+  - job_name: alertmanager
+    static_configs:
+      - targets:
+          - alertmanager:9093

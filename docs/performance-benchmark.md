@@ -208,4 +208,4 @@ uv run python -X utf8 -m performance.fixture cleanup `
 
 - 登录和 `/auth/me` 仍只有观测值，没有技术计划书定义的阻断阈值。
 - 本文记录的是一次可重复的隔离目标环境门禁，不替代生产流量回放、长期 soak、故障注入或生产容量规划。
-- `BE-035` 已提供 maintenance 连续失败/stale 指标和 Prometheus 规则；外部 Alertmanager 路由与完整治理看板仍由部署治理继续完成。
+- `BE-035` 已提供 maintenance 连续失败/stale 指标和 Prometheus 规则；Sprint 6 又在可选 `monitoring` profile 中补齐 Alertmanager webhook 路由和 Grafana overview/maintenance 看板，生产环境仍需配置真实接收端并验收告警链路。

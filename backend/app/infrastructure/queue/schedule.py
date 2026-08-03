@@ -94,4 +94,10 @@ def build_beat_schedule(settings: Settings) -> dict[str, dict[str, object]]:
             },
             "options": {"queue": "maintenance"},
         },
+        "cleanup-expired-admin-exports": {
+            "task": "admin.cleanup_expired_exports",
+            "schedule": float(settings.admin_export_cleanup_interval_seconds),
+            "kwargs": {"limit": batch_size},
+            "options": {"queue": "maintenance"},
+        },
     }

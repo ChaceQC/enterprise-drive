@@ -21,6 +21,7 @@ MAINTENANCE_TASK_INTERVAL_SECONDS: dict[str, str] = {
     "file.cleanup_unreferenced_blobs": "blob_cleanup_interval_seconds",
     "file.cleanup_orphaned_objects": "orphan_object_scan_interval_seconds",
     "quota.reconcile_space_usage": "quota_reconciliation_interval_seconds",
+    "admin.cleanup_expired_exports": "admin_export_cleanup_interval_seconds",
 }
 
 _RECORD_RESULT_LUA = """

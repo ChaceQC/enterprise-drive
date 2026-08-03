@@ -54,13 +54,14 @@ Copy-Item .env.windows.example .env.windows
 - API `/metrics` 只暴露 API 进程内的 `http_requests_total`、`http_request_duration_seconds`、上传/下载、权限判断、Outbox 和搜索延迟指标。HTTP 标签使用完整路由模板，不使用原始 URL、路径参数、用户/租户 ID 或 token；抓取 `/metrics` 自身不进入 HTTP 请求指标。
 - 正式 Compose 的 API 默认运行 2 个 Uvicorn worker，使用 `PROMETHEUS_MULTIPROC_DIR=/tmp/enterprise-drive/prometheus` 聚合。Docker runtime entrypoint 只在容器启动前清理旧 `.db` metric 文件；运行中的 worker 不清理共享目录。
 - API 与 Celery Worker 是不同容器。`worker-audit`、`worker-permission`、`worker-search`、`worker-maintenance` 和 `worker-preview` 各自在 Compose 内部 `9100` 暴露 `worker_tasks_total`、`worker_task_duration_seconds` 及本进程业务指标，不发布宿主端口。监控系统应按服务分别抓取，不能只抓 API `/metrics`。
+- 根 Compose 的可选 `monitoring` profile 内置 Prometheus、Alertmanager 和 Grafana；Grafana 只通过 gateway `/grafana/` 访问，三项监控服务都不发布宿主端口。启用命令、secret 和看板说明见 `../docs/maintenance-monitoring.md`。
 - JSON 日志自动包含 `service`、`env`、`request_id`、`task_id`、`trace_id`、`span_id`、tenant/user/resource 上下文；HTTP 请求结束日志包含 route、method、status、`latency_ms`，Worker 结束日志包含 task、queue、status 和耗时。
 - FastAPI 与 Celery 使用 OpenTelemetry。`DRIVE_TRACING_EXPORTER=none` 是默认值，只生成关联上下文；可改为 `console` 或 `otlp_http`。OTLP/HTTP 使用完整 traces endpoint，例如 `http://otel-collector:4318/v1/traces`；认证 header 通过 JSON 格式的 `DRIVE_TRACING_OTLP_HEADERS` 注入，不写入仓库。
 - 常用配置包括 `DRIVE_SERVICE_NAME`、`DRIVE_TRACING_ENABLED`、`DRIVE_TRACING_SAMPLE_RATIO`、`DRIVE_TRACING_EXPORTER`、`DRIVE_TRACING_OTLP_ENDPOINT`、`DRIVE_TRACING_OTLP_HEADERS`、`DRIVE_TRACING_EXPORT_TIMEOUT_SECONDS`、`DRIVE_METRICS_DATABASE_REFRESH_ENABLED` 和 `DRIVE_METRICS_DATABASE_REFRESH_TIMEOUT_SECONDS`。
 
 ### 备份、校验与隔离恢复
 
-`v0.4.0` 已通过根目录 `deploy/windows/manage.ps1` 提供 `backup`、`backup-verify` 和 `restore`。备份目录必须是仓库外的绝对专用目录，不得是卷根、仓库目录或仓库祖先；若既有目录非空，则必须已经使用本项目 restricted ACL，脚本不会直接重写任意宽范围目录 ACL。正式备份默认使用当前 Windows 用户证书存储中的 CMS 文档加密证书保护 `.env.windows`。建议创建可导出私钥的专用证书，并把 PFX 单独保存在加密离线介质中：
+`v0.4.0` 已通过根目录 `deploy/windows/manage.ps1` 提供 `backup`、`backup-verify`、`restore`、`backup-retention` 和 `restore-drill`。备份目录必须是仓库外的绝对专用目录，不得是卷根、仓库目录或仓库祖先；若既有目录非空，则必须已经使用本项目 restricted ACL，脚本不会直接重写任意宽范围目录 ACL。正式备份默认使用当前 Windows 用户证书存储中的 CMS 文档加密证书保护 `.env.windows`。轮换会先验证目录命名、manifest 和 checksum，再按保留天数与最少份数删除；恢复演练使用随机隔离 Compose project，完成后删除 target 容器/卷并写 restricted ACL JSON 记录。两类任务都支持 Windows 周期任务注册/删除。建议创建可导出私钥的专用证书，并把 PFX 单独保存在加密离线介质中：
 
 备份、校验和恢复的临时容器统一使用 `--pull never`，默认限制为 `0.50 CPU`、`512m` 内存、无额外 swap 和 `128` 个 PID；卷归档与 `pg_dump` 默认使用压缩等级 `1`，避免 gzip 高压缩长时间占满 CPU。对应变量为 `DRIVE_BACKUP_HELPER_CPU_LIMIT`、`DRIVE_BACKUP_HELPER_MEMORY_LIMIT`、`DRIVE_BACKUP_HELPER_PIDS_LIMIT`、`DRIVE_BACKUP_GZIP_LEVEL` 和 `DRIVE_BACKUP_PG_DUMP_COMPRESSION_LEVEL`。
 
@@ -118,7 +119,7 @@ Copy-Item .env.windows .env.restore.windows
 
 `-RestoreEnvironmentOutput` 只把备份中的 CMS 环境文件解密到仓库和备份目录外的绝对、尚不存在文件路径，不会替换当前 target 的 `-EnvFile`；父目录必须预先存在且不得经过 reparse point。CMS 明文先保存在内存中，只在本次恢复模式的数据、Alembic revision 和镜像门禁全部成功后的最后一步，通过同目录 restricted ACL 临时文件原子发布；未使用 `-NoStartAfterRestore` 时还会先完成全栈健康和实际容器 image ID 对账。若原子发布时目标路径已被其他进程创建，失败清理会保留该 foreign file。备份根目录、staging/正式备份、rollback archive 和最终 CMS 输出会自动关闭 ACL 继承，并只允许当前用户、SYSTEM、Administrators 完全控制。
 
-Windows CMS 只加密 `.env.windows`。PostgreSQL dump、MinIO/Redis/OpenSearch 原始卷 tar 和包含私钥的 TLS 证书卷 tar 仍依赖 BitLocker、restricted NTFS ACL 与加密外部介质。`manifest.sha256` 和工件 SHA-256 只提供完整性校验，不认证备份制作者身份。Redis/OpenSearch 原始卷恢复只支持相同 image reference、相同 image ID、单节点同拓扑；`-ForceRestore` rollback 属于尽力恢复。当前 MinIO Server/Client 仍有 19/12 个 Critical 基线，正式上线前仍需升级到修复镜像或使用可审计的自建修复镜像。完整操作和验收边界见 `../docs/deployment-windows-docker.md`。
+Windows CMS 只加密 `.env.windows`。PostgreSQL dump、MinIO/Redis/OpenSearch 原始卷 tar 和包含私钥的 TLS 证书卷 tar 仍依赖 BitLocker、restricted NTFS ACL 与加密外部介质。`manifest.sha256` 和工件 SHA-256 只提供完整性校验，不认证备份制作者身份。Redis/OpenSearch 原始卷恢复只支持相同 image reference、相同 image ID、单节点同拓扑；`-ForceRestore` rollback 属于尽力恢复。当前 MinIO Server/Client 仍有 16/9 个 Critical 唯一 ID 基线，正式 `v0.4.0` tag/Release 在受支持修复镜像或可审计补丁镜像完成替换与重扫前保持阻塞。完整操作见 `../docs/deployment-windows-docker.md`，风险登记见 `../docs/minio-security-risk.md`。
 
 ## 常用验证
 
@@ -139,7 +140,7 @@ uv run pytest tests/test_route_security_matrix.py `
   tests/test_security_adversarial.py -q
 ```
 
-矩阵与运行时 OpenAPI 的 64 个路径、85 个操作完全对账，覆盖匿名、CSRF、管理员、内部分享接收人、真实跨租户资源和活跃会话撤权。对抗输入覆盖损坏/超大图片、OCR 页数/像素/体量边界、文档路径与扩展名注入、Range 权限、预签名 URL、用户/组织/配额/安全策略管理、不同 token 外链穷举、Trusted Host 和 CORS。
+矩阵与运行时 OpenAPI 的 73 个路径、99 个操作完全对账，覆盖匿名、CSRF、管理员、内部分享接收人、真实跨租户资源和活跃会话撤权。对抗输入覆盖损坏/超大图片、OCR 页数/像素/体量边界、文档路径与扩展名注入、Range 权限、预签名 URL、用户/组织/空间/统计/维护/导出/配额/安全策略管理、不同 token 外链穷举、Trusted Host 和 CORS。
 
 真实 Nginx 原始 HTTP 安全 smoke：
 
@@ -149,7 +150,7 @@ uv run python -X utf8 scripts/smoke_gateway_security_docker.py `
   --template ..\deploy\windows\nginx\default.conf.template
 ```
 
-脚本只使用本地已有镜像和 `--pull never`，限制为 `0.25 CPU / 128m / 64 PIDs`，验证冲突 CL/TE、重复 Content-Length、API body limit 和 storage `100 Continue`，结束后删除随机测试容器。`backend-ci` 会先显式 pull，再执行同一 smoke。
+脚本只使用本地已有镜像和 `--pull never`，限制为 `0.25 CPU / 128m / 64 PIDs`，验证未知 API/S3 Host、冲突 CL/TE、重复 Content-Length、API body limit、storage `100 Continue` 和默认本机 S3 Host，结束后删除随机测试容器。`backend-ci` 会先显式 pull，再执行同一 smoke。
 
 真实 Docker 可观测性 smoke：
 
@@ -216,6 +217,10 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - `/api/v1/admin/departments` 部门管理：cursor 分页、筛选、详情、创建、重命名、移动、停用和成员增删；路径变更原子更新完整子树并拒绝环路或停用父部门。
 - `/api/v1/admin/groups` 用户组管理：cursor 分页、筛选、详情、创建、更新、停用和成员增删。
 - 用户、部门和用户组写操作使用实体 `version` 前置条件，全部按租户隔离并写入管理审计；成员或组织状态变化递增租户权限版本并触发租户级权限缓存失效。
+- `/api/v1/admin/spaces` 空间管理：按状态、类型、owner 和关键字筛选，支持 cursor 分页、详情、原子创建 owner/root/member/quota、乐观更新和停用；主 owner 变更同步更新根节点 owner 和权限版本事件。
+- `/api/v1/admin/stats/overview` 管理概览：按租户返回用户、空间、节点、版本、空间配额、分享、上传和 Outbox 统计口径。
+- `/api/v1/admin/maintenance` 管理维护任务：查询九个任务的连续失败/stale 状态，创建租户范围异步运行并持久化任务状态。
+- `/api/v1/admin/exports` 异步 CSV 导出：支持审计、空间和用户筛选，输出到私有 `exports/{tenant_id}/{job_id}/`，提供短期预签名下载、CSV formula 防护、最大行数显式失败和保留期清理。
 - 本地账号登录、BFF + HttpOnly Cookie Session、CSRF 校验和会话轮换。
 - 旧 session 复用检测与 session family 吊销。
 - `audit_logs`、`outbox_events` 基础表和迁移。
@@ -289,12 +294,28 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - `POST /api/v1/admin/file-security/policies`
 - `PATCH /api/v1/admin/file-security/policies/{policy_id}`
 - `DELETE /api/v1/admin/file-security/policies/{policy_id}`
+- `GET /api/v1/admin/spaces`
+- `POST /api/v1/admin/spaces`
+- `GET /api/v1/admin/spaces/{space_id}`
+- `PATCH /api/v1/admin/spaces/{space_id}`
+- `DELETE /api/v1/admin/spaces/{space_id}`
+- `GET /api/v1/admin/stats/overview`
+- `GET /api/v1/admin/maintenance/tasks`
+- `POST /api/v1/admin/maintenance/runs`
+- `GET /api/v1/admin/maintenance/runs`
+- `GET /api/v1/admin/maintenance/runs/{run_id}`
+- `POST /api/v1/admin/exports`
+- `GET /api/v1/admin/exports`
+- `GET /api/v1/admin/exports/{export_id}`
+- `GET /api/v1/admin/exports/{export_id}/download`
 
 审计查询仅允许当前租户的系统管理员访问。可使用 `actor_id`、`actor_type`、`action`、`resource_type`、`resource_id`、`result`、`risk_level`、`request_id`、`created_from`、`created_to`、`cursor` 和 `page_size` 组合筛选；结果按 `created_at DESC, id DESC` 返回。普通用户访问、非法时间范围和成功查询都会写入 `admin.audit_logs.queried` 审计事件。
 
 配额管理同样只允许系统管理员访问并按当前租户隔离。账户查询支持 owner type/id 和签名 cursor；创建账户可省略 `expected_limit_bytes`，更新现有账户必须提供当前额度作为乐观前置条件。策略名称租户内唯一，更新/停用使用当前 `limit_bytes` 前置条件，额度不得低于策略账户或普通账户的已用容量。数据库中已存在的租户/用户账户优先于环境默认额度。
 
 文件安全策略管理只允许系统管理员访问并按当前租户隔离。策略至少需要扩展名或 MIME 前缀选择器，支持 `internal/confidential/restricted`、`presigned/proxy/watermark/blocked`、关键字 DLP audit/block、fail-closed 和水印文本模板；更新和停用必须提供 `expected_version`。
+
+空间、统计、维护和导出管理同样只允许当前租户的系统管理员访问。空间写操作使用独立 `spaces.version`，避免与权限缓存的 `permission_version` 混用；维护运行和导出使用 `admin_jobs` 持久化 pending/running/succeeded/failed/expired 状态。异步导出不会静默截断：超过 `DRIVE_ADMIN_EXPORT_MAX_ROWS` 时任务以 `ADMIN_EXPORT_ROW_LIMIT_EXCEEDED` 失败；成功文件由 `admin.cleanup_expired_exports` 按保留期删除。
 
 ## 空间和文件树接口
 
@@ -436,12 +457,17 @@ uv run pytest tests/test_storage_minio_integration.py -q
 维护任务可通过 Celery 任务调用：
 
 - `quota.reconcile_space_usage(tenant_id=None, limit=100, repair=False, request_id=None, scan_all=True, max_items=1000)`
+- `upload.expire_sessions(tenant_id=None, limit=100, request_id=None)`
 - `file.cleanup_expired_trash(tenant_id=None, limit=100, retention_days=None, request_id=None)`
 - `file.cleanup_unreferenced_blobs(tenant_id=None, limit=100, request_id=None)`
 - `file.cleanup_orphaned_objects(tenant_id=None, limit=100, after_storage_key=None, dry_run=True, request_id=None, scan_all=True)`
+- `file.process_tree_operations(limit=100, tenant_id=None)`
+- `share.expire_shares(tenant_id=None, limit=100, request_id=None)`
+- `preview.cleanup_artifacts(tenant_id=None, limit=100, retention_days=None, dry_run=False, request_id=None, scan_all=True)`
+- `admin.cleanup_expired_exports(limit=100, tenant_id=None)`
 - `permission.invalidate_cache(batch_size=None)`
 
-当前六个周期维护任务（含 `file.process_tree_operations`）接入统一健康状态。Celery signal 在任务结束后把连续失败次数和最近成功/失败时间原子写入 Redis，达到阈值时输出结构化告警日志；maintenance Worker 的 `9100/metrics` 暴露连续失败、告警状态、stale、最近完成时间和任务返回计数。Redis 状态写入失败不会改变任务原结果。配置项包括：
+当前九个周期维护任务接入统一健康状态。Celery signal 在任务结束后把连续失败次数和最近成功/失败时间原子写入 Redis，达到阈值时输出结构化告警日志；maintenance Worker 的 `9100/metrics` 暴露连续失败、告警状态、stale、最近完成时间和任务返回计数。Redis 状态写入失败不会改变任务原结果。配置项包括：
 
 - `DRIVE_MAINTENANCE_ALERT_CONSECUTIVE_FAILURES`
 - `DRIVE_MAINTENANCE_ALERT_STALE_INTERVALS`
@@ -449,7 +475,7 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - `DRIVE_MAINTENANCE_STATE_REDIS_TIMEOUT_SECONDS`
 - `DRIVE_MAINTENANCE_HEALTH_REFRESH_SECONDS`
 
-Prometheus 规则位于 `../deploy/monitoring/maintenance-alerts.yml`，完整说明见 `../docs/maintenance-monitoring.md`。
+Prometheus 规则位于 `../deploy/monitoring/maintenance-alerts.yml` 和 `../deploy/monitoring/platform-alerts.yml`。根 Compose 的 `monitoring` profile 会加载这些规则并连接 Alertmanager/Grafana，完整说明见 `../docs/maintenance-monitoring.md`。
 
 ## 下载接口
 

@@ -27,8 +27,16 @@ class FileTreeOperationProcessor:
         self.batch_size = batch_size
         self.audit_service = audit_service
 
-    async def process_pending(self, *, limit: int) -> dict[str, int]:
-        operation_ids = await self.repository.list_runnable_tree_operation_ids(limit=limit)
+    async def process_pending(
+        self,
+        *,
+        limit: int,
+        tenant_id: UUID | None = None,
+    ) -> dict[str, int]:
+        operation_ids = await self.repository.list_runnable_tree_operation_ids(
+            limit=limit,
+            tenant_id=tenant_id,
+        )
         result = {"scanned": len(operation_ids), "completed": 0, "failed": 0}
         for operation_id in operation_ids:
             status = await self.process_operation(operation_id=operation_id)

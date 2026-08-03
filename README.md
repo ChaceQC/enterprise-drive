@@ -13,7 +13,7 @@
 - S3 兼容对象存储
 - OpenSearch
 - Celery
-- Prometheus client、OpenTelemetry
+- Prometheus、Alertmanager、Grafana、OpenTelemetry
 - Windows 11
 - Docker Desktop（WSL2 / Linux containers）
 - Docker Compose v2
@@ -30,7 +30,8 @@
 - 内部分享、外链分享、创建者/接收人列表、站内通知、提取码、过期、次数限制、撤销和授权重算。
 - 预览 Worker、预览产物生命周期、搜索索引/OCR Worker、审计 outbox dispatcher。
 - API/Worker 结构化日志、Prometheus 指标和 OpenTelemetry tracing。
-- Docker Compose 本地开发环境、Windows 11 Docker 正式部署、自动化备份/校验/隔离恢复、Alembic migration、CI 质量门禁。
+- 系统管理员空间、统计、维护任务和异步 CSV 导出 API。
+- Docker Compose 本地开发环境、Windows 11 Docker 正式部署、可选监控栈、自动化备份轮换/校验/隔离恢复、Alembic migration、CI 质量门禁。
 
 ## 二期 Rust 桌面客户端
 
@@ -46,7 +47,7 @@
 
 当前仓库尚无 `frontend/` Web 工程，以下能力已从概念升级为正式 Sprint 和工程任务：
 
-- Sprint 9 / `0.6.0`：文件版本、回收站/批量文件操作、内部分享接收端与通知、用户/部门/用户组管理 API 已完成，继续交付空间管理和统计/维护/导出 API。
+- Sprint 9 / `0.6.0`：文件版本、回收站/批量文件操作、内部分享接收端与通知，以及用户、部门、用户组、空间、配额、统计、维护和导出管理 API 已完成。
 - Sprint 10 / `0.7.0`：TypeScript + React + Vite Web 用户端与管理后台，覆盖批量操作、分享通知，使用生成的 OpenAPI client 和 Playwright E2E。
 - Sprint 11 / `0.8.0`：登录失败防护、账号锁定、密码与会话管理、OIDC/OAuth 2.1 + PKCE、LDAP 同步及对应用户端/管理端身份页面。
 - Sprint 12 / `0.9.0`：继续完成大目录权限重算和治理页面、生命周期策略扩展、审计分区、Outbox dead-letter、备份签名与离线恢复治理；图片/扫描 PDF OCR、旧 Office/ODF 抽取和基础分享/预览生命周期已提前完成。
@@ -56,11 +57,11 @@
 
 ## 当前状态
 
-当前仓库已完成 Sprint 1 工程底座、Sprint 2 空间和文件树、Sprint 3 上传下载、Sprint 4 权限系统以及 Sprint 5 分享、预览、搜索闭环。当前运行时 OpenAPI 为 64 个路径、85 个操作，数据库 migration head 为 `20260803_0020`。已建立 `backend` 后端工程、uv 依赖锁定、FastAPI 应用入口、配置加载、带 request/task/trace 关联的 JSON 结构化日志、`X-Request-ID` 中间件、统一错误响应、健康检查、Prometheus 指标、OpenTelemetry FastAPI/Celery tracing、本地依赖 Compose 和后端 CI。认证基础能力已落地：租户、用户、`auth_sessions` 表，管理员 seed，本地账号登录、服务端 opaque session、HttpOnly Cookie、CSRF 校验、会话轮换和登出。基础审计、outbox 和 Celery audit 队列 dispatcher 已接入；`GET /api/v1/admin/audit-logs` 已提供系统管理员专用的租户隔离审计查询。用户、部门和用户组管理已提供 `/api/v1/admin/users`、`/api/v1/admin/departments`、`/api/v1/admin/groups` 的 cursor 列表、详情、创建、更新、停用及部门/用户组成员管理，所有入口按当前租户隔离并要求系统管理员权限，写操作使用实体 `version` 前置条件、写入审计，用户停用会吊销有效会话，组织成员或状态变化会递增租户权限版本并写入租户级 `permission.changed`。空间和文件树已具备 `spaces`、`nodes`、`file_blobs`、`file_versions` 元数据表，支持创建空间、创建文件夹、按游标列出目录节点、重命名、移动、删除到回收站、恢复、回收站根节点分页和四类批量文件操作。
+当前仓库已完成 Sprint 1 工程底座、Sprint 2 空间和文件树、Sprint 3 上传下载、Sprint 4 权限系统、Sprint 5 分享/预览/搜索，以及 Sprint 6 的代码侧管理与上线治理。当前运行时 OpenAPI 为 73 个路径、99 个操作，数据库 migration head 为 `20260803_0021`。已建立 `backend` 后端工程、uv 依赖锁定、FastAPI 应用入口、配置加载、带 request/task/trace 关联的 JSON 结构化日志、`X-Request-ID` 中间件、统一错误响应、健康检查、Prometheus 指标、OpenTelemetry FastAPI/Celery tracing、本地依赖 Compose 和后端 CI。认证基础能力已落地：租户、用户、`auth_sessions` 表，管理员 seed，本地账号登录、服务端 opaque session、HttpOnly Cookie、CSRF 校验、会话轮换和登出。基础审计、outbox 和 Celery audit 队列 dispatcher 已接入；管理面已覆盖审计、用户、部门、用户组、空间、配额、文件安全、统计、维护任务和异步 CSV 导出，全部按当前租户隔离并要求系统管理员权限，写操作使用实体 `version` 前置条件并写入审计。空间和文件树已具备 `spaces`、`nodes`、`file_blobs`、`file_versions` 元数据表，支持创建空间、创建文件夹、按游标列出目录节点、重命名、移动、删除到回收站、恢复、回收站根节点分页和四类批量文件操作。
 
 Sprint 3 上传主链路已包含 `upload_sessions`、multipart init/presign/complete/abort、秒传、服务端 SHA-256、最终对象归档、失败清理、过期会话回收、限流、下载、容量流水以及对象/回收站治理。multipart complete 使用标准 S3 HTTP 控制面；同 hash 首次上传在 PostgreSQL 中通过原子 upsert 只创建一个 blob，异常 complete 可从对象事实恢复，失败路径会清理受控 `uploads/...` 临时对象。
 
-配额管理已提供 `GET /api/v1/admin/quotas/accounts`、`PUT /api/v1/admin/quotas/accounts/{owner_type}/{owner_id}` 以及配额策略的列表、创建、更新和停用接口。空间、租户、用户和策略账户继续由数据库事实驱动；更新现有额度需要乐观前置条件，新额度不得低于已用容量，数据库中已建立的用户/租户账户优先于环境默认值。`quota.reconcile_space_usage` 当前仍只校准空间账户；部门/临时额度、多维通用校准、空间管理和统计/维护/导出继续归后续管理治理。
+配额管理已提供 `GET /api/v1/admin/quotas/accounts`、`PUT /api/v1/admin/quotas/accounts/{owner_type}/{owner_id}` 以及配额策略的列表、创建、更新和停用接口。空间、租户、用户和策略账户继续由数据库事实驱动；更新现有额度需要乐观前置条件，新额度不得低于已用容量，数据库中已建立的用户/租户账户优先于环境默认值。`quota.reconcile_space_usage` 当前仍只校准空间账户；部门/临时额度和多维通用校准继续归后续治理。
 
 回收站保留期任务 `file.cleanup_expired_trash` 已接入 `maintenance` 队列和 Celery beat，默认保留 30 天。任务按租户扫描超过保留期的删除批次根节点，排除同一 `deleted_at/deleted_by` 批次内的子节点，事务锁定根节点与全部已删除后代后复用彻底删除语义：删除版本和节点、扣减 blob 引用、按版本流水释放全部配额维度、写入搜索删除事件与系统审计。迁移 `20260731_0013` 增加 `idx_nodes_trash_cleanup`，`/metrics` 暴露 `trash_cleanup_total{status}` 和 `trash_cleanup_released_bytes_total`。
 
@@ -74,9 +75,9 @@ Sprint 3 上传主链路已包含 `upload_sessions`、multipart init/presign/com
 
 Sprint 2 剩余增强已闭环：创建文件夹、移动、恢复和对应批量入口支持 `fail`、`keep_both`、`replace`。`keep_both` 自动生成 `名称 (n)`，文件名工具会保留扩展名；`replace` 把当前同名节点移入回收站后再完成新操作，不执行不可恢复覆盖。删除、恢复或彻底删除的子树超过 `DRIVE_FILE_TREE_ASYNC_THRESHOLD` 时返回 HTTP 202 和 operation ID，根节点先进入目标状态，maintenance Worker 通过 `file.process_tree_operations` 使用递归 CTE、`deleted_root_id` 和固定批次分段提交后代状态或容量/blob 清理。`GET /api/v1/files/operations/{operation_id}` 查询进度，失败任务可用 `POST .../retry` 恢复；每个批次可重入，Worker 中断后从 PostgreSQL 事实继续。
 
-`BE-027` 可观测性已完成：API `/metrics` 暴露路由模板维度的请求数/延迟、上传下载、权限、Outbox 和搜索延迟指标，正式 2-worker Uvicorn 使用 Prometheus multiprocess 聚合；5 个 Celery Worker 分别在 Compose 内部 `9100` 暴露 task 数量、状态、耗时及本进程业务指标。JSON 日志自动关联 `service`、`env`、`request_id`、`task_id`、`trace_id` 和 `span_id`；OpenTelemetry exporter 默认 `none`，可配置 Console 或 OTLP/HTTP。
+`BE-027` 可观测性已完成：API `/metrics` 暴露路由模板维度的请求数/延迟、上传下载、权限、Outbox 和搜索延迟指标，正式 2-worker Uvicorn 使用 Prometheus multiprocess 聚合；5 个 Celery Worker 分别在 Compose 内部 `9100` 暴露 task 数量、状态、耗时及本进程业务指标。可选 `monitoring` profile 内置 Prometheus、Alertmanager 和 Grafana，两张预置看板通过 gateway `/grafana/` 访问，三项监控服务都不发布宿主端口。JSON 日志自动关联 `service`、`env`、`request_id`、`task_id`、`trace_id` 和 `span_id`；OpenTelemetry exporter 默认 `none`，可配置 Console 或 OTLP/HTTP。
 
-`BE-030` 已完成 API 与网络安全矩阵；当前运行时 OpenAPI 为 64 个路径、85 个操作，新增内部分享和通知路由已纳入匿名、CSRF、登录态和跨租户门禁。损坏/超大图片、OCR 页数/像素/体量边界、文档路径与扩展名注入、Range 权限、预签名 URL、用户/组织/配额/安全策略管理和轮换 token 外链穷举也已覆盖。Trusted Host/CORS 已通过动态测试，真实 Nginx raw HTTP smoke 已验证 CL/TE 冲突、重复 Content-Length、API 请求体 413 与 storage 流式入口，并固化进 CI。
+`BE-030` 已完成 API 与网络安全矩阵；当前运行时 OpenAPI 为 73 个路径、99 个操作，管理空间、统计、维护和导出路由已纳入匿名、CSRF、管理员和跨租户门禁。损坏/超大图片、OCR 页数/像素/体量边界、文档路径与扩展名注入、Range 权限、预签名 URL、用户/组织/空间/配额/安全策略管理和轮换 token 外链穷举也已覆盖。Trusted Host/CORS 已通过动态测试，真实 Nginx raw HTTP smoke 已验证未知 API/S3 Host、CL/TE 冲突、重复 Content-Length、API 请求体 413 与 storage 流式入口，并固化进 CI。
 
 Sprint 4 权限系统已新增 `space_members` 基础表，创建空间时会自动写入当前用户的 `owner` 角色成员关系。空间列表、文件树、上传初始化、multipart complete 和下载已通过 `PermissionService` 做空间级成员角色检查：`viewer` 可列表和下载，`editor` 可上传与修改，`owner/admin` 可执行全部空间级动作。空间成员管理 API 已接入，支持 owner/admin 添加、调整和移除成员，权限变更会递增空间权限版本并写入审计。节点 ACL 已支持 `user`、`department`、`group` 三类主体，基于 org 事实表展开用户部门和用户组，支持 allow/deny、继承开关和 deny 优先，并已覆盖文件列表、创建文件夹、上传初始化、multipart complete 和下载入口；文件列表响应会通过批量权限评估返回每个子节点的常用动作权限，避免列表页逐项查询。系统管理员现可通过管理 API 完成用户生命周期、部门层级重命名/移动/停用、用户组状态以及部门/组成员变更；部门路径更新会原子改写子树并拒绝环路，所有修改使用版本前置条件、租户隔离和审计。空间成员和节点 ACL 变更都会写入 `permission.changed` outbox event，`permission.invalidate_cache` 会消费该事件并删除匹配的 Redis 权限缓存 key；部门/用户组成员或状态变化会写入租户级事件，按受影响用户或整个租户失效权限缓存。搜索 ACL 已新增 token builder 和 `search.acl_rebuild_requested` outbox event；秒传、multipart complete、重命名、移动、删除、恢复和彻底删除会写入 `search.index_requested`，上传完成还会写入 `search.extract_requested`。`search.dispatch_outbox` 会从 PostgreSQL 重新构建文件索引文档写入 OpenSearch，不再活跃或已彻底删除的文件会删除索引文档，并在 ACL 变更后按 space 或 node 子树保守重建索引 token；搜索抽取支持 UTF-8 文本、可复制正文 PDF、DOCX/PPTX/XLSX、图片 OCR、扫描 PDF OCR，以及 LibreOffice 转换后的旧 Office/ODF 文档。Tesseract OCR 受页数、像素、渲染字节、正文字符数和命令超时边界约束，抽取结果写入 `file_versions.search_text` 并刷新索引 `content` 字段。预览链路使用 Pillow、Poppler 和 LibreOffice 生成私有 WebP 产物；`GET /api/v1/files/{node_id}/preview` 会刷新 `last_accessed_at` 并返回短期私有 URL，`preview.cleanup_artifacts` 周期清理非当前旧版本产物和超期孤儿预览对象。`GET /api/v1/search` 已接入 allow/deny token、签名 cursor、HTML 编码高亮、限流和 `read_meta` 二次权限校验。最终对象的 DB 驱动清理由 `file.cleanup_unreferenced_blobs` 承担；对象存储中没有 DB 元数据的孤儿最终对象由 `file.cleanup_orphaned_objects` 承担。
 
@@ -169,21 +170,22 @@ GitHub `backend-ci` 同时启动临时 PostgreSQL 16 容器、执行 Alembic upg
 - `docs/deployment-windows-docker.md`：Windows 11 Docker Desktop 正式部署、运维、备份与回滚说明。
 - `docs/deployment-preview-worker.md`：预览 Worker 资源配额和部署说明。
 - `docs/maintenance-monitoring.md`：maintenance 周期任务状态、指标、告警规则和排障顺序。
+- `docs/minio-security-risk.md`：固定 MinIO 镜像的 Critical 基线、可达性缓解和正式发布门禁。
 - `docs/performance-benchmark.md`：`BE-029` Locust 性能基准、fixture、资源边界和报告格式。
 - `docs/security-testing.md`：`BE-030` 威胁模型、Bandit/pip-audit 门禁、登录防护和安全修复记录。
 
 ## 部署说明
 
-正式部署目标为 Windows 11 + Docker Desktop（WSL2/Linux containers）。仓库根 `compose.windows.yml` 是唯一正式编排入口，根 `.env.windows.example` 是环境变量模板，`deploy/windows/manage.ps1` 是 PowerShell 管理入口；`backend/docker-compose.yml` 继续只用于本地依赖开发。`manage.ps1 up` 默认使用 `--no-build --pull never`，只启动已经准备好的本地镜像；首次部署或代码变更后的镜像构建必须显式使用 `up -Build`，第三方镜像拉取也应单独执行，避免把下载、构建和服务启动混入备份测试。
+正式部署目标为 Windows 11 + Docker Desktop（WSL2/Linux containers）。仓库根 `compose.windows.yml` 是唯一正式编排入口，根 `.env.windows.example` 是环境变量模板，`deploy/windows/manage.ps1` 是 PowerShell 管理入口；`backend/docker-compose.yml` 继续只用于本地依赖开发。`manage.ps1 up` 默认使用 `--no-build --pull never`，只启动已经准备好的本地镜像；首次部署或代码变更后的镜像构建必须显式使用 `up -Build`。可选监控栈使用 `config/up/down/status/logs -Monitoring`；正式启用时必须配置非示例 Grafana 密码和可达的 Alertmanager webhook 文件。第三方镜像拉取、项目镜像构建、服务启动和备份恢复测试保持为独立步骤。
 
 应用本身也会在 `DRIVE_ENVIRONMENT=production` 时执行 fail-fast 配置校验，因此绕过 `manage.ps1` 直接启动 API、Worker、beat、migration 或 seed 仍会拒绝示例/过短 secret、无强密码连接 URL、关闭限流、Wildcard Trusted Hosts 和不安全公网 HTTP/Cookie 配置。默认 `localhost:18080/19000` HTTP 基线仅在全部浏览器与 S3 公共端点均为 localhost/回环地址时允许。
 
 Compose 内的 Nginx gateway 是唯一宿主端口入口。默认本机模式继续使用 API `http://localhost:18080` 和 S3 外部端点 `http://localhost:19000`。公网 TLS 模式已提供 ACME HTTP-01 bootstrap、Certbot 证书卷、TLS server block、HTTP `308` 跳转、`80/443` 双域名 Host 分流、证书续期与 Nginx 热重载命令；生产使用 `https://drive.example.com`、`https://storage.example.com` 时，必须先配置真实 DNS、邮箱、API/MinIO CORS、Trusted Hosts、Secure Cookie 和 S3 公共端点，执行 `manage.ps1 tls-init -Tls` 后再运行 `manage.ps1 up -Tls -Build` 启动全部 Worker 和 beat。API、Worker、PostgreSQL、Redis、OpenSearch、MinIO API/Console 等内部服务不发布宿主端口；Worker metrics `9100` 也只暴露在 Compose 网络内。容器内 API/Worker 通过 `http://minio:9000` 访问对象存储，不能把内部服务名返回给浏览器。
 
-正式编排还包含真实 PostgreSQL `/readyz` 探针、独立 Celery beat、隔离的 Preview Worker、named volumes 和 `v0.4.0` 自动化备份恢复。`manage.ps1 backup` 会生成 PostgreSQL custom dump、MinIO/Redis/OpenSearch/TLS 停止状态卷归档、CMS 环境文件密文和严格 manifest；manifest 从 15 个无 profile 默认服务的实际 Compose 容器记录 image ID，并记录工件大小/SHA-256、精确 `compose.windows.yml` SHA-256、Git commit、项目版本、S3 bucket、OpenSearch index、`DRIVE_TLS_CERT_NAME` lineage 名称、Alembic revision 与 WAL LSN。`backup-verify` 要求当前 Git HEAD、Compose、项目版本、configuration lineage 和全部 15 个服务镜像与 manifest 精确一致，并在无网络、只读、drop capabilities 的临时容器/卷中预解包扫描 tar。备份辅助容器默认限制为 `0.50 CPU / 512m memory / 512m memory-swap / 128 PIDs`，`pg_dump` 和 gzip 默认使用压缩等级 `1`；这些值可通过 `.env.windows` 中的 `DRIVE_BACKUP_*` 变量调整，但不得取消资源边界。
+正式编排还包含真实 PostgreSQL `/readyz` 探针、独立 Celery beat、隔离的 Preview Worker、named volumes 和 `v0.4.0` 自动化备份恢复。`manage.ps1 backup` 会生成 PostgreSQL custom dump、MinIO/Redis/OpenSearch/TLS 停止状态卷归档、CMS 环境文件密文和严格 manifest；manifest 从 15 个无 profile 默认服务的实际 Compose 容器记录 image ID，并记录工件大小/SHA-256、精确 `compose.windows.yml` SHA-256、Git commit、项目版本、S3 bucket、OpenSearch index、`DRIVE_TLS_CERT_NAME` lineage 名称、Alembic revision 与 WAL LSN。`backup-verify` 要求当前 Git HEAD、Compose、项目版本、configuration lineage 和全部 15 个服务镜像与 manifest 精确一致，并在无网络、只读、drop capabilities 的临时容器/卷中预解包扫描 tar。`backup-retention` 按保留天数和最少份数轮换经过校验的托管备份，`restore-drill` 把最新或指定备份恢复到随机隔离 Compose project 并在结束后删除 target 容器/卷；两类操作都写入仓库外 restricted ACL JSON 记录，并支持 Windows 周期任务注册/删除。备份辅助容器默认限制为 `0.50 CPU / 512m memory / 512m memory-swap / 128 PIDs`，`pg_dump` 和 gzip 默认使用压缩等级 `1`；这些值可通过 `.env.windows` 中的 `DRIVE_BACKUP_*` 变量调整，但不得取消资源边界。
 
 `backup` 和 `restore` 同时使用 project 级与逐 physical volume Windows mutex；备份根目录会拒绝卷根、仓库目录/祖先及未预先使用 restricted ACL 的既有非空目录，staging/正式备份、`-ForceRestore` rollback archive 和恢复后的 CMS 文件会自动应用只允许当前用户、SYSTEM、Administrators 的 restricted ACL。`restore` 只接受不同且已停止的 Compose project，并拒绝 source/target 卷重叠、错误卷标签、foreign attachment；使用 `-ForceRestore` 时会先归档原非空卷，失败后还原原非空卷、清空原空卷、删除新卷并停止 target，回滚异常则保留并报告归档路径。恢复提交后的 rollback cleanup 异常只报告维护失败，不会反向回滚已恢复数据。CMS 明文输出必须使用仓库和备份目录外的绝对新文件路径、已有父目录，并只在本次恢复模式全部门禁成功的末尾原子发布；若发布竞态中目标被其他进程创建，脚本保留该 foreign file。真实随机 source/target project 演练已验证数据库和对象回到同一备份点、CMS 环境文件解密、TLS lineage、Worker/beat、gateway 与健康检查。
 
-备份安全边界如下：Windows CMS 只加密 `.env.windows`，PostgreSQL dump、MinIO/Redis/OpenSearch 原始卷归档和 TLS 证书卷归档仍依赖 BitLocker、restricted NTFS ACL 与加密外部介质；SHA-256 只证明内容与 manifest 一致，不认证备份制作者身份；Redis/OpenSearch 原始卷只适用于相同 image reference/image ID、单节点同拓扑；`-ForceRestore` rollback 属于尽力恢复。当前 MinIO Server/Client 仍有 19/12 个 Critical 基线，CI 阻断新增 Critical 不代表现有风险已经消除。
+备份安全边界如下：Windows CMS 只加密 `.env.windows`，PostgreSQL dump、MinIO/Redis/OpenSearch 原始卷归档和 TLS 证书卷归档仍依赖 BitLocker、restricted NTFS ACL 与加密外部介质；SHA-256 只证明内容与 manifest 一致，不认证备份制作者身份；Redis/OpenSearch 原始卷只适用于相同 image reference/image ID、单节点同拓扑；`-ForceRestore` rollback 属于尽力恢复。当前 MinIO Server/Client 仍有 16/9 个 Critical 唯一 ID 基线，其中两个 MinIO 自身 Critical 在固定社区镜像中没有上游 patched version；CI 阻断新增 Critical 不代表现有风险已经消除。正式 `v0.4.0` tag/Release 在采用受支持修复镜像或可审计补丁镜像并重新扫描前保持阻塞，详见 [MinIO 安全风险与发布门禁](docs/minio-security-risk.md)。
 
-本机已用自签名双域名证书在标准宿主 `80/443` 启动完整编排，验证 HTTP `308`、API readiness、MinIO CORS/S3v4、临时 ACME bootstrap、原 gateway 恢复和彻底清理；公网受信证书签发与真实续期仍需要生产 DNS/网络环境。完整流程见 [Windows 11 Docker 部署说明](docs/deployment-windows-docker.md)，预览资源限制见 [预览 Worker 部署说明](docs/deployment-preview-worker.md)。Kubernetes、systemd 仅作为未来可选迁移方案。
+本机已用自签名双域名证书在标准宿主 `80/443` 启动完整编排，验证 HTTP `308`、API readiness、MinIO CORS/S3v4、临时 ACME bootstrap、原 gateway 恢复和彻底清理；公网受信证书签发与真实续期仍需要生产 DNS/网络环境。生产完成后使用 `tls-validate-public` 一次性验证双域名只解析到公网地址、HTTP 精确 `308`、HTTPS readiness、证书链和剩余有效期，并保存 JSON 记录。完整流程见 [Windows 11 Docker 部署说明](docs/deployment-windows-docker.md)，预览资源限制见 [预览 Worker 部署说明](docs/deployment-preview-worker.md)。Kubernetes、systemd 仅作为未来可选迁移方案。

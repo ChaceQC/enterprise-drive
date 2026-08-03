@@ -73,9 +73,9 @@
 上传/下载链路、秒传、multipart、服务端 hash 校验、容量账本和彻底删除容量释放是当前最重要的企业级主链路。2026-08-03 已按阶段表完成本节原有补强项；以下记录当前已落地结果及继续留在后续治理中的真实边界：
 
 - MinIO multipart create/complete/abort 已改为 `S3MultipartControlClient`：通过公共 `get_presigned_url` 生成内部短期控制 URL，再发送标准 S3 HTTP POST/DELETE 和 XML 请求，不再依赖 `_create_multipart_upload`、`_complete_multipart_upload`、`_abort_multipart_upload`。依赖范围锁定为 `minio>=7.2.20,<8`，控制请求超时与 URL 有效期可配置；升级必须通过真实 MinIO 集成门禁。
-- 对象复制到最终 `objects/{tenant_id}/{hash_prefix}/{content_hash}` 成功但数据库最终化失败后，可能出现孤儿最终对象。`file.cleanup_orphaned_objects` 反向扫描任务、`BE-031/BE-032` 的真实 MinIO 主路径及 `BE-035` 连续失败/stale 指标告警均已完成；外部 Alertmanager 路由和完整治理看板继续后续交付。
+- 对象复制到最终 `objects/{tenant_id}/{hash_prefix}/{content_hash}` 成功但数据库最终化失败后，可能出现孤儿最终对象。`file.cleanup_orphaned_objects` 反向扫描任务、`BE-031/BE-032` 的真实 MinIO 主路径及 `BE-035` 连续失败/stale 指标告警均已完成；Alertmanager 企业 webhook 路由和 Grafana overview/maintenance 看板已纳入可选 `monitoring` profile，实际 webhook 端点与值班流程由生产环境配置。
 - `BE-033` 已补齐空间、可选用户、可选租户和文件策略四类容量账户，上传初始化执行快速检查，版本创建通过原子条件更新和统一 ledger 扣减，彻底删除按版本流水释放全部维度。系统管理员现可分页查询账户、创建或更新空间/租户/用户额度，并列表、创建、更新和停用策略；更新使用乐观前置条件且额度不得低于已用容量。部门额度、临时上传占用上限和多维通用校准继续后续治理。
-- `BE-035` 已建立维护任务的 Redis 连续失败状态、结构化阈值告警、stale/时间戳 Gauge、通用任务结果计数和 Prometheus 规则文件；`file.process_tree_operations`、`share.expire_shares` 与 `preview.cleanup_artifacts` 均已接入同一健康状态。外部 Alertmanager 路由和完整看板继续后续交付。
+- `BE-035` 已建立维护任务的 Redis 连续失败状态、结构化阈值告警、stale/时间戳 Gauge、通用任务结果计数和 Prometheus 规则文件；`file.process_tree_operations`、`share.expire_shares` 与 `preview.cleanup_artifacts` 均已接入同一健康状态。可选 `monitoring` profile 已补齐 Prometheus、Alertmanager webhook 路由和 Grafana overview/maintenance 看板，生产部署只需注入真实接收端并执行告警链路验收。
 - `BE-034` 已在短期预签名直连之外补充内部受控代理下载、单段 HTTP Range、流式对象读取和范围审计。新增租户隔离的文件安全策略后，当前版本和历史版本可按扩展名/MIME 自动选择预签名、代理、水印或阻断，并执行关键字 DLP audit/block 与 fail-closed；内部图片/PDF 支持动态水印，公开外链支持预签名或水印派生对象，搜索正文已支持图片/扫描 PDF OCR。外链代理流、历史版本专用水印、legal hold 和高级内容分类继续 `GOV-001`。
 - 同 hash 首次上传竞争已使用数据库 savepoint 解析唯一约束竞争：并发事务只创建一个 blob，后续事务复用并原子增加引用；真实 PostgreSQL 双会话测试确认 `1` 个 blob、`ref_count=2`。complete 响应丢失时会通过对象 stat 恢复结果，hash、归档或数据库最终化失败会最佳努力 abort multipart 并删除 `uploads/...` 临时对象，最终对象孤儿继续由既有反向扫描兜底。
 - 真实对象存储集成测试已在 CI 和本机真实 Docker 中覆盖标准 HTTP multipart、预签名 PUT/GET、copy、delete、list、hash 校验和孤儿最终对象扫描；单元门禁覆盖 complete 成功但响应丢失后的 stat 恢复，以及不存在 upload 的幂等 abort。
@@ -101,14 +101,14 @@
 ### Sprint 6：管理、治理、上线
 
 - 管理员审计查询 API。（已完成 `GET /api/v1/admin/audit-logs`，仅系统管理员可访问，按租户隔离，支持用户、资源、动作、结果、风险、请求 ID、时间范围和签名 cursor 筛选，并审计成功与拒绝查询）
-- 用户、部门、用户组和配额账户/策略管理 API 已完成；空间、统计、维护和导出等其余管理面按 Sprint 9 的 `BE-044`、`BE-045` 继续交付。
+- 用户、部门、用户组、空间、配额账户/策略、审计、统计、维护和导出管理 API 已完成；`BE-044`、`BE-045` 已闭环。
 - 生命周期治理、孤儿对象扫描和容量治理增强。（`BE-026` 已完成过期上传、无引用 blob 和回收站保留期清理；回收站任务按删除批次根节点加锁清理，释放容量、扣减 blob 引用并写入审计、搜索事件和指标；完整策略化治理继续由 `BE-047` 承担）
 - 多维配额核心运行时及账户/策略管理 API 已完成；部门/临时额度、通用校准和容量治理看板继续由后续管理治理提供。维护任务定时调度、连续失败告警和清理指标已由 `BE-035` 完成核心运行时。
 - 高密级下载治理：后端流式代理、单段 HTTP Range、自动选路、图片/PDF 水印、关键字 DLP、图片/扫描 PDF OCR 和增强审计已完成；外链代理流、历史版本专用水印、legal hold 和高级内容分类继续后续交付。
-- Windows 11 Docker Desktop 正式部署：多阶段 Dockerfile、根 `compose.windows.yml`、Compose 内 Nginx gateway、根 `.env.windows.example` 和 `deploy/windows/manage.ps1`。（已完成本机 HTTP 基线、公网 ACME/TLS 配置、续期命令及 `backup`、`backup-verify`、`restore` 自动化；真实 DNS/受信证书验收待生产环境执行）
+- Windows 11 Docker Desktop 正式部署：多阶段 Dockerfile、根 `compose.windows.yml`、Compose 内 Nginx gateway、根 `.env.windows.example` 和 `deploy/windows/manage.ps1`。（已完成本机 HTTP、公网 ACME/TLS、续期、`tls-validate-public` 验收入口、可选 monitoring profile、`backup`/`backup-verify`/`restore`、备份轮换和周期恢复演练自动化；真实 DNS/受信证书记录待生产环境执行）
 - API、migration、seed、MinIO 初始化、按队列隔离的 Worker、Celery beat、PostgreSQL、Redis、MinIO、OpenSearch 的完整编排；只有 gateway 发布宿主端口，默认 HTTP `18080/19000`，公网模式由 gateway 发布 `80/443` 并按 API/存储域名 Host 分流。（已完成）
 - S3 容器内端点和浏览器外部端点分离；默认本机 API 为 `http://localhost:18080`、S3 外部端点为 `http://localhost:19000`，均由 gateway 发布；生产支持 API/存储独立域名的 Host 分流并保留原始 Host。（已完成）
-- named volumes、真实 `/readyz` PostgreSQL 探针、Preview Worker 资源限制、定时维护任务和数据库连接池边界。（已完成）`v0.4.0` 已交付 PostgreSQL custom dump、MinIO/Redis/OpenSearch/TLS 停止状态卷归档、CMS 环境文件保护、15 个默认服务实际容器 image ID 与精确 Compose/Git/版本/configuration lineage 门禁、project/逐物理卷 mutex、restricted ACL、隔离 tar 预扫描、`-ForceRestore` rollback archive、失败恢复和不同 Compose project 真实端到端演练；后续继续建设周期恢复演练、备份介质轮换、告警和治理看板。
+- named volumes、真实 `/readyz` PostgreSQL 探针、Preview Worker 资源限制、定时维护任务和数据库连接池边界。（已完成）`v0.4.0` 代码侧已交付 PostgreSQL custom dump、MinIO/Redis/OpenSearch/TLS 停止状态卷归档、CMS 环境文件保护、15 个默认服务实际容器 image ID 与精确 Compose/Git/版本/configuration lineage 门禁、project/逐物理卷 mutex、restricted ACL、隔离 tar 预扫描、`-ForceRestore` rollback archive、失败恢复、备份保留轮换、Windows 周期任务和随机隔离恢复演练；离线介质、来源签名和完整包加密继续后续治理。
 - Kubernetes、systemd 降为未来可选迁移方案，不作为当前交付目标。
 
 ### Sprint 7：Rust 桌面客户端基础（目标版本 `0.5.0`）
@@ -136,7 +136,7 @@
 - 文件版本：版本列表、指定版本下载、回滚为新版本、版本审计和容量流水。（`BE-036` 已完成核心 API：签名 cursor、DTP/1 历史版本下载、当前版本前置条件、不可变回滚、多维配额和事件）
 - 回收站与批量操作：回收站分页列表、批量删除、移动、恢复和彻底删除；批量结果逐项返回，所有写操作支持 `Idempotency-Key`。（`BE-037` 已完成核心 API、迁移、部分失败和幂等重放）
 - 内部分享接收端：“分享给我的”、创建者分享列表、接收人详情与下载、部门/用户组成员变化后的授权重算、撤销和站内通知。（`BE-038`、`BE-039` 已完成）
-- 管理 API：用户、部门、用户组、空间、配额、审计、统计、维护任务和导出，所有管理操作写审计并支持 cursor 分页。（用户、部门、用户组、配额和审计子集已完成；`BE-044` 尚余空间管理，`BE-045` 尚余统计、维护和导出）
+- 管理 API：用户、部门、用户组、空间、配额、审计、统计、维护任务和导出，所有管理操作写审计并支持 cursor 分页。（`BE-044`、`BE-045` 已完成；异步维护/导出状态由 `admin_jobs` 持久化）
 - 完成上述接口的 OpenAPI、迁移、权限、审计、并发、容量和端到端测试，为 Web 与桌面客户端提供稳定契约。
 
 ### Sprint 10：Web 用户端与管理后台（目标版本 `0.7.0`）
@@ -188,9 +188,11 @@
 
 ## 5. 当前下一步
 
-2026-08-03 Sprint 5 剩余项已完成：新增创建者分享列表、“分享给我的”、接收人详情与 DTP/1 下载、`share_recipient_grants` 物化授权、部门/用户组成员变化后的异步重算、站内通知列表/已读/失效、过期分享维护任务；预览产物记录最后访问时间，并周期清理旧版本产物和超期孤儿对象；搜索 Worker 接入 Tesseract 图片/扫描 PDF OCR 和 LibreOffice 旧 Office/ODF 转换抽取，使用内容处理镜像、独立 tmpfs 和子进程回收边界。运行时 OpenAPI 为 64 个路径、85 个操作，migration head 为 `20260803_0020`。Sprint 5 尚未完成项现为空；下一项进入 `BE-044` 剩余空间管理和 `BE-045` 统计、维护、导出管理 API。
+2026-08-03 Sprint 6 剩余代码与治理入口已完成：`BE-044` 新增系统管理员空间 cursor CRUD、独立 `spaces.version`、owner/root/member/quota 原子创建和 owner/root 一致更新；`BE-045` 新增租户统计、九项维护状态与异步运行、审计/空间/用户 CSV 导出、短期下载和过期清理。运行时 OpenAPI 为 73 个路径、99 个操作，安全矩阵同步到 99 项，migration head 为 `20260803_0021`。根 Compose 新增不发布宿主端口的 Prometheus/Alertmanager/Grafana `monitoring` profile；Windows 管理入口新增备份轮换、计划任务、随机隔离恢复演练和真实公网 TLS JSON 验收。代码侧 Sprint 6 与 Sprint 9 已闭环；下一步只处理生产环境才能完成的 DNS/受信证书记录，以及 MinIO 修复镜像与正式 `v0.4.0` 发布门禁，随后进入桌面设备会话/增量同步契约。
 
-2026-08-03 Sprint 4 原剩余的用户、部门和用户组管理 API 已完成：新增 21 个系统管理员操作，覆盖三类实体的 cursor 列表、详情、创建、更新、停用及部门/用户组成员增删；所有入口按租户隔离，写操作使用实体 `version` 乐观前置条件、写入审计并联动会话或租户权限版本。当时运行时 OpenAPI 为 58 个路径、79 个操作，migration head 为 `20260803_0019`。`BE-044` 已完成用户、组织和配额子集，尚余空间管理；其后 `BE-038`、`BE-039` 已由上方 Sprint 5 完成记录闭环。
+2026-08-03 Sprint 5 剩余项已完成：新增创建者分享列表、“分享给我的”、接收人详情与 DTP/1 下载、`share_recipient_grants` 物化授权、部门/用户组成员变化后的异步重算、站内通知列表/已读/失效、过期分享维护任务；预览产物记录最后访问时间，并周期清理旧版本产物和超期孤儿对象；搜索 Worker 接入 Tesseract 图片/扫描 PDF OCR 和 LibreOffice 旧 Office/ODF 转换抽取，使用内容处理镜像、独立 tmpfs 和子进程回收边界。当时运行时 OpenAPI 为 64 个路径、85 个操作，migration head 为 `20260803_0020`；该阶段记录的下一项是 `BE-044` 剩余空间管理和 `BE-045` 统计、维护、导出管理 API，现已由上方 Sprint 6 记录闭环。
+
+2026-08-03 Sprint 4 原剩余的用户、部门和用户组管理 API 已完成：新增 21 个系统管理员操作，覆盖三类实体的 cursor 列表、详情、创建、更新、停用及部门/用户组成员增删；所有入口按租户隔离，写操作使用实体 `version` 乐观前置条件、写入审计并联动会话或租户权限版本。当时运行时 OpenAPI 为 58 个路径、79 个操作，migration head 为 `20260803_0019`；当时 `BE-044` 只完成用户、组织和配额子集，空间管理现已由上方 Sprint 6 记录闭环，`BE-038`、`BE-039` 也已由 Sprint 5 完成。
 
 2026-08-02 `BE-037` 回收站与批量文件操作已实现：回收站按 `deleted_at/id` 签名 cursor 仅列删除批次根节点；批量删除、移动、恢复和彻底删除最多处理 100 项，每项使用 savepoint 并逐项返回结果。新增 `file_batch_operations` 与 `20260801_0015` migration，按租户、用户、操作和 key hash 保存请求 hash/最终响应；同请求重放、异请求冲突。其后的 `BE-038`、`BE-039` 已完成。
 
@@ -216,9 +218,9 @@
 
 2026-07-31 `BE-030` 首轮安全测试修复已通过提交 `25acecf` 和 GitHub Actions run `30660034411` 闭环：对当前虚拟环境 123 个实际包的审计发现 20 条记录全部来自攻击者可达的图片预览依赖 `Pillow 12.2.0`，已升级并锁定 `Pillow 12.3.0`；加入项目内 `bandit` 与 `pip-audit` dev 依赖和 CI 门禁，升级后审计 145 个环境包为 0 已知漏洞，Bandit 中危/高危为 0。登录新增来源 IP 与账号哈希双维 Redis 固定窗口，不存在租户/用户时仍执行 Argon2id dummy verify；422 校验错误不再回显原始 `input`。随后 production `Settings` 应用内 fail-fast 已通过提交 `a52b4ce` 和 GitHub Actions run `30661668693` 闭环：API、Worker、beat、migration 和 seed 会拒绝示例/过短 secret、无强密码连接 URL、关闭限流、Wildcard Trusted Hosts 及不安全公网 CORS/S3/Cookie 配置，同时保留纯 localhost/回环 HTTP 基线；完整后端门禁为 `188 passed, 4 skipped`，受限 runtime 镜像和真实 PostgreSQL/认证 Redis/API/Worker Docker smoke 均已通过并彻底清理。2026-08-01 已继续完成 route 身份/租户、撤权、恶意文件、Range、预签名 URL、外链穷举、Host/CORS 和真实 Nginx 原始 HTTP 门禁，`BE-030` 进入提交与远端 CI 收尾。
 
-2026-07-31 已把此前仅停留在接口示例、技术建议或“后续接入”的能力补成 Sprint 9 至 Sprint 13、工程任务和远期 Backlog。当前执行顺序保持：先完成 Sprint 6 和 `v0.4.0` 正式发布，再推进 Sprint 7/8 Rust 桌面端；随后按核心产品闭环、Web 用户端与管理后台、身份安全、规模治理、`v1.0.0` 稳定发布推进。桌面端所依赖的版本前置条件和增量变更契约继续优先交付，Web 页面不得反向定义后端业务规则。
+2026-07-31 已把此前仅停留在接口示例、技术建议或“后续接入”的能力补成 Sprint 9 至 Sprint 13、工程任务和远期 Backlog。2026-08-03 Sprint 6 和 Sprint 9 的代码侧能力已完成；正式 `v0.4.0` 仍需生产 DNS/受信证书记录和 MinIO 修复镜像门禁。当前并行顺序为：外部发布门禁不伪造完成，同时开始桌面端依赖的设备会话与增量同步契约；随后推进 Sprint 7/8 Rust 桌面端、Web 用户端与管理后台、身份安全、规模治理和 `v1.0.0` 稳定发布。Web 页面不得反向定义后端业务规则。
 
-2026-07-31 已把 Rust 桌面客户端从笼统的二期增强项提升为 Sprint 7 和 Sprint 8 正式路线。当前仓库仍没有桌面客户端代码；先完成 Sprint 6、发布 `v0.4.0`，随后以 `0.5.0` 为桌面 Alpha 目标建立 `desktop/` Cargo workspace。开工顺序固定为：先提交桌面架构 ADR 和后端设备会话/增量同步契约，再实现 Rust API client、本地索引和单向传输，最后进入双向同步、冲突处理和签名发布。
+2026-07-31 已把 Rust 桌面客户端从笼统的二期增强项提升为 Sprint 7 和 Sprint 8 正式路线。当前仓库仍没有桌面客户端代码；Sprint 6 代码侧完成后，以 `0.5.0` 为桌面 Alpha 目标建立 `desktop/` Cargo workspace，不等待无法在本机伪造的生产 DNS 证据。开工顺序固定为：先提交桌面架构 ADR 和后端设备会话/增量同步契约，再实现 Rust API client、本地索引和单向传输，最后进入双向同步、冲突处理和签名发布；正式发布仍不得绕过 MinIO 风险门禁。
 
 2026-07-31 已正式启用 `Drive Transfer Protocol v1`（线协议标识 `DTP/1`）：新增 `docs/drive-transfer-protocol-v1.md`，上传、文件下载和外链下载公开可选 `X-Drive-Transfer-Protocol` 协商头，未知版本返回 HTTP 426，全部传输响应返回 `protocol_version=DTP/1`。协议自定义的是 HTTPS 之上的分片、断点、校验、幂等和错误状态机，数据面继续使用预签名 HTTPS 直达 MinIO/S3，不自研 TCP/UDP、TLS、QUIC 或私有加密。批量分片签名、服务端并发提示和 Rust 持久化传输队列继续由 `DC-006` 实现。
 
@@ -226,6 +228,6 @@
 
 备份和恢复会自动把备份根目录、staging/正式备份、rollback archive 与最终 CMS 明文文件限制为当前用户、SYSTEM、Administrators，并在无网络、只读根文件系统、drop capabilities 的临时容器/卷中预解包扫描 tar。`-RestoreEnvironmentOutput` 必须是仓库和备份目录外的绝对新文件路径，父目录预先存在；CMS 明文只在本次恢复模式全部门禁成功的末尾通过同目录临时文件原子发布，发布竞态中的 foreign file 不会被失败清理删除。恢复提交后的 rollback archive 清理异常只报告维护失败并保留路径，不会再次清空或回滚已恢复卷。
 
-剩余边界必须保持明确：Windows CMS 只加密 `.env.windows`，其余数据库、对象、索引、队列和 TLS 卷归档仍依赖 BitLocker、restricted NTFS ACL 与加密外部介质；SHA-256 只校验完整性，不认证制作者身份；Redis/OpenSearch 原始卷只支持相同 image reference/image ID、单节点同拓扑；`-ForceRestore` rollback 是尽力恢复，异常时受限 ACL 归档会保留并报告路径；当前 MinIO Server/Client 19/12 个 Critical 基线仍是上线风险。本阶段收尾门禁包括 Windows fake Docker/CMS smoke、真实备份恢复 integration、完整后端与部署检查、文档同步和 GitHub Actions 结果确认；随后恢复推进 MinIO multipart 稳定封装、高密级下载、多维配额和治理告警。
+剩余边界必须保持明确：Windows CMS 只加密 `.env.windows`，其余数据库、对象、索引、队列和 TLS 卷归档仍依赖 BitLocker、restricted NTFS ACL 与加密外部介质；SHA-256 只校验完整性，不认证制作者身份；Redis/OpenSearch 原始卷只支持相同 image reference/image ID、单节点同拓扑；`-ForceRestore` rollback 是尽力恢复，异常时受限 ACL 归档会保留并报告路径。2026-08-03 扫描复核把 MinIO Server/Client Critical 唯一 ID 允许集收紧为 16/9，其中两个 MinIO 自身 Critical 在固定社区镜像中没有 patched version；当前配置关闭 OIDC/LDAP/Console 只属于可达性缓解。正式 `v0.4.0` tag/Release 在受支持修复镜像或可审计补丁镜像替换、SBOM/Grype 重扫和真实 MinIO/备份恢复兼容性验证前保持阻塞，详见 `docs/minio-security-risk.md`。
 
 2026-07-01 代码审计发现的实现边界问题已完成首轮整改：浏览器认证改为 BFF + HttpOnly Cookie Session，移除 JWT/refresh token 兼容路径；对象存储默认实现已移除 `boto3/botocore` 并改用 MinIO Python SDK；Redis 固定窗口限流已改为 Lua 原子脚本。容量校准草稿已从 `stash@{0}: paused quota reconciliation draft` 恢复并整理为 `quota.reconcile_space_usage` 维护任务，worker 默认按批次和 cursor 扫完整个租户，修复模式会在已有账户上使用数据库行锁重算差额并限制返回明细体量；blob/object 垃圾回收已整理为 `file.cleanup_unreferenced_blobs` 维护任务；孤儿最终对象扫描已整理为 `file.cleanup_orphaned_objects` 维护任务，默认 dry-run，按对象存储游标扫描受控 `objects/{tenant_id}/{hash_prefix}/{sha256}` key，以 DB blob 元数据为事实来源清理对象复制成功但 DB 最终化失败后的无引用最终对象，并写入审计和 `orphan_object_cleanup_total` 指标。真实 MinIO 集成测试已接入 `backend-ci`，覆盖对象读写、copy、delete、list 游标、预签名下载、multipart 私有方法封装、预签名分片 PUT、complete 后 hash 校验和孤儿最终对象扫描。Sprint 4 权限系统已开始，`space_members` 用户成员基础表、创建空间 owner 成员写入、空间级 `PermissionService` 角色检查和 owner/admin 空间成员管理 API 已落地，节点 ACL 已支持用户、部门和用户组三类主体并接入文件列表、文件夹创建、上传初始化、multipart complete 和下载入口，文件列表已返回基于批量权限评估的子节点常用动作权限，空间成员和节点 ACL 变更已写入 `permission.changed` 事件，`permission.invalidate_cache` 已消费该事件并失效 Redis 权限缓存；搜索 ACL 已具备 token builder、独立 outbox event 和 search 队列入口，上传完成、重命名、移动、删除、恢复和彻底删除后的文件索引同步已接入 OpenSearch 适配，ACL 变更后可按 space 或 node 子树保守重建索引 token，`GET /api/v1/search` 已接入查询层 allow/deny token 过滤、签名 cursor 分页、HTML 编码 highlight、搜索限流和应用层 `read_meta` 二次权限校验。搜索全文抽取入口已落地，当前支持安全的小型 UTF-8 文本类文件、基于成熟开源库 `pypdf` 的 PDF 可复制正文抽取、基于成熟开源库 `python-docx` 的 DOCX 段落/表格抽取、基于成熟开源库 `python-pptx` 的 PPTX 文本框/表格抽取和基于成熟开源库 `openpyxl` 的 XLSX 单元格抽取，并刷新索引 `content`；分享模块已完成基础数据模型、迁移、服务层、创建/详情/撤销 HTTP API、外链访问入口和外链下载入口；预览基础链路已新增 `preview.render_requested` outbox event、`preview` 队列 worker、`preview_artifacts` 私有产物表和 `GET /api/v1/files/{node_id}/preview` 权限控制入口，当前使用 Pillow 生成图片 WebP 预览产物，通过 Poppler `pdftoppm` 生成 PDF 首页 WebP 预览，并通过 LibreOffice headless 将 Office 文档转换为 PDF 后复用 PDF/图片链路；`preview.dispatch_outbox` 已配置 Celery 软/硬超时、速率限制、结构化失败日志和 `preview_failures_total` 指标，`/metrics` 已暴露 Prometheus 文本指标，`docs/deployment-preview-worker.md` 已补充预览 Worker CPU、内存和临时磁盘配额说明。上传/下载链路下一步优先补齐企业级治理缺口：MinIO SDK multipart 私有方法的替换评估或稳定封装、真实对象存储异常恢复和升级兼容测试、用户/租户/策略化配额、维护任务调度告警和清理指标、高密级下载代理与 Range/审计/水印/DLP、同 hash 首次上传竞争测试；同时继续补充真实 LibreOffice 环境联调和图片 OCR 等搜索复杂格式抽取的成熟开源工具适配。

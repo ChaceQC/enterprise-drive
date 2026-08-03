@@ -23,6 +23,7 @@ class SpaceResponse(BaseModel):
     name: str
     space_type: str
     is_active: bool
+    version: int
     permission_version: int
     created_at: datetime
     updated_at: datetime

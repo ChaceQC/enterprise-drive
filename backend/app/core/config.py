@@ -184,6 +184,10 @@ class Settings(BaseSettings):
     maintenance_state_ttl_seconds: int = Field(default=30 * 24 * 3600, ge=3600)
     maintenance_state_redis_timeout_seconds: float = Field(default=1.0, gt=0, le=10)
     maintenance_health_refresh_seconds: int = Field(default=30, ge=5, le=300)
+    admin_export_max_rows: int = Field(default=50_000, ge=1, le=1_000_000)
+    admin_export_presign_expires_seconds: int = Field(default=300, ge=60, le=3600)
+    admin_export_retention_days: int = Field(default=30, ge=1, le=3650)
+    admin_export_cleanup_interval_seconds: int = Field(default=86400, ge=60)
     upload_session_ttl_minutes: int = 1440
     upload_part_size_bytes: int = 8 * 1024 * 1024
     upload_presign_expires_seconds: int = 900

@@ -34,6 +34,7 @@ class Space(Base):
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     space_type: Mapped[str] = mapped_column(String(32), nullable=False, default="team")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     permission_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

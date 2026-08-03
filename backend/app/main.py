@@ -21,6 +21,9 @@ logger = logging.getLogger("enterprise_drive")
 def create_app(settings: Settings | None = None) -> FastAPI:
     app_settings = settings or get_settings()
     configure_logging(app_settings)
+    trusted_hosts = list(app_settings.trusted_hosts)
+    if app_settings.environment == "production" and "api" not in trusted_hosts:
+        trusted_hosts.append("api")
 
     app = FastAPI(
         title=app_settings.app_name,
@@ -29,7 +32,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = app_settings
 
-    app.add_middleware(TrustedHostMiddleware, allowed_hosts=app_settings.trusted_hosts)
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=trusted_hosts)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=app_settings.cors_origins,
