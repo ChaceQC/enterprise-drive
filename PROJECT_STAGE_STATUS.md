@@ -4,11 +4,11 @@
 
 ## 1. 总体结论
 
-当前项目处于 **v0.5.0、Sprint 7 桌面 Alpha 交付后的 CI 与正式发布门禁阶段**：
+当前项目处于 **v0.5.0、Sprint 7 桌面 Alpha 已完成 CI 收尾、等待正式发布门禁的阶段**：
 
 - 后端核心能力、权限、分享、预览、搜索、完整管理 API、Windows 11 Docker 部署、监控 profile 和备份治理入口已经形成试点基础，Sprint 2 至 Sprint 6 代码侧剩余项为空。
 - `BE-036` 至 `BE-039`、`BE-044` 和 `BE-045` 已完成，Sprint 9 核心产品能力闭环。
-- Sprint 7 的 `DC-001` 至 `DC-006` 已完成：Rust/Tauri Windows 11 骨架、设备会话、增量游标/tombstone、SQLite 索引、DTP/1 单向传输、诊断导出和 CI 门禁均已落地；Windows CI 全绿后再作为本阶段收尾。
+- Sprint 7 的 `DC-001` 至 `DC-006` 已完成并收尾：Rust/Tauri Windows 11 骨架、设备会话、增量游标/tombstone、SQLite 索引、DTP/1 单向传输、诊断导出和 CI 门禁均已落地；最终 Windows CI 已全绿。
 - 真实生产 DNS/受信证书证据和 MinIO 修复镜像不在当前本机环境内，正式 `v0.4.0` tag/Release 保持阻塞；Sprint 8 双向同步、Web 用户端、身份治理、规模化治理和 `v1.0.0` 尚未完成。
 
 ## 2. 当前仓库快照
@@ -16,6 +16,8 @@
 - 分支：`dev`
 - Sprint 3 对象存储稳定性基线：`31a0de1`；配额、安全与性能收尾：`6465c5a`；CI 安全解析与下载达限修复：`404cc08`、`d8185a5`
 - 项目版本：`0.5.0`
+- Sprint 7 最终代码提交：`a57d3fb`
+- Sprint 7 最终 CI：`backend-ci` run `30838990372`（8 个 job 全部成功）
 - Git tag：当前尚未建立 `v0.4.0` tag
 - 运行时 OpenAPI：80 个路径、107 个操作
 - 最新数据库迁移：`20260803_0022`
@@ -32,7 +34,7 @@
 | Sprint 4：权限系统 | 空间成员和角色、用户/部门/用户组 ACL、继承、deny 优先、缓存失效、搜索 ACL 过滤、关键入口二次查权，以及用户/部门/用户组的 cursor 列表、详情、创建、更新、停用和成员管理 API | 无 |
 | Sprint 5：分享、预览、搜索 | 内外部分享、创建者列表、“分享给我的”、接收人详情与 DTP/1 受控下载、通知已读/失效、部门/用户组授权重算、过期分享维护、图片/PDF/Office 预览、预览产物生命周期、OpenSearch ACL 过滤、图片/扫描 PDF OCR 和旧 Office/ODF 抽取 | 无 |
 | Sprint 6：管理、治理、上线 | 审计、用户/部门/用户组/空间/配额/文件安全/统计/维护/导出管理 API；生命周期、指标、Tracing、Prometheus/Alertmanager/Grafana、Windows Compose、Nginx、TLS/ACME、备份校验/轮换/隔离演练和安全门禁 | 仅剩生产环境的真实 DNS/受信证书记录、MinIO 修复镜像和正式 `v0.4.0` 发布标记 |
-| Sprint 7：Rust 桌面基础 | `DC-001` 至 `DC-006`：Cargo/Tauri 骨架、设备会话、增量游标/tombstone、Rust API client、SQLite 索引、DTP/1 队列、托盘、同步根和诊断导出 | 仅剩 Windows CI 全绿后的交付收尾 |
+| Sprint 7：Rust 桌面基础 | `DC-001` 至 `DC-006`：Cargo/Tauri 骨架、设备会话、增量游标/tombstone、Rust API client、SQLite 索引、DTP/1 队列、托盘、同步根和诊断导出；Windows CI 已全绿 | 无 |
 | Sprint 8：双向同步与桌面发布 | 尚未开始 | 双向同步、冲突副本、离线队列、签名安装包、更新回滚 |
 | Sprint 9：核心产品闭环 | `BE-036` 至 `BE-039`、`BE-044`、`BE-045` 已完成 | 无 |
 | Sprint 10：Web 用户端与管理后台 | 尚未开始 | React/Vite、生成 API Client、用户端、管理后台、Playwright E2E |
@@ -52,6 +54,9 @@
 - Sprint 7 后端定向测试：`backend/tests/test_desktop_sprint7.py` 与 OpenAPI 契约测试合计 `5 passed`；Ruff/format 与 `uv lock --check` 通过。
 - 空 PostgreSQL 已从零升级至 `20260803_0022`，并确认 `desktop_devices`、`device_sessions`、`client_operations`、`sync_changes` 四张 Sprint 7 表存在。
 - Rust workspace 已通过 `cargo fmt --all --check`、`cargo metadata --locked --no-deps`；本机未安装 MSVC linker，Rust 编译、Clippy、cargo test、cargo-deny 和 NSIS 构建由 Windows CI 执行。
+- 最终 `backend-ci` run `30838990372`（提交 `a57d3fb`）的 `rust-desktop`、`rust-dependency-policy`、`backend`、`windows-deployment`、`minio-image-policy`、两组 MinIO supply-chain 和 `windows-desktop-installer` 共 8 个 job 全部成功。
+- Rust CI 失败项均按实际日志收敛：先修正 Clippy `too_many_arguments`、reqwest `query` feature，再将 Windows 不支持的 cargo-deny 容器 action 移到 Ubuntu；依赖策略最终 advisories、bans、licenses、sources 均通过。
+- Sprint 7 的全绿 CI 验证提交为 `a57d3fb`；全绿后仅追加状态文档收尾，不改变该提交中已验证的代码与 CI 配置；未重复执行已通过的后端、MinIO、备份恢复或性能集合。
 - 本轮推送前已确认的 GitHub Actions `backend-ci` 基线：运行 `30782429638`、提交 `d8185a5`，5 个 job 全部成功。
 - 该 CI 后端门禁：`314 passed`；Ruff、格式检查、Bandit、依赖漏洞审计、Mypy、真实 PostgreSQL/MinIO、Windows 部署和 MinIO 供应链门禁均通过。
 - Sprint 4 用户/组织管理集中定向首轮：`92 passed, 1 skipped, 1 failed`；唯一失败修复后只重跑该用例，结果 `1 passed`。
@@ -77,11 +82,11 @@
 
 ## 5. 下一步顺序
 
-1. 推送 `dev` 后跟踪本次 `backend-ci`，修复真实失败项直至 Rust、Tauri、后端和供应链 job 全部通过。
+1. Sprint 7 已完成，不再重复执行已通过的 Sprint 7 或无关测试。
 2. 在真实生产网络执行 `tls-validate-public`，保存双域名 DNS、HTTP `308`、HTTPS readiness 和受信证书记录。
 3. 采用受支持修复镜像或可审计补丁镜像解决 MinIO Critical，重新生成 SBOM/Grype 并运行真实 MinIO/备份恢复兼容门禁。
 4. 上述发布阻塞解除后创建 `v0.4.0` tag/Release；Sprint 3 目标规模性能证据继续复用已通过工件。
-5. 进入 Sprint 8，建立双向同步、冲突处理和签名更新。
+5. 按计划进入 Sprint 8，建立双向同步、冲突处理和签名更新。
 
 ## 6. 状态判断
 

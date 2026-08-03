@@ -7,7 +7,7 @@
 - 分支：`dev`；目标版本已提升为 `0.5.0`。
 - Sprint 7 范围固定为 `DC-001` 至 `DC-006`，不包含 Sprint 8 的文件系统监听、双向同步、冲突副本、签名更新和失败回退。
 - 运行时 OpenAPI 为 80 个路径、107 个操作；migration head 为 `20260803_0022`。
-- 本地实现与定向验证已完成，正在提交、推送并跟踪新增 Windows Rust/NSIS 与既有后端、部署、供应链 CI。
+- Sprint 7 实现、定向验证、提交、推送和 Windows CI 收尾均已完成；最终代码提交为 `a57d3fb`，`dev` 与 `origin/dev` 同步。
 
 ### 已完成
 
@@ -28,12 +28,15 @@
 - `cargo fmt --all --check` 和 `cargo metadata --locked --no-deps` 通过，workspace 共 8 个 package。
 - 本机 PowerShell 未加载 MSVC `link.exe`，因此本地 `cargo check` 在 Rust build script 链接阶段停止；按用户要求不安装系统软件，Clippy、Rust tests、cargo-deny、release build 和 NSIS 由 Windows CI 验证。
 - 未重复运行已通过且未受后续修改影响的全量 pytest、安全矩阵、真实 MinIO、备份恢复或性能测试。
+- 最终 GitHub Actions `backend-ci` run `30838990372`（提交 `a57d3fb`）全绿：`rust-desktop`、`rust-dependency-policy`、`backend`、`windows-deployment`、`minio-image-policy`、Server/Client 两个 MinIO supply-chain job 和 `windows-desktop-installer` 共 8 个 job 全部成功。
+- 最新修复 run 启动后，已取消被取代且仍在运行的 run `30838675810`，避免继续执行重复门禁。
+- CI 收尾修复仅针对真实日志：Windows runner 上的 cargo-deny 改为独立 Ubuntu job；15 个内部 path 依赖补齐 `0.5.0`，Tauri 传递链 5 个无安全升级的 RustSec 公告在 `desktop/deny.toml` 中逐项记录原因。
 
 ### 下一步
 
-1. 审查差异并提交到 `dev`。
-2. 推送后跟踪 `backend-ci`；只修复真实失败项，直至所有 job 成功。
-3. CI 全绿后把本条记录和 `PROJECT_STAGE_STATUS.md` 更新为最终提交与 run 证据。
+1. Sprint 7 已闭环，不再重复执行已通过的 Sprint 7 或无关测试。
+2. 后续按计划进入 Sprint 8：文件系统监听、双向同步、冲突副本、离线队列、签名安装包和更新回滚。
+3. 生产发布仍需真实 DNS/受信证书、MinIO 修复镜像和正式 `v0.4.0` tag/Release 门禁。
 
 ### 涉及文件
 
