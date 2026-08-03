@@ -106,6 +106,31 @@ def test_multipart_abort_is_idempotent_when_provider_upload_is_missing() -> None
     )
 
 
+def test_multipart_control_rejects_unsafe_xml_entities() -> None:
+    control = S3MultipartControlClient(
+        client=FakeMinioClient(),  # type: ignore[arg-type]
+        request_timeout_seconds=30,
+        presign_expires_seconds=300,
+    )
+
+    control._request = (  # type: ignore[method-assign]
+        lambda **kwargs: (
+            b"<!DOCTYPE response [<!ENTITY blocked SYSTEM "
+            b'"file:///tmp/fixture-secret">]><InitiateMultipartUploadResult>'
+            b"<UploadId>&blocked;</UploadId></InitiateMultipartUploadResult>"
+        )
+    )
+
+    with pytest.raises(S3MultipartControlError) as exc_info:
+        control.create(
+            bucket="bucket",
+            storage_key="uploads/file.bin",
+            content_type="application/octet-stream",
+        )
+
+    assert exc_info.value.code == "InvalidS3XmlResponse"
+
+
 @pytest.mark.asyncio
 async def test_storage_adapter_recovers_ambiguous_complete_from_object_stat() -> None:
     adapter = object.__new__(S3StorageAdapter)

@@ -6,6 +6,8 @@ from urllib.error import HTTPError, URLError
 from urllib.request import OpenerDirector, ProxyHandler, Request, build_opener
 from xml.etree import ElementTree
 
+from defusedxml import ElementTree as DefusedElementTree
+from defusedxml.common import DefusedXmlException
 from minio import Minio
 
 from app.infrastructure.storage.base import CompletedUploadPart
@@ -178,8 +180,8 @@ def _xml_text(response_body: bytes, name: str) -> str | None:
 
 def _parse_xml(response_body: bytes) -> ElementTree.Element:
     try:
-        return ElementTree.fromstring(response_body)
-    except ElementTree.ParseError as exc:
+        return DefusedElementTree.fromstring(response_body)
+    except (ElementTree.ParseError, DefusedXmlException) as exc:
         raise S3MultipartControlError(
             code="InvalidS3XmlResponse",
             message="S3 response was not valid XML",
@@ -199,8 +201,8 @@ def _local_name(tag: str) -> str:
 
 def _error_details(response_body: bytes) -> tuple[str, str]:
     try:
-        root = ElementTree.fromstring(response_body)
-    except ElementTree.ParseError:
+        root = DefusedElementTree.fromstring(response_body)
+    except (ElementTree.ParseError, DefusedXmlException):
         return "S3ControlRequestFailed", "S3 returned an HTTP error"
     return (
         _find_element_text(root, "Code") or "S3ControlRequestFailed",

@@ -14,6 +14,7 @@ dependencies = [
   "redis>=5.0",
   "argon2-cffi>=23.1",
   "celery[redis]>=5.4",
+  "defusedxml>=0.7.1",
   "opensearch-py>=2.6",
   "opentelemetry-api>=1.26",
   "opentelemetry-exporter-otlp-proto-http>=1.26",
@@ -43,6 +44,7 @@ dev = [
   "requests>=2.32,<3",
   "ruff>=0.5",
   "testcontainers>=4.7",
+  "types-defusedxml>=0.7.0.20260504",
   "types-openpyxl>=3.1.5.20260518",
 ]
 
