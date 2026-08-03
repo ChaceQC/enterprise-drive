@@ -35,6 +35,7 @@
 - 管理任务审计摘要修正后只运行对应安全防护用例，结果 `1 passed`；受影响 Worker/测试 Ruff 与 format 通过，Worker 定向 Mypy 通过。
 - 本机/TLS Nginx 模板 `nginx -t` 通过；真实 raw HTTP smoke 验证未知 API/S3 Host、CL/TE、重复 Content-Length、API 413、S3 streaming 和本机 Host 兼容。
 - `docker compose --profile monitoring --profile tls-tools ... config` 通过，确认只有 gateway 发布宿主端口；GitHub Actions YAML 可解析。
+- 首次推送提交 `35b3831` 触发 `backend-ci` run `30827760952`：Windows 部署、MinIO image policy 和两组 supply-chain job 全部成功；backend 仅在 Ruff format check 报告 `tests/test_celery_schedule.py` 一处格式差异，其余步骤因 fail-fast 未执行。已按 Ruff diff 精确修正该文件，不重跑无关测试。
 - 未重复运行全量 pytest、旧 Sprint 集合、真实 MinIO、完整备份恢复或 Sprint 3 性能测试；这些未受本轮代码路径影响，继续复用已有通过证据。推送后只跟踪 `backend-ci`，若失败仅修复对应失败项。
 
 ### 阻塞与风险

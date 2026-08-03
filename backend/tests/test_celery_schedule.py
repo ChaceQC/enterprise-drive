@@ -72,10 +72,6 @@ def test_beat_schedule_keeps_destructive_maintenance_in_safe_modes() -> None:
         "repair": False,
         "scan_all": True,
     }
-    assert schedule["cleanup-expired-admin-exports"]["task"] == (
-        "admin.cleanup_expired_exports"
-    )
+    assert schedule["cleanup-expired-admin-exports"]["task"] == ("admin.cleanup_expired_exports")
     assert schedule["cleanup-expired-admin-exports"]["kwargs"] == {"limit": 23}
-    assert schedule["cleanup-expired-admin-exports"]["options"] == {
-        "queue": "maintenance"
-    }
+    assert schedule["cleanup-expired-admin-exports"]["options"] == {"queue": "maintenance"}
