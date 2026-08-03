@@ -32,6 +32,8 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 _WARMED_STORAGE_ORIGINS: set[str] = set()
 _STORAGE_WARMUP_LOCK = Lock()
+_STATS_RESET_LOCK = Lock()
+_STATS_RESET_SCHEDULED = False
 _DEFAULT_WAIT_TIME = between(0.1, 0.3)
 _COMPLETE_SEMAPHORE: GeventSemaphore | None = None
 if os.getenv("PERF_COMPLETE_QUEUE_PATH"):
@@ -81,6 +83,7 @@ class BenchmarkUser(HttpUser):
             )
             if self.scenario != "login" and not self._use_prepared_session() and not self._login():
                 raise StopUser()
+            _schedule_stats_reset(self.environment)
         except (KeyError, OSError, ValueError, RuntimeError) as exc:
             raise StopUser() from exc
 
@@ -370,7 +373,13 @@ class BenchmarkUser(HttpUser):
             if mark_prepared_complete_item_finished(queue_path):
                 runner = self.environment.runner
                 if runner is not None:
-                    spawn_later(1.0, runner.quit)
+                    spawn_later(
+                        max(
+                            float(os.getenv("PERF_COMPLETE_QUIT_GRACE_SECONDS", "0.2")),
+                            0.0,
+                        ),
+                        runner.quit,
+                    )
 
     def _storage_client(self) -> requests.Session:
         if self.storage_client is None:
@@ -435,3 +444,15 @@ class BenchmarkUser(HttpUser):
         ) as response:
             if response.status_code != 200:
                 response.failure(f"audit status={response.status_code}")
+
+
+def _schedule_stats_reset(environment: Any) -> None:
+    warmup_seconds = float(os.getenv("PERF_WARMUP_SECONDS", "0"))
+    if warmup_seconds <= 0:
+        return
+    global _STATS_RESET_SCHEDULED
+    with _STATS_RESET_LOCK:
+        if _STATS_RESET_SCHEDULED:
+            return
+        _STATS_RESET_SCHEDULED = True
+    spawn_later(warmup_seconds, environment.stats.reset_all)

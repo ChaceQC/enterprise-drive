@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from urllib.parse import quote
@@ -7,6 +8,7 @@ from uuid import UUID
 
 from app.api.errors import ApiError
 from app.core.config import Settings
+from app.core.security import utc_now
 from app.core.transfer_protocol import DRIVE_TRANSFER_PROTOCOL_HEADER, DRIVE_TRANSFER_PROTOCOL_V1
 from app.infrastructure.storage.base import StorageAdapter
 from app.modules.audit.schemas import AuditContext, AuditEvent
@@ -17,6 +19,12 @@ from app.modules.file.download_range import resolve_download_range
 from app.modules.file.models import FileBlob, FileVersion, Node
 from app.modules.file.repository import FileRepository
 from app.modules.file.schemas import FileDownloadUrlResponse
+from app.modules.file_security.service import (
+    DeliveryMode,
+    FileSecurityDecision,
+    FileSecurityService,
+)
+from app.modules.file_security.watermark import WatermarkRenderer, build_watermark_text
 from app.modules.permission.actions import ACTION_DOWNLOAD
 from app.modules.permission.service import PermissionService
 from app.modules.space.repository import SpaceRepository
@@ -37,6 +45,13 @@ class FileProxyDownload:
     body: AsyncIterator[bytes]
 
 
+@dataclass(frozen=True, slots=True)
+class FileWatermarkedDownload:
+    media_type: str
+    headers: dict[str, str]
+    content: bytes
+
+
 class FileDownloadService:
     def __init__(
         self,
@@ -47,6 +62,8 @@ class FileDownloadService:
         storage: StorageAdapter,
         settings: Settings,
         audit_service: AuditService | None = None,
+        security_service: FileSecurityService | None = None,
+        watermark_renderer: WatermarkRenderer | None = None,
     ) -> None:
         self.repository = repository
         self.space_repository = space_repository
@@ -54,6 +71,8 @@ class FileDownloadService:
         self.storage = storage
         self.settings = settings
         self.audit_service = audit_service
+        self.security_service = security_service
+        self.watermark_renderer = watermark_renderer or WatermarkRenderer()
 
     async def create_download_url(
         self,
@@ -65,6 +84,12 @@ class FileDownloadService:
         source = await self._get_download_source(
             current_user=current_user,
             node_id=node_id,
+            audit_context=audit_context,
+        )
+        security_decision = await self._ensure_delivery_allowed(
+            current_user=current_user,
+            source=source,
+            requested_mode="presigned",
             audit_context=audit_context,
         )
 
@@ -85,6 +110,7 @@ class FileDownloadService:
                 "blob_id": str(source.blob.id),
                 "size_bytes": source.version.size_bytes,
                 "delivery_mode": "presigned",
+                **_security_metadata(security_decision),
             },
         )
         await self.repository.commit()
@@ -110,6 +136,12 @@ class FileDownloadService:
         source = await self._get_download_source(
             current_user=current_user,
             node_id=node_id,
+            audit_context=audit_context,
+        )
+        security_decision = await self._ensure_delivery_allowed(
+            current_user=current_user,
+            source=source,
+            requested_mode="proxy",
             audit_context=audit_context,
         )
         try:
@@ -160,6 +192,7 @@ class FileDownloadService:
                 "range_start": byte_range.start,
                 "range_end": byte_range.end,
                 "response_bytes": byte_range.length,
+                **_security_metadata(security_decision),
             },
         )
         await self.repository.commit()
@@ -175,6 +208,140 @@ class FileDownloadService:
                 chunk_size=self.settings.download_proxy_chunk_size_bytes,
             ),
         )
+
+    async def create_watermarked_download(
+        self,
+        *,
+        current_user: User,
+        node_id: UUID,
+        audit_context: AuditContext | None = None,
+    ) -> FileWatermarkedDownload:
+        source = await self._get_download_source(
+            current_user=current_user,
+            node_id=node_id,
+            audit_context=audit_context,
+        )
+        security_decision = await self._ensure_delivery_allowed(
+            current_user=current_user,
+            source=source,
+            requested_mode="watermark",
+            audit_context=audit_context,
+        )
+        if source.version.size_bytes > self.settings.watermark_max_source_bytes:
+            await self._record_denied_download(
+                current_user=current_user,
+                resource_id=source.node.id,
+                reason="watermark_source_too_large",
+                audit_context=audit_context,
+                metadata={
+                    "space_id": str(source.node.space_id),
+                    "version_id": str(source.version.id),
+                    **_security_metadata(security_decision),
+                },
+            )
+            raise ApiError(
+                "WATERMARK_SOURCE_TOO_LARGE",
+                "文件超过水印处理大小上限",
+                status_code=422,
+            )
+        content = await self.storage.read_object_bytes(
+            bucket=self.settings.s3_bucket,
+            storage_key=source.blob.storage_key,
+            max_bytes=source.version.size_bytes,
+        )
+        watermark_text = build_watermark_text(
+            template=security_decision.watermark_text if security_decision else None,
+            user_label=current_user.username,
+            user_id=current_user.id,
+            tenant_id=current_user.tenant_id,
+            now=utc_now(),
+        )
+        try:
+            rendered = await asyncio.to_thread(
+                self.watermark_renderer.render,
+                content=content,
+                mime_type=source.version.mime_type
+                or source.blob.mime_type
+                or "application/octet-stream",
+                file_name=source.node.name,
+                watermark_text=watermark_text,
+            )
+        except ApiError as exc:
+            await self._record_denied_download(
+                current_user=current_user,
+                resource_id=source.node.id,
+                reason=exc.code.lower(),
+                audit_context=audit_context,
+                metadata={
+                    "space_id": str(source.node.space_id),
+                    "version_id": str(source.version.id),
+                    **_security_metadata(security_decision),
+                },
+            )
+            raise
+        await record_node_event(
+            audit_service=self.audit_service,
+            current_user=current_user,
+            node=source.node,
+            action="file.downloaded",
+            audit_context=audit_context,
+            metadata={
+                "version_id": str(source.version.id),
+                "blob_id": str(source.blob.id),
+                "size_bytes": source.version.size_bytes,
+                "delivery_mode": "watermark",
+                "response_bytes": len(rendered.content),
+                **_security_metadata(security_decision),
+            },
+        )
+        await self.repository.commit()
+        return FileWatermarkedDownload(
+            media_type=rendered.media_type,
+            headers={
+                "Cache-Control": "private, no-store",
+                "Content-Disposition": _content_disposition(rendered.file_name),
+                "Content-Length": str(len(rendered.content)),
+                "X-Content-Type-Options": "nosniff",
+                DRIVE_TRANSFER_PROTOCOL_HEADER: DRIVE_TRANSFER_PROTOCOL_V1,
+            },
+            content=rendered.content,
+        )
+
+    async def _ensure_delivery_allowed(
+        self,
+        *,
+        current_user: User,
+        source: DownloadSource,
+        requested_mode: DeliveryMode,
+        audit_context: AuditContext | None,
+    ) -> FileSecurityDecision | None:
+        if self.security_service is None:
+            return None
+        decision = await self.security_service.evaluate(
+            tenant_id=current_user.tenant_id,
+            file_name=source.node.name,
+            mime_type=source.version.mime_type or source.blob.mime_type,
+            version=source.version,
+        )
+        try:
+            self.security_service.ensure_delivery(
+                decision=decision,
+                requested_mode=requested_mode,
+            )
+        except ApiError as exc:
+            await self._record_denied_download(
+                current_user=current_user,
+                resource_id=source.node.id,
+                reason=exc.code.lower(),
+                audit_context=audit_context,
+                metadata={
+                    "space_id": str(source.node.space_id),
+                    "version_id": str(source.version.id),
+                    **decision.audit_metadata(),
+                },
+            )
+            raise
+        return decision
 
     async def _get_download_source(
         self,
@@ -335,3 +502,7 @@ def _content_disposition(filename: str) -> str:
         f'attachment; filename="{ascii_filename}"; '
         f"filename*=UTF-8''{quote(safe_filename, safe='')}"
     )
+
+
+def _security_metadata(decision: FileSecurityDecision | None) -> dict[str, object]:
+    return decision.audit_metadata() if decision is not None else {}

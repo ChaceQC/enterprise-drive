@@ -27,6 +27,8 @@ from app.modules.auth.models import User
 from app.modules.auth.repository import AuthRepository
 from app.modules.auth.service import AuthService
 from app.modules.file.repository import FileRepository
+from app.modules.file_security.repository import FileSecurityRepository
+from app.modules.file_security.service import FileSecurityService
 from app.modules.org.repository import OrgRepository
 from app.modules.org.service import OrgService
 from app.modules.permission.repository import PermissionRepository
@@ -92,6 +94,10 @@ def get_share_external_download_service(
         storage=storage,
         settings=settings,
         audit_service=AuditService(repository=AuditRepository(session)),
+        security_service=FileSecurityService(
+            repository=FileSecurityRepository(session),
+            enabled=settings.file_security_policy_enabled,
+        ),
     )
 
 
@@ -221,6 +227,7 @@ async def create_external_download_url(
             raw_token=request.raw_token,
             node_id=request.node_id,
             passcode=request.passcode,
+            delivery_mode=request.delivery_mode,
             audit_context=build_audit_context(http_request),
         )
     except ApiError as exc:

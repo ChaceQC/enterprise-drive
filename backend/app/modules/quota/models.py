@@ -3,7 +3,18 @@ from __future__ import annotations
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Uuid
+from sqlalchemy import (
+    JSON,
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Uuid,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.security import utc_now
@@ -77,9 +88,6 @@ class QuotaPolicy(Base):
     """按文件名后缀或 MIME 前缀选择的策略配额。"""
 
     __tablename__ = "quota_policies"
-    __table_args__ = (
-        Index("idx_quota_policies_tenant_priority", "tenant_id", "is_active", "priority"),
-    )
 
     id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), primary_key=True, default=uuid4)
     tenant_id: Mapped[UUID] = mapped_column(
@@ -105,4 +113,9 @@ class QuotaPolicy(Base):
         nullable=False,
         default=utc_now,
         onupdate=utc_now,
+    )
+
+    __table_args__ = (
+        Index("uq_quota_policies_name", "tenant_id", func.lower(name), unique=True),
+        Index("idx_quota_policies_tenant_priority", "tenant_id", "is_active", "priority"),
     )

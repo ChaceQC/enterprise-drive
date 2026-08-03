@@ -202,6 +202,12 @@ def _rate_limit_rule(*, settings: Settings, action: str) -> RateLimitRule:
             limit=settings.download_proxy_rate_limit_count,
             window_seconds=settings.download_proxy_rate_limit_window_seconds,
         )
+    if action == "file.download_watermark":
+        return RateLimitRule(
+            action=action,
+            limit=settings.download_watermark_rate_limit_count,
+            window_seconds=settings.download_watermark_rate_limit_window_seconds,
+        )
     if action == "search.query":
         return RateLimitRule(
             action=action,

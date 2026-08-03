@@ -50,6 +50,8 @@ from app.modules.file.schemas import (
 )
 from app.modules.file.service import FileService
 from app.modules.file.version_service import FileVersionService
+from app.modules.file_security.repository import FileSecurityRepository
+from app.modules.file_security.service import FileSecurityService
 from app.modules.org.repository import OrgRepository
 from app.modules.org.service import OrgService
 from app.modules.permission.repository import PermissionRepository
@@ -117,6 +119,10 @@ def get_file_download_service(
         storage=storage,
         settings=settings,
         audit_service=AuditService(repository=AuditRepository(session)),
+        security_service=FileSecurityService(
+            repository=FileSecurityRepository(session),
+            enabled=settings.file_security_policy_enabled,
+        ),
     )
 
 
@@ -144,6 +150,10 @@ def get_file_version_service(
         storage=storage,
         settings=settings,
         audit_service=AuditService(repository=AuditRepository(session)),
+        security_service=FileSecurityService(
+            repository=FileSecurityRepository(session),
+            enabled=settings.file_security_policy_enabled,
+        ),
     )
 
 
@@ -570,6 +580,55 @@ async def proxy_download_content(
     return StreamingResponse(
         content=download.body,
         status_code=download.status_code,
+        media_type=download.media_type,
+        headers=download.headers,
+    )
+
+
+@router.get(
+    "/{node_id}/watermarked-content",
+    dependencies=[Depends(ensure_supported_transfer_protocol)],
+    response_class=Response,
+    responses={
+        200: {"description": "带水印的图片或 PDF 完整下载"},
+        409: {"description": "策略或 DLP 状态不允许水印下载"},
+        422: {"description": "格式或大小不支持水印处理"},
+    },
+)
+async def download_watermarked_content(
+    http_request: Request,
+    node_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    settings: Annotated[Settings, Depends(get_settings)],
+    rate_limiter: Annotated[RateLimiter, Depends(get_rate_limiter)],
+    service: Annotated[FileDownloadService, Depends(get_file_download_service)],
+) -> Response:
+    try:
+        await enforce_rate_limit(
+            settings=settings,
+            rate_limiter=rate_limiter,
+            current_user=current_user,
+            action="file.download_watermark",
+            resource_key=f"node:{node_id}",
+            request=http_request,
+        )
+        download = await service.create_watermarked_download(
+            current_user=current_user,
+            node_id=node_id,
+            audit_context=build_audit_context(http_request),
+        )
+    except ApiError as exc:
+        record_download_request(
+            channel="internal_watermark",
+            outcome="denied" if exc.status_code < 500 else "error",
+        )
+        raise
+    except Exception:
+        record_download_request(channel="internal_watermark", outcome="error")
+        raise
+    record_download_request(channel="internal_watermark", outcome="allowed")
+    return Response(
+        content=download.content,
         media_type=download.media_type,
         headers=download.headers,
     )

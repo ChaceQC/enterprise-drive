@@ -78,7 +78,7 @@ class QuotaService:
             ):
                 raise quota_exceeded_error("policy")
 
-        for owner_type, owner_id, limit_bytes in self._enabled_dimensions(
+        for owner_type, owner_id, limit_bytes in await self._enabled_dimensions(
             tenant_id=tenant_id,
             user_id=user_id,
         ):
@@ -129,7 +129,7 @@ class QuotaService:
                 space_id,
                 self.default_space_limit_bytes,
             ),
-            *self._enabled_dimensions(tenant_id=tenant_id, user_id=user_id),
+            *(await self._enabled_dimensions(tenant_id=tenant_id, user_id=user_id)),
         ]
         if policy is not None:
             dimensions.append(("policy", policy.id, policy.limit_bytes))
@@ -228,17 +228,32 @@ class QuotaService:
             ref_id=ref_id,
         )
 
-    def _enabled_dimensions(
+    async def _enabled_dimensions(
         self,
         *,
         tenant_id: UUID,
         user_id: UUID | None,
     ) -> list[tuple[str, UUID, int]]:
         dimensions: list[tuple[str, UUID, int]] = []
-        if self.default_tenant_limit_bytes > 0:
+        tenant_account = await self.repository.get_account(
+            tenant_id=tenant_id,
+            owner_type="tenant",
+            owner_id=tenant_id,
+        )
+        if tenant_account is not None:
+            dimensions.append(("tenant", tenant_id, tenant_account.limit_bytes))
+        elif self.default_tenant_limit_bytes > 0:
             dimensions.append(("tenant", tenant_id, self.default_tenant_limit_bytes))
-        if user_id is not None and self.default_user_limit_bytes > 0:
-            dimensions.append(("user", user_id, self.default_user_limit_bytes))
+        if user_id is not None:
+            user_account = await self.repository.get_account(
+                tenant_id=tenant_id,
+                owner_type="user",
+                owner_id=user_id,
+            )
+            if user_account is not None:
+                dimensions.append(("user", user_id, user_account.limit_bytes))
+            elif self.default_user_limit_bytes > 0:
+                dimensions.append(("user", user_id, self.default_user_limit_bytes))
         return dimensions
 
     async def _matching_policy(

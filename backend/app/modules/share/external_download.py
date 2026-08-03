@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import NoReturn
 from uuid import UUID
 
@@ -10,6 +11,8 @@ from app.infrastructure.storage.base import StorageAdapter
 from app.modules.audit.schemas import AuditContext, AuditEvent
 from app.modules.audit.service import AuditService
 from app.modules.file.repository import FileRepository
+from app.modules.file_security.service import DeliveryMode, FileSecurityService
+from app.modules.file_security.watermark import WatermarkRenderer, build_watermark_text
 from app.modules.share.constants import (
     SHARE_PERMISSION_DOWNLOAD,
     SHARE_STATUS_ACTIVE,
@@ -31,12 +34,16 @@ class ShareExternalDownloadService:
         storage: StorageAdapter,
         settings: Settings,
         audit_service: AuditService | None = None,
+        security_service: FileSecurityService | None = None,
+        watermark_renderer: WatermarkRenderer | None = None,
     ) -> None:
         self.repository = repository
         self.file_repository = file_repository
         self.storage = storage
         self.settings = settings
         self.audit_service = audit_service
+        self.security_service = security_service
+        self.watermark_renderer = watermark_renderer or WatermarkRenderer()
 
     async def create_external_download_url(
         self,
@@ -45,6 +52,7 @@ class ShareExternalDownloadService:
         raw_token: str,
         node_id: UUID,
         passcode: str | None = None,
+        delivery_mode: DeliveryMode = "presigned",
         audit_context: AuditContext | None = None,
     ) -> ExternalShareDownloadResponse:
         try:
@@ -126,6 +134,112 @@ class ShareExternalDownloadService:
                     },
                 )
 
+            version, blob = version_blob
+            security_decision = None
+            if self.security_service is not None:
+                security_decision = await self.security_service.evaluate(
+                    tenant_id=share.tenant_id,
+                    file_name=node.name,
+                    mime_type=version.mime_type or blob.mime_type,
+                    version=version,
+                )
+                try:
+                    self.security_service.ensure_delivery(
+                        decision=security_decision,
+                        requested_mode=delivery_mode,
+                    )
+                except ApiError as exc:
+                    await self._raise_denied_download(
+                        share=share,
+                        audit_context=audit_context,
+                        node_id=node.id,
+                        error=exc,
+                        metadata={
+                            "reason": exc.code.lower(),
+                            **security_decision.audit_metadata(),
+                        },
+                    )
+            if delivery_mode == "watermark":
+                if version.size_bytes > self.settings.watermark_max_source_bytes:
+                    await self._raise_denied_download(
+                        share=share,
+                        audit_context=audit_context,
+                        node_id=node.id,
+                        error=ApiError(
+                            "WATERMARK_SOURCE_TOO_LARGE",
+                            "文件超过水印处理大小上限",
+                            status_code=422,
+                        ),
+                        metadata={"reason": "watermark_source_too_large"},
+                    )
+                source_content = await self.storage.read_object_bytes(
+                    bucket=self.settings.s3_bucket,
+                    storage_key=blob.storage_key,
+                    max_bytes=version.size_bytes,
+                )
+                watermark_text = build_watermark_text(
+                    template=security_decision.watermark_text
+                    if security_decision is not None
+                    else None,
+                    user_label="external",
+                    user_id=None,
+                    tenant_id=share.tenant_id,
+                    now=utc_now(),
+                )
+                try:
+                    rendered = await asyncio.to_thread(
+                        self.watermark_renderer.render,
+                        content=source_content,
+                        mime_type=version.mime_type or blob.mime_type or "application/octet-stream",
+                        file_name=node.name,
+                        watermark_text=watermark_text,
+                    )
+                except ApiError as exc:
+                    await self._raise_denied_download(
+                        share=share,
+                        audit_context=audit_context,
+                        node_id=node.id,
+                        error=exc,
+                        metadata={"reason": exc.code.lower()},
+                    )
+                await self.storage.put_object_bytes(
+                    bucket=self.settings.s3_bucket,
+                    storage_key=_external_watermark_key(
+                        tenant_id=share.tenant_id,
+                        share_id=share.id,
+                        node_id=node.id,
+                        version_id=version.id,
+                    ),
+                    content=rendered.content,
+                    content_type=rendered.media_type,
+                )
+                watermark_key = _external_watermark_key(
+                    tenant_id=share.tenant_id,
+                    share_id=share.id,
+                    node_id=node.id,
+                    version_id=version.id,
+                )
+                presigned = await self.storage.presign_download(
+                    bucket=self.settings.s3_bucket,
+                    storage_key=watermark_key,
+                    filename=rendered.file_name,
+                    expires_in_seconds=self.settings.download_presign_expires_seconds,
+                )
+                response_file_name = rendered.file_name
+                response_mime_type = rendered.media_type
+                response_size_bytes = len(rendered.content)
+            else:
+                presigned = await self.storage.presign_download(
+                    bucket=self.settings.s3_bucket,
+                    storage_key=blob.storage_key,
+                    filename=node.name,
+                    expires_in_seconds=self.settings.download_presign_expires_seconds,
+                )
+                response_file_name = node.name
+                response_mime_type = (
+                    version.mime_type or blob.mime_type or "application/octet-stream"
+                )
+                response_size_bytes = version.size_bytes
             consumed = await self.repository.consume_external_download(
                 tenant_id=share.tenant_id,
                 share_id=share.id,
@@ -150,14 +264,6 @@ class ShareExternalDownloadService:
                     ),
                     metadata={"reason": "download_limit_or_state"},
                 )
-
-            version, blob = version_blob
-            presigned = await self.storage.presign_download(
-                bucket=self.settings.s3_bucket,
-                storage_key=blob.storage_key,
-                filename=node.name,
-                expires_in_seconds=self.settings.download_presign_expires_seconds,
-            )
             updated_share = await self.repository.get_share(
                 tenant_id=share.tenant_id,
                 share_id=share.id,
@@ -169,11 +275,14 @@ class ShareExternalDownloadService:
                 result="allowed",
                 audit_context=audit_context,
                 node_id=node.id,
-                bytes_sent=version.size_bytes,
+                bytes_sent=response_size_bytes,
                 metadata={
                     "version_id": str(version.id),
                     "blob_id": str(blob.id),
-                    "size_bytes": version.size_bytes,
+                    "source_size_bytes": version.size_bytes,
+                    "size_bytes": response_size_bytes,
+                    "delivery_mode": delivery_mode,
+                    **(security_decision.audit_metadata() if security_decision is not None else {}),
                 },
             )
             await self.repository.commit()
@@ -181,9 +290,9 @@ class ShareExternalDownloadService:
                 share_id=updated_share.id,
                 node_id=node.id,
                 version_id=version.id,
-                file_name=node.name,
-                size_bytes=version.size_bytes,
-                mime_type=version.mime_type or blob.mime_type,
+                file_name=response_file_name,
+                size_bytes=response_size_bytes,
+                mime_type=response_mime_type,
                 download_url=presigned.download_url,
                 expires_at=presigned.expires_at,
                 headers=presigned.headers,
@@ -328,3 +437,13 @@ class ShareExternalDownloadService:
         )
         await self.repository.commit()
         raise error
+
+
+def _external_watermark_key(
+    *,
+    tenant_id: UUID,
+    share_id: UUID,
+    node_id: UUID,
+    version_id: UUID,
+) -> str:
+    return f"exports/{tenant_id}/share-watermarks/{share_id}/{node_id}/{version_id}"

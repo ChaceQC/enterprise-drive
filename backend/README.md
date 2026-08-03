@@ -139,7 +139,7 @@ uv run pytest tests/test_route_security_matrix.py `
   tests/test_security_adversarial.py -q
 ```
 
-矩阵与运行时 OpenAPI 的 47 个 `/api/v1` route 完全对账，覆盖匿名、CSRF、管理员、真实跨租户资源和活跃会话撤权；对抗输入覆盖损坏/超大图片、文档路径与扩展名注入、Range 权限、预签名 URL、不同 token 外链穷举、Trusted Host 和 CORS。
+矩阵与运行时 OpenAPI 的 48 个路径、58 个操作完全对账，覆盖匿名、CSRF、管理员、真实跨租户资源和活跃会话撤权；排除 ping/login 后的 56 个受保护或业务操作均在矩阵内。对抗输入覆盖损坏/超大图片、文档路径与扩展名注入、Range 权限、预签名 URL、配额/安全策略管理、不同 token 外链穷举、Trusted Host 和 CORS。
 
 真实 Nginx 原始 HTTP 安全 smoke：
 
@@ -196,6 +196,8 @@ uv run pytest tests/test_storage_minio_integration.py -q
 
 `performance.runner` 的 `upload_complete` 场景会真实执行 DTP/1 初始化、分片预签名、无 Cookie 的 MinIO 直传、complete 和清理，并通过测试环境 `Server-Timing` 分解对象存储合并与 API 其余耗时。真实 Compose 运行时传入 `--docker-compose-project <project>`，报告 `BE-029/2` 会记录 p50/p95/p99、错误率、硬件与磁盘、Docker server/容器限额和镜像 digest、PostgreSQL 索引/体量以及 OpenSearch refresh/store 状态。
 
+2026-08-03 已完成目标规模门禁：10,000 个 fixture 节点、100 万 OpenSearch 文档和 1,000 万审计日志均在报告环境中确认；target `upload_complete` 使用 `--warmup-seconds 5` 后统计重置，计入 1,936 个 complete 样本、0 失败，吞吐 `58.364 RPS`，不含对象存储合并的 API P95 为 `790 ms`，端到端 P95 为 `840 ms`，storage merge P95 为 `71 ms`，`report.json passed=true`。清理工件确认 2,000/2,000 个完成节点已 purge 且 errors 为空；search、audit、mixed 和 upload-init 沿用此前通过的 target 工件，没有重复执行。
+
 ## 当前能力
 
 - FastAPI 应用入口。
@@ -228,7 +230,7 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - 文件版本签名 cursor 列表、指定历史版本 DTP/1 预签名下载，以及把历史内容回滚为递增新版本；回滚支持可选当前版本前置条件，复用 blob 并同步容量、审计、搜索和预览事件。
 - 空间创建、文件夹创建、重命名、移动、删除、恢复和彻底删除审计事件。
 - `upload_sessions`、`upload_parts` 基础表和迁移。
-- `quota_accounts`、`quota_ledger`、`quota_policies` 基础表和迁移。
+- `quota_accounts`、`quota_ledger`、`quota_policies` 基础表和迁移，以及系统管理员配额账户/策略管理 API。
 - 空间创建时同步初始化默认空间容量账户。
 - MinIO Python SDK 对象存储适配器，业务层通过 `StorageAdapter` 协议隔离具体 SDK。
 - 上传初始化、上传状态查询、分片预签名 URL、multipart complete 和 abort 接口。
@@ -236,7 +238,7 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - 秒传分支：命中同租户同 hash、同大小 blob 时直接创建文件节点和版本，并增加 blob 引用计数。
 - multipart complete 成功合并后服务端校验 `sha256`，通过后将新对象归档到 `objects/{tenant_id}/{hash_prefix}/{content_hash}`，再写入 `file_blobs`、`nodes`、`file_versions`、`upload_parts` 和上传会话完成结果。
 - 秒传和 multipart complete 创建文件版本时原子增加空间、可选租户、可选用户和匹配策略账户的容量快照，并分别写入 `quota_ledger` 容量流水。
-- `quota_policies` 按扩展名或 MIME 前缀匹配累计额度与单文件大小限制；策略管理 HTTP API 后续由 `BE-044` 提供。
+- `quota_policies` 按扩展名或 MIME 前缀匹配累计额度与单文件大小限制；管理员可分页查询账户，创建或调整空间/租户/用户额度，并列表、创建、更新和停用策略。现有额度更新要求乐观前置条件，新额度不得低于已用容量。
 - 删除到回收站保留容量占用；彻底删除回收站节点时按文件版本正向流水释放全部关联维度，并写入 `file_purged` 负向容量流水。
 - 上传初始化、秒传、complete、abort 和 hash 不匹配等失败审计事件。
 - `upload.expire_sessions` 维护任务，按租户清理过期上传会话并写入 `upload.expired` 审计事件。
@@ -252,7 +254,9 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - 预览基础链路：上传成功后写入 `preview.render_requested` outbox event，`preview.dispatch_outbox` 消费事件并使用 Pillow 生成图片 WebP 预览产物；PDF 会通过 Poppler `pdftoppm` 在临时目录中渲染第一页 PNG，再复用 Pillow 生成 WebP；Office 文档会通过 LibreOffice headless 转换为 PDF，再复用 PDF/图片链路。产物写入私有对象存储 `previews/{tenant_id}/{node_id}/{version_id}/image.webp`；`GET /api/v1/files/{node_id}/preview` 会校验节点级 `preview` 权限并返回短期私有预览 URL。缺少 `pdftoppm` 或 `soffice` 时会标记为 `unsupported` 并写入明确错误原因，避免无意义重试；`preview.dispatch_outbox` 已配置独立 Celery 软/硬超时、速率限制、结构化失败日志和 `preview_failures_total` 指标，便于后续接入日志告警与指标看板。
 - `shares`、`share_items`、`share_recipients`、`share_access_logs` 基础表和迁移；服务层支持内部分享、外链分享、提取码哈希、过期时间、访问/下载次数上限和撤销状态。
 - 分享创建会校验 root 节点和全部分享项的节点级 `share` 权限，分享项必须与 root 节点属于同一空间；外链原始 token 只返回一次，数据库只保存全局唯一 token hash，提取码只保存 Argon2id hash。
-- 分享创建和撤销会写入 `share.created` / `share.revoked` 审计事件和 `audit.share.*` outbox event；`POST /api/v1/shares`、`GET /api/v1/shares/{share_id}`、`POST /api/v1/shares/{share_id}/revoke` 已接入 Cookie Session、CSRF 和创建者边界；`POST /api/v1/public/shares/access` 已接入 `tenant_slug`、外链 token、提取码、状态、过期、访问次数校验，以及 IP 总量和 `token + IP` 维度限流，会带租户边界查询分享、原子增加 `view_count` 并写入 `share_access_logs`；`POST /api/v1/public/shares/download` 已接入外链下载，会校验分享状态、提取码、下载权限、分享项范围、文件当前版本和下载次数限制，原子增加 `download_count`，返回短期私有对象下载 URL，并写入 `share_access_logs` 和 `share.external.downloaded` 审计。
+- 分享创建和撤销会写入 `share.created` / `share.revoked` 审计事件和 `audit.share.*` outbox event；`POST /api/v1/shares`、`GET /api/v1/shares/{share_id}`、`POST /api/v1/shares/{share_id}/revoke` 已接入 Cookie Session、CSRF 和创建者边界；`POST /api/v1/public/shares/access` 已接入 `tenant_slug`、外链 token、提取码、状态、过期、访问次数校验，以及 IP 总量和 `token + IP` 维度限流，会带租户边界查询分享、原子增加 `view_count` 并写入 `share_access_logs`；`POST /api/v1/public/shares/download` 会重新校验分享项、当前版本、下载次数和文件安全策略，支持 `delivery_mode=presigned|watermark`，并以实际响应文件名、MIME 和字节数记录访问日志与审计。
+- `file_security_policies` 按扩展名/MIME 前缀提供密级、`presigned/proxy/watermark/blocked` 下载模式、关键字 DLP audit/block、fail-closed、水印模板、版本前置条件和租户隔离管理；当前版本、历史版本和公开外链下载均执行策略。
+- 内部图片/PDF 动态水印通过 `GET /api/v1/files/{node_id}/watermarked-content` 返回；公开外链水印生成私有派生对象后签发短期 URL。外链代理流、历史版本专用水印、OCR、legal hold 和复杂内容识别继续后续治理。
 - 文件下载预签名 URL 接口，按当前文件版本生成短期私有对象下载地址。
 - 下载成功和拒绝均写入 `file.downloaded` 审计事件与 outbox event。
 - 管理员 seed 脚本。
@@ -271,8 +275,22 @@ uv run pytest tests/test_storage_minio_integration.py -q
 ## 管理员接口
 
 - `GET /api/v1/admin/audit-logs`
+- `GET /api/v1/admin/quotas/accounts`
+- `PUT /api/v1/admin/quotas/accounts/{owner_type}/{owner_id}`
+- `GET /api/v1/admin/quotas/policies`
+- `POST /api/v1/admin/quotas/policies`
+- `PATCH /api/v1/admin/quotas/policies/{policy_id}`
+- `DELETE /api/v1/admin/quotas/policies/{policy_id}`
+- `GET /api/v1/admin/file-security/policies`
+- `POST /api/v1/admin/file-security/policies`
+- `PATCH /api/v1/admin/file-security/policies/{policy_id}`
+- `DELETE /api/v1/admin/file-security/policies/{policy_id}`
 
 审计查询仅允许当前租户的系统管理员访问。可使用 `actor_id`、`actor_type`、`action`、`resource_type`、`resource_id`、`result`、`risk_level`、`request_id`、`created_from`、`created_to`、`cursor` 和 `page_size` 组合筛选；结果按 `created_at DESC, id DESC` 返回。普通用户访问、非法时间范围和成功查询都会写入 `admin.audit_logs.queried` 审计事件。
+
+配额管理同样只允许系统管理员访问并按当前租户隔离。账户查询支持 owner type/id 和签名 cursor；创建账户可省略 `expected_limit_bytes`，更新现有账户必须提供当前额度作为乐观前置条件。策略名称租户内唯一，更新/停用使用当前 `limit_bytes` 前置条件，额度不得低于策略账户或普通账户的已用容量。数据库中已存在的租户/用户账户优先于环境默认额度。
+
+文件安全策略管理只允许系统管理员访问并按当前租户隔离。策略至少需要扩展名或 MIME 前缀选择器，支持 `internal/confidential/restricted`、`presigned/proxy/watermark/blocked`、关键字 DLP audit/block、fail-closed 和水印文本模板；更新和停用必须提供 `expected_version`。
 
 ## 空间和文件树接口
 
@@ -363,6 +381,10 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - `DRIVE_DOWNLOAD_PROXY_CHUNK_SIZE_BYTES`
 - `DRIVE_DOWNLOAD_PROXY_RATE_LIMIT_COUNT`
 - `DRIVE_DOWNLOAD_PROXY_RATE_LIMIT_WINDOW_SECONDS`
+- `DRIVE_FILE_SECURITY_POLICY_ENABLED`
+- `DRIVE_WATERMARK_MAX_SOURCE_BYTES`
+- `DRIVE_DOWNLOAD_WATERMARK_RATE_LIMIT_COUNT`
+- `DRIVE_DOWNLOAD_WATERMARK_RATE_LIMIT_WINDOW_SECONDS`
 - `DRIVE_DEFAULT_SPACE_QUOTA_BYTES`
 - `DRIVE_DEFAULT_USER_QUOTA_BYTES`
 - `DRIVE_DEFAULT_TENANT_QUOTA_BYTES`
@@ -397,7 +419,7 @@ uv run pytest tests/test_storage_minio_integration.py -q
 - `DRIVE_PREVIEW_TASK_RATE_LIMIT`
 - `DRIVE_PREVIEW_PRESIGN_EXPIRES_SECONDS`
 
-当前上传接口已通过 `PermissionService` 校验父目录节点级 `upload` 权限；初始化和 multipart complete 都会重新检查，避免会话创建后权限收紧仍可完成上传。`BE-033` 已把容量服务扩展为多维账本：空间账户始终启用，`DRIVE_DEFAULT_TENANT_QUOTA_BYTES` 和 `DRIVE_DEFAULT_USER_QUOTA_BYTES` 大于 `0` 时分别启用租户、用户账户，`DRIVE_QUOTA_POLICY_ENABLED=true` 时按 `quota_policies` 的优先级匹配扩展名或 MIME 前缀，并执行累计额度和单文件上限。上传初始化执行快速检查；秒传和 multipart complete 创建文件版本时在同一事务内按固定维度顺序执行条件 update，任一维度不足都会回滚整次创建。删除到回收站不释放容量；彻底删除时按版本关联的正向流水原子释放全部账户，并写入 `reason=file_purged`、`ref_type=node` 的负向流水。现有账户额度是数据库事实，不会因环境默认值变化自动覆盖；策略及账户管理 HTTP API 归 `BE-044`。容量校准任务 `quota.reconcile_space_usage` 仍以 PostgreSQL 文件版本为事实来源，仅报告和修复空间账户；多维通用校准也归后续管理/治理任务。彻底删除接口不在用户请求事务中同步删除最终对象；`file.cleanup_unreferenced_blobs` 会扫描 active、`ref_count=0` 且无 `file_versions` 引用的 blob，先标记为 `deleting`，再删除对象存储内容和 DB 元数据。对象存储删除失败会恢复为 `active` 并计入 `storage_errors`。`file.cleanup_orphaned_objects` 用于对象复制成功但 DB 最终化失败后的反向治理，只扫描受控 `objects/{tenant_id}/{hash_prefix}/{sha256}` key，跳过非受控 key，默认 dry-run，显式 `dry_run=False` 才删除对象；删除成功、失败和 dry-run 计划均写入系统审计，审计 metadata 不保存原始 storage key，并通过 `orphan_object_cleanup_total{status}` 暴露扫描、计划、清理、失败和跳过计数。
+当前上传接口已通过 `PermissionService` 校验父目录节点级 `upload` 权限；初始化和 multipart complete 都会重新检查，避免会话创建后权限收紧仍可完成上传。`BE-033` 已把容量服务扩展为多维账本：空间账户始终启用，`DRIVE_DEFAULT_TENANT_QUOTA_BYTES` 和 `DRIVE_DEFAULT_USER_QUOTA_BYTES` 大于 `0` 时分别启用租户、用户账户，`DRIVE_QUOTA_POLICY_ENABLED=true` 时按 `quota_policies` 的优先级匹配扩展名或 MIME 前缀，并执行累计额度和单文件上限。上传初始化执行快速检查；秒传和 multipart complete 创建文件版本时在同一事务内按固定维度顺序执行条件 update，任一维度不足都会回滚整次创建。删除到回收站不释放容量；彻底删除时按版本关联的正向流水原子释放全部账户，并写入 `reason=file_purged`、`ref_type=node` 的负向流水。现有账户额度是数据库事实，不会因环境默认值变化自动覆盖；系统管理员已可通过配额管理 API 显式创建或更新账户和策略。容量校准任务 `quota.reconcile_space_usage` 仍以 PostgreSQL 文件版本为事实来源，仅报告和修复空间账户；部门/临时额度和多维通用校准归后续管理治理。彻底删除接口不在用户请求事务中同步删除最终对象；`file.cleanup_unreferenced_blobs` 会扫描 active、`ref_count=0` 且无 `file_versions` 引用的 blob，先标记为 `deleting`，再删除对象存储内容和 DB 元数据。对象存储删除失败会恢复为 `active` 并计入 `storage_errors`。`file.cleanup_orphaned_objects` 用于对象复制成功但 DB 最终化失败后的反向治理，只扫描受控 `objects/{tenant_id}/{hash_prefix}/{sha256}` key，跳过非受控 key，默认 dry-run，显式 `dry_run=False` 才删除对象；删除成功、失败和 dry-run 计划均写入系统审计，审计 metadata 不保存原始 storage key，并通过 `orphan_object_cleanup_total{status}` 暴露扫描、计划、清理、失败和跳过计数。
 
 回收站自动清理由 `file.cleanup_expired_trash` 承担，默认使用 `DRIVE_TRASH_RETENTION_DAYS=30` 和 `DRIVE_TRASH_CLEANUP_INTERVAL_SECONDS=3600`。查询使用 `idx_nodes_trash_cleanup(tenant_id, is_deleted, deleted_at, id)`，只把没有“同删除时间、同删除人父节点”的过期节点视为删除批次根节点，避免一个目录子树被重复领取。用户发起的大目录删除、恢复和彻底删除由 `file.process_tree_operations` 按 `deleted_root_id` 和递归 CTE 分批处理；保留期自动清理仍使用独立治理任务。
 
@@ -423,14 +445,15 @@ Prometheus 规则位于 `../deploy/monitoring/maintenance-alerts.yml`，完整�
 
 - `GET /api/v1/files/{node_id}/download`
 - `GET /api/v1/files/{node_id}/content`
+- `GET /api/v1/files/{node_id}/watermarked-content`
 - `GET /api/v1/files/{node_id}/versions/{version_id}/download`
 
 下载接口基于 `nodes.current_version_id` 查询当前版本和 blob，返回 `download_url`、`expires_at`、`file_name`、`version_id`、`size_bytes`、`mime_type` 和额外 `headers`。S3/MinIO 适配器会使用 `ResponseContentDisposition` 设置下载文件名，并同时提供 ASCII `filename` 和 UTF-8 `filename*`。
 
-历史版本下载按 URL 中的 `version_id` 查询同一文件节点下的不可变版本，并复用 DTP/1、节点级 `download` 权限、预签名限流和 active blob 校验。版本列表使用 `read_meta` 权限和签名 cursor；版本回滚使用 `update` 权限，在锁定节点后校验可选 `expected_current_version_id`，创建新的 `file_versions` 记录并把 `nodes.current_version_id` 指向新版本，旧版本保持不变。
+历史版本下载按 URL 中的 `version_id` 查询同一文件节点下的不可变版本，并复用 DTP/1、节点级 `download` 权限、预签名限流、active blob 和文件安全策略校验。版本列表使用 `read_meta` 权限和签名 cursor；版本回滚使用 `update` 权限，在锁定节点后校验可选 `expected_current_version_id`，创建新的 `file_versions` 记录并把 `nodes.current_version_id` 指向新版本，旧版本保持不变。
 
 下载预签名已接入基础限流，按 `tenant + user + node + IP` 维度计数。触发限流时返回 HTTP 429，错误码为 `RATE_LIMITED`。
 
 `BE-034` 的 `/content` 入口复用完全相同的权限、当前版本和 active blob 判断，由 `StorageAdapter.stream_object` 从私有对象存储按 offset/length 分块读取，不把整文件载入 API 内存。无 `Range` 时返回 HTTP 200 完整流；单段 `Range` 支持 `bytes=start-end`、`bytes=start-` 和 `bytes=-suffix` 并返回 HTTP 206。多段、反向、越界或超过 `DRIVE_DOWNLOAD_PROXY_MAX_RANGE_BYTES` 的部分请求返回 HTTP 416 和 `Content-Range: bytes */{size}`。响应包含 `Accept-Ranges`、`Content-Length`、ETag、UTF-8 `Content-Disposition`、`Cache-Control: private, no-store` 和 DTP/1 响应头。
 
-预签名和代理下载分别使用 `file.download_presign`、`file.download_proxy` 限流；两者都按 `tenant + user + node + IP` 计数。当前下载入口已通过 `PermissionService` 校验节点级 `download` 权限：非空间成员、空间角色不足或节点 ACL deny 均返回统一的 `NODE_NOT_FOUND`，目录节点返回 `NODE_NOT_FILE`，缺失当前版本返回 `FILE_VERSION_NOT_FOUND`，非 active blob 返回 `FILE_CONTENT_NOT_AVAILABLE`。下载成功与拒绝都会写入 `file.downloaded`；代理审计额外记录 delivery mode、Range 起止位置和响应字节数。当前任何具备下载权限的客户端都可显式选择代理入口；由密级标签自动强制代理、水印和内容 DLP 仍需后续策略模型。
+预签名、代理和水印下载分别使用 `file.download_presign`、`file.download_proxy`、`file.download_watermark` 限流，并按 `tenant + user + node + IP` 计数。下载入口已通过 `PermissionService` 校验节点级 `download` 权限，并按当前匹配策略自动允许或拒绝 `presigned/proxy/watermark/blocked` 模式；关键字 DLP 可记录命中或直接阻止下载，fail-closed 可在搜索正文尚未就绪时阻止访问。内部水印入口只处理配置上限内的图片和 PDF，动态文本可包含用户、用户 ID、租户 ID 与时间。成功和拒绝审计均记录策略 ID、版本、密级、DLP 状态、传输模式和真实响应字节数；外链代理流、历史版本专用水印及 OCR/复杂内容分类继续后续治理。

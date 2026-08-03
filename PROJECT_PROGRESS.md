@@ -1,11 +1,81 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-03 Sprint 3 配额、安全与目标性能收尾
+
+### 当前状态
+
+- `PROJECT_STAGE_STATUS.md` 中 Sprint 3 原剩余的目标规模压测、配额账户/策略管理 API 和水印/DLP 基础策略均已完成，Sprint 3 尚未完成项现为空。
+- 运行时 OpenAPI 为 48 个路径、58 个操作；migration head 为 `20260803_0018`。
+- 本轮沿用已通过的 search、audit、mixed、upload-init 目标工件，只补此前未通过的 `upload_complete`，没有重复运行已通过或无关测试。
+
+### 已完成
+
+- 新增系统管理员配额管理：分页查询配额账户，创建/更新空间、租户、用户额度，以及配额策略列表、创建、更新和停用。
+- 配额更新按租户隔离并使用乐观前置条件；新额度不得低于已用容量，数据库中已有用户/租户账户优先于环境默认值。
+- 新增租户隔离的 `file_security_policies`：按扩展名/MIME 匹配密级、`presigned/proxy/watermark/blocked` 下载模式、关键字 DLP audit/block、fail-closed、水印模板和策略版本。
+- 当前版本与历史版本下载均执行安全策略；内部图片/PDF 可生成动态水印，公开外链支持预签名或水印派生对象，响应、访问日志和审计使用派生文件的真实大小。
+- 外链策略要求 proxy 时阻止直连；外链代理流、历史版本专用水印、OCR、legal hold 和复杂内容识别保留为后续治理边界。
+- PostgreSQL 新 blob 创建改为 `ON CONFLICT DO NOTHING RETURNING` 原子 upsert，移除新对象常态路径的“先查 + savepoint 插入”开销。
+- 性能 runner 增加 `--warmup-seconds`，warm-up 后重置 Locust 统计；complete 队列退出等待缩短为可记录的 0.2 秒。
+
+### 验证
+
+- 配额管理既有定向测试：`3 passed`；真实 PostgreSQL 乐观前置条件并发用例：`1 passed`。
+- 空 PostgreSQL 完整 Alembic 升级到 `20260803_0018` 通过。
+- 配额、内部文件安全和外链安全集中定向：`8 passed`；历史版本 DLP 与水印派生大小补充用例：`2 passed`。
+- 路由安全矩阵与跨租户集中验证：`67 passed`。
+- 相关 Ruff、格式检查和 Mypy 均通过；未重跑全量 pytest、旧 smoke、备份恢复或无关模块测试。
+- 目标环境确认 10,000 个 fixture 节点、100 万 OpenSearch 文档和 1,000 万审计日志；search、audit、mixed、upload-init 使用此前通过报告。
+- 最终 target `upload_complete`：计入 1,936 个 complete，0 失败，`58.364 RPS`；API（不含 storage merge）P95 `790 ms`，端到端 P95 `840 ms`，storage merge P95 `71 ms`，`report.json passed=true`。
+- `complete_cleanup.json` 确认 2,000/2,000 个准备节点已 purge，errors 为空；隔离 target 容器、卷、网络和本轮临时镜像均已清理。
+
+### 工件
+
+- `backend/tmp/performance/20260803-sprint3-final/upload-complete-target-upsert-final/report.json`
+- `backend/tmp/performance/20260803-sprint3-final/upload-complete-target-upsert-final/complete_cleanup.json`
+
+### 后续边界
+
+- 配额管理本轮闭环账户和策略子集；用户、部门、用户组、空间及统计/维护/导出等完整管理 API 继续 Sprint 9。
+- 容量通用校准、部门额度、临时上传占用上限和治理看板继续后续治理。
+- 文件安全本轮完成基于已有搜索正文的关键字 DLP 和图片/PDF 水印；OCR、扫描 PDF、复杂内容分类与 legal hold 继续 `GOV-001`。
+- 下一项按现有工程顺序进入 `BE-038` 内部分享接收端。
+
+### 涉及文件
+
+- `backend/app/modules/admin/quota.py`
+- `backend/app/modules/admin/quota_router.py`
+- `backend/app/modules/admin/quota_schemas.py`
+- `backend/app/modules/admin/file_security.py`
+- `backend/app/modules/admin/file_security_router.py`
+- `backend/app/modules/admin/file_security_schemas.py`
+- `backend/app/modules/file_security/`
+- `backend/app/modules/file/download.py`
+- `backend/app/modules/file/version_service.py`
+- `backend/app/modules/share/external_download.py`
+- `backend/app/modules/upload/repository.py`
+- `backend/performance/`
+- `backend/migrations/versions/20260803_0017_quota_policy_name.py`
+- `backend/migrations/versions/20260803_0018_file_security_policy.py`
+- `backend/tests/test_admin_quota.py`
+- `backend/tests/test_admin_quota_postgres.py`
+- `backend/tests/test_file_security_policy.py`
+- `backend/tests/test_external_share_file_security.py`
+- `backend/tests/test_performance_benchmark.py`
+- `README.md`
+- `backend/README.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `PROJECT_STAGE_STATUS.md`
+- `docs/performance-benchmark.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-08-03 Sprint 3 对象存储稳定性与同 hash 并发闭环
 
 ### 当前状态
 
 - Sprint 3 的 MinIO SDK 私有 multipart 方法、同 hash 首次上传竞争、异常 complete 恢复和失败临时对象清理已完成。
-- `PROJECT_STAGE_STATUS.md` 中 Sprint 3 尚余目标规模压测、策略/账户管理 API 和水印/DLP。
+- 此记录建立时 `PROJECT_STAGE_STATUS.md` 中 Sprint 3 尚余目标规模压测、策略/账户管理 API 和水印/DLP；这些项目已由上方 2026-08-03 收尾记录全部完成。
 
 ### 已完成
 
@@ -27,9 +97,8 @@
 
 ### 下一步
 
-1. 完成 Sprint 3 的配额账户/策略管理 API，并补显式变更审计和最小并发校验。
-2. 完成水印/DLP 基础策略与下载自动选路。
-3. 最后恢复执行一次尚未完成的目标规模压测，不重复既有 smoke、备份恢复和完整后端回归。
+1. 本记录中的三个待办已由上方“配额、安全与目标性能收尾”全部完成。
+2. 后续按工程顺序进入 `BE-038`，不重复 Sprint 3 已通过测试和 target 工件。
 
 ## 2026-08-02 Sprint 2 剩余增强闭环
 
@@ -331,15 +400,15 @@
 
 ### 边界
 
-- 当前任何具备节点下载权限的客户端都可显式选择代理入口；服务端密级标签自动强制代理尚未建立。
-- 外链分享仍返回短期预签名 URL；外链代理、动态水印和内容 DLP 不在本轮核心链路内。
+- 此记录建立时任何具备节点下载权限的客户端都可显式选择代理入口；2026-08-03 已补文件安全策略自动选路。
+- 此记录建立时外链分享只返回短期预签名 URL；2026-08-03 已补动态水印和关键字 DLP，外链代理流仍属后续边界。
 - 单次部分 Range 默认上限为 64 MiB，完整无 Range 请求不受该部分范围上限限制；API 带宽和连接资源需要由部署层继续监控。
 
 ### 下一步
 
 1. 只运行一次代理下载定向测试、Ruff 和 Mypy，确认最小闭环后提交推送。
 2. 进入 `BE-035`，为 maintenance 任务增加连续失败状态、Prometheus 指标和可配置告警阈值。
-3. 保留密级标签自动选路、外链代理、水印和 DLP 为后续治理能力，不阻塞当前工程顺序。
+3. 密级自动选路、图片/PDF 水印和关键字 DLP 已由 2026-08-03 收尾完成；仅外链代理、历史版本专用水印和复杂内容识别继续后续治理。
 
 ### 涉及文件
 
@@ -379,7 +448,7 @@
 - 上传初始化执行多维快速检查；秒传和 multipart complete 创建版本时在同一事务内按固定顺序执行原子条件扣减，任一维度不足都会回滚本次创建。
 - 彻底删除和回收站保留期清理按文件版本正向流水释放全部关联账户，兼容旧版本只有空间流水的历史数据。
 - 新增 `DRIVE_DEFAULT_USER_QUOTA_BYTES`、`DRIVE_DEFAULT_TENANT_QUOTA_BYTES`、`DRIVE_QUOTA_POLICY_ENABLED`，并同步 Windows 环境模板和 Compose。
-- 明确 `quota_policies` 当前由数据库事实表提供；账户/策略管理 HTTP API、部门额度和多维通用校准归 `BE-044`。
+- 明确 `quota_policies` 当前由数据库事实表提供；2026-08-03 已补账户/策略管理 HTTP API，部门额度和多维通用校准继续后续治理。
 
 ### 验证
 
@@ -389,15 +458,15 @@
 
 ### 风险与边界
 
-- 现有账户的 `limit_bytes` 是数据库事实，修改环境默认值不会自动覆盖已创建账户；后续由 `BE-044` 管理 API 显式调整并写审计。
-- 策略当前按上传文件名扩展名和请求中的 MIME 元数据匹配；服务端内容分类、密级标签和 DLP 判定属于后续治理能力。
+- 现有账户的 `limit_bytes` 是数据库事实，修改环境默认值不会自动覆盖已创建账户；2026-08-03 已提供管理 API 显式调整并写审计。
+- 策略按上传文件名扩展名和请求中的 MIME 元数据匹配；2026-08-03 已补密级和基于已有搜索正文的关键字 DLP，复杂内容分类/OCR 继续后续治理。
 - `quota.reconcile_space_usage` 仍只校准空间账户，多维通用校准尚未实现。
 
 ### 下一步
 
 1. 完成一次定向 Ruff、Mypy 和迁移 SQL 检查后提交并推送当前成果。
 2. 实现 `BE-034`：为高密级/强审计场景增加后端代理下载、单段 HTTP Range、流式响应和下载结果审计；普通文件继续使用短期预签名直连。
-3. `BE-029` 目标规模数据灌入和完整 target profile 保留到发布性能门禁，不再作为当前工程任务的前置条件。
+3. `BE-029` 目标规模数据和最终 target `upload_complete` 已于 2026-08-03 完成；后续直接复用通过工件。
 
 ### 涉及文件
 

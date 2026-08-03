@@ -161,6 +161,8 @@ def test_report_marks_each_request_against_p95_target(tmp_path: Path) -> None:
     assert report["workload"]["storage_warmup_mode"] is None
     assert report["workload"]["complete_mode"] is None
     assert report["workload"]["complete_ready_count"] is None
+    assert report["workload"]["warmup_seconds"] == 0.0
+    assert report["workload"]["complete_quit_grace_seconds"] is None
     by_name = {item["name"]: item for item in report["results"]}
     assert by_name["file_list_permission_batch"]["p50_ms"] == 50.0
     assert by_name["file_list_permission_batch"]["passed"] is True

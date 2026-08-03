@@ -194,6 +194,8 @@ class Settings(BaseSettings):
         ge=64 * 1024,
         le=4 * 1024 * 1024,
     )
+    file_security_policy_enabled: bool = True
+    watermark_max_source_bytes: int = Field(default=20 * 1024 * 1024, ge=1)
     default_space_quota_bytes: int = 1024 * 1024 * 1024 * 1024
     default_user_quota_bytes: int = Field(default=0, ge=0)
     default_tenant_quota_bytes: int = Field(default=0, ge=0)
@@ -210,6 +212,8 @@ class Settings(BaseSettings):
     download_presign_rate_limit_window_seconds: int = 60
     download_proxy_rate_limit_count: int = 60
     download_proxy_rate_limit_window_seconds: int = 60
+    download_watermark_rate_limit_count: int = 30
+    download_watermark_rate_limit_window_seconds: int = 60
     search_query_rate_limit_count: int = 60
     search_query_rate_limit_window_seconds: int = 60
     share_external_access_rate_limit_count: int = 60

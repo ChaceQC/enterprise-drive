@@ -68,6 +68,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--users", type=int)
     parser.add_argument("--spawn-rate", type=float)
     parser.add_argument("--run-time")
+    parser.add_argument(
+        "--warmup-seconds",
+        type=float,
+        default=float(os.getenv("PERF_WARMUP_SECONDS", "0")),
+    )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--keep-fixture", action="store_true")
     parser.add_argument("--no-prepare", action="store_true")
@@ -179,6 +184,8 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("--profile target 必须提供 --docker-compose-project")
     if args.profile == "target" and scenario in {"search", "audit"} and args.target_state is None:
         raise SystemExit("target 搜索/审计场景必须提供 --target-state")
+    if args.warmup_seconds < 0:
+        raise SystemExit("--warmup-seconds 不能为负数")
     users = args.users or profile.users
     spawn_rate = args.spawn_rate or profile.spawn_rate
     run_time = args.run_time or profile.run_time
@@ -240,6 +247,7 @@ def main(argv: list[str] | None = None) -> int:
             "PERF_TENANT_SLUG": args.tenant_slug,
             "PERF_USERNAME": args.username,
             "PERF_PASSWORD": args.password,
+            "PERF_WARMUP_SECONDS": str(args.warmup_seconds),
             "PYTHONUTF8": "1",
         }
     )
@@ -306,6 +314,7 @@ def main(argv: list[str] | None = None) -> int:
             complete_ready_count=(
                 len(prepared_complete_queue.items) if prepared_complete_queue is not None else None
             ),
+            warmup_seconds=args.warmup_seconds,
         )
         print(json.dumps(report, ensure_ascii=False, indent=2))
         return 0 if report["passed"] else 1

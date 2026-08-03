@@ -93,6 +93,7 @@ class ExternalShareDownloadRequest(BaseModel):
     raw_token: str = Field(min_length=32, max_length=256)
     node_id: UUID
     passcode: str | None = Field(default=None, min_length=1, max_length=128)
+    delivery_mode: Literal["presigned", "watermark"] = "presigned"
 
 
 class ExternalShareDownloadResponse(DriveTransferProtocolResponse):

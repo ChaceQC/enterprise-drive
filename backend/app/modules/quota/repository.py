@@ -3,11 +3,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
-from sqlalchemy import and_, func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.pagination import PageCursor
 from app.core.security import utc_now
+from app.modules.auth.models import Tenant, User
 from app.modules.file.models import FileVersion, Node
 from app.modules.quota.models import QuotaAccount, QuotaLedger, QuotaPolicy
 from app.modules.space.models import Space
@@ -40,6 +42,24 @@ class QuotaRepository:
                 QuotaAccount.owner_type == owner_type,
                 QuotaAccount.owner_id == owner_id,
             )
+        )
+        return result.scalar_one_or_none()
+
+    async def get_account_by_owner_for_update(
+        self,
+        *,
+        tenant_id: UUID,
+        owner_type: str,
+        owner_id: UUID,
+    ) -> QuotaAccount | None:
+        result = await self.session.execute(
+            select(QuotaAccount)
+            .where(
+                QuotaAccount.tenant_id == tenant_id,
+                QuotaAccount.owner_type == owner_type,
+                QuotaAccount.owner_id == owner_id,
+            )
+            .with_for_update()
         )
         return result.scalar_one_or_none()
 
@@ -111,6 +131,142 @@ class QuotaRepository:
             .order_by(QuotaPolicy.priority, QuotaPolicy.created_at, QuotaPolicy.id)
         )
         return list(result.scalars().all())
+
+    async def list_accounts(
+        self,
+        *,
+        tenant_id: UUID,
+        owner_type: str | None,
+        owner_id: UUID | None,
+        limit: int,
+        cursor: PageCursor | None,
+    ) -> list[QuotaAccount]:
+        conditions = [QuotaAccount.tenant_id == tenant_id]
+        if owner_type is not None:
+            conditions.append(QuotaAccount.owner_type == owner_type)
+        if owner_id is not None:
+            conditions.append(QuotaAccount.owner_id == owner_id)
+        if cursor is not None:
+            conditions.append(
+                or_(
+                    QuotaAccount.created_at < cursor.created_at,
+                    and_(
+                        QuotaAccount.created_at == cursor.created_at,
+                        QuotaAccount.id < cursor.item_id,
+                    ),
+                )
+            )
+        result = await self.session.execute(
+            select(QuotaAccount)
+            .where(*conditions)
+            .order_by(QuotaAccount.created_at.desc(), QuotaAccount.id.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def owner_exists(
+        self,
+        *,
+        tenant_id: UUID,
+        owner_type: str,
+        owner_id: UUID,
+    ) -> bool:
+        if owner_type == "tenant":
+            result = await self.session.execute(
+                select(Tenant.id).where(Tenant.id == tenant_id, Tenant.id == owner_id)
+            )
+        elif owner_type == "user":
+            result = await self.session.execute(
+                select(User.id).where(User.tenant_id == tenant_id, User.id == owner_id)
+            )
+        elif owner_type == "space":
+            result = await self.session.execute(
+                select(Space.id).where(Space.tenant_id == tenant_id, Space.id == owner_id)
+            )
+        elif owner_type == "policy":
+            result = await self.session.execute(
+                select(QuotaPolicy.id).where(
+                    QuotaPolicy.tenant_id == tenant_id,
+                    QuotaPolicy.id == owner_id,
+                )
+            )
+        else:
+            return False
+        return result.scalar_one_or_none() is not None
+
+    async def list_policies(
+        self,
+        *,
+        tenant_id: UUID,
+        is_active: bool | None,
+        name: str | None,
+        limit: int,
+        cursor: PageCursor | None,
+    ) -> list[QuotaPolicy]:
+        conditions = [QuotaPolicy.tenant_id == tenant_id]
+        if is_active is not None:
+            conditions.append(QuotaPolicy.is_active.is_(is_active))
+        if name is not None:
+            conditions.append(func.lower(QuotaPolicy.name).contains(name.casefold()))
+        if cursor is not None:
+            conditions.append(
+                or_(
+                    QuotaPolicy.created_at < cursor.created_at,
+                    and_(
+                        QuotaPolicy.created_at == cursor.created_at,
+                        QuotaPolicy.id < cursor.item_id,
+                    ),
+                )
+            )
+        result = await self.session.execute(
+            select(QuotaPolicy)
+            .where(*conditions)
+            .order_by(QuotaPolicy.created_at.desc(), QuotaPolicy.id.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def get_policy_for_update(
+        self,
+        *,
+        tenant_id: UUID,
+        policy_id: UUID,
+    ) -> QuotaPolicy | None:
+        result = await self.session.execute(
+            select(QuotaPolicy)
+            .where(
+                QuotaPolicy.tenant_id == tenant_id,
+                QuotaPolicy.id == policy_id,
+            )
+            .with_for_update()
+        )
+        return result.scalar_one_or_none()
+
+    async def create_policy(
+        self,
+        *,
+        tenant_id: UUID,
+        name: str,
+        priority: int,
+        limit_bytes: int,
+        max_file_size_bytes: int | None,
+        extensions: list[str],
+        mime_prefixes: list[str],
+        is_active: bool,
+    ) -> QuotaPolicy:
+        policy = QuotaPolicy(
+            tenant_id=tenant_id,
+            name=name,
+            priority=priority,
+            limit_bytes=limit_bytes,
+            max_file_size_bytes=max_file_size_bytes,
+            extensions=extensions,
+            mime_prefixes=mime_prefixes,
+            is_active=is_active,
+        )
+        self.session.add(policy)
+        await self.session.flush()
+        return policy
 
     async def try_add_usage(
         self,

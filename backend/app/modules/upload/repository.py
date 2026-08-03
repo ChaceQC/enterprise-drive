@@ -2,12 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import select, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.security import utc_now
 from app.modules.file.models import FileBlob, FileVersion, Node
 from app.modules.upload.models import UploadPart, UploadSession
 
@@ -154,6 +156,16 @@ class UploadRepository:
         storage_key: str,
         mime_type: str | None,
     ) -> BlobReferenceResolution:
+        if self.session.get_bind().dialect.name == "postgresql":
+            return await self._resolve_file_blob_reference_postgresql(
+                tenant_id=tenant_id,
+                hash_algo=hash_algo,
+                content_hash=content_hash,
+                size_bytes=size_bytes,
+                storage_key=storage_key,
+                mime_type=mime_type,
+            )
+
         existing = await self.get_blob_by_hash_any_status(
             tenant_id=tenant_id,
             hash_algo=hash_algo,
@@ -185,6 +197,54 @@ class UploadRepository:
             if existing is None:
                 raise RuntimeError("file blob creation race did not resolve") from exc
             return BlobReferenceResolution(blob=existing, created=False)
+
+    async def _resolve_file_blob_reference_postgresql(
+        self,
+        *,
+        tenant_id: UUID,
+        hash_algo: str,
+        content_hash: str,
+        size_bytes: int,
+        storage_key: str,
+        mime_type: str | None,
+    ) -> BlobReferenceResolution:
+        statement = (
+            postgresql_insert(FileBlob)
+            .values(
+                id=uuid4(),
+                tenant_id=tenant_id,
+                hash_algo=hash_algo,
+                content_hash=content_hash,
+                size_bytes=size_bytes,
+                storage_key=storage_key,
+                mime_type=mime_type,
+                ref_count=1,
+                status="active",
+                created_at=utc_now(),
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    FileBlob.tenant_id,
+                    FileBlob.hash_algo,
+                    FileBlob.content_hash,
+                    FileBlob.size_bytes,
+                ]
+            )
+            .returning(FileBlob)
+        )
+        created = (await self.session.execute(statement)).scalar_one_or_none()
+        if created is not None:
+            return BlobReferenceResolution(blob=created, created=True)
+
+        existing = await self.get_blob_by_hash_any_status(
+            tenant_id=tenant_id,
+            hash_algo=hash_algo,
+            content_hash=content_hash,
+            size_bytes=size_bytes,
+        )
+        if existing is None:
+            raise RuntimeError("file blob upsert conflict did not resolve")
+        return BlobReferenceResolution(blob=existing, created=False)
 
     async def create_upload_session(
         self,

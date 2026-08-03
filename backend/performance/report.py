@@ -66,6 +66,7 @@ def write_report(
     environment_snapshot: dict[str, Any] | None = None,
     complete_mode: str | None = None,
     complete_ready_count: int | None = None,
+    warmup_seconds: float = 0.0,
 ) -> dict[str, Any]:
     results = read_stats(output_dir / "stats.csv")
     required_metrics = _apply_target_throughput_requirements(
@@ -122,6 +123,12 @@ def write_report(
             "complete_mode": complete_mode if scenario == "upload_complete" else None,
             "complete_ready_count": (
                 complete_ready_count if scenario == "upload_complete" else None
+            ),
+            "warmup_seconds": warmup_seconds,
+            "complete_quit_grace_seconds": (
+                float(os.getenv("PERF_COMPLETE_QUIT_GRACE_SECONDS", "0.2"))
+                if scenario == "upload_complete"
+                else None
             ),
         },
         "environment": {

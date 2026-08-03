@@ -9,7 +9,7 @@ from app.core.config import Settings
 from app.core.pagination import decode_page_cursor, encode_page_cursor
 from app.core.security import utc_now
 from app.infrastructure.storage.base import StorageAdapter
-from app.modules.audit.schemas import AuditContext
+from app.modules.audit.schemas import AuditContext, AuditEvent
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
 from app.modules.file.audit import record_node_event
@@ -21,6 +21,7 @@ from app.modules.file.schemas import (
     FileVersionResponse,
     FileVersionRollbackResponse,
 )
+from app.modules.file_security.service import FileSecurityDecision, FileSecurityService
 from app.modules.permission.actions import ACTION_DOWNLOAD, ACTION_READ_META, ACTION_UPDATE
 from app.modules.permission.service import PermissionService
 from app.modules.preview.events import emit_preview_render_requested
@@ -40,6 +41,7 @@ class FileVersionService:
         storage: StorageAdapter,
         settings: Settings,
         audit_service: AuditService | None = None,
+        security_service: FileSecurityService | None = None,
     ) -> None:
         self.repository = repository
         self.space_repository = space_repository
@@ -48,6 +50,7 @@ class FileVersionService:
         self.storage = storage
         self.settings = settings
         self.audit_service = audit_service
+        self.security_service = security_service
 
     async def list_versions(
         self,
@@ -124,6 +127,13 @@ class FileVersionService:
             node=node,
             version_id=version_id,
         )
+        security_decision = await self._ensure_version_delivery_allowed(
+            current_user=current_user,
+            node=node,
+            version=version,
+            blob=blob,
+            audit_context=audit_context,
+        )
         presigned = await self.storage.presign_download(
             bucket=self.settings.s3_bucket,
             storage_key=blob.storage_key,
@@ -142,6 +152,7 @@ class FileVersionService:
                 "blob_id": str(blob.id),
                 "size_bytes": version.size_bytes,
                 "delivery_mode": "presigned",
+                **_security_metadata(security_decision),
             },
         )
         await self.repository.commit()
@@ -365,3 +376,54 @@ class FileVersionService:
         if blob.status != "active":
             raise ApiError("FILE_CONTENT_NOT_AVAILABLE", "文件内容暂不可用", status_code=409)
         return version, blob
+
+    async def _ensure_version_delivery_allowed(
+        self,
+        *,
+        current_user: User,
+        node: Node,
+        version: FileVersion,
+        blob: FileBlob,
+        audit_context: AuditContext | None,
+    ) -> FileSecurityDecision | None:
+        if self.security_service is None:
+            return None
+        decision = await self.security_service.evaluate(
+            tenant_id=current_user.tenant_id,
+            file_name=node.name,
+            mime_type=version.mime_type or blob.mime_type,
+            version=version,
+        )
+        try:
+            self.security_service.ensure_delivery(
+                decision=decision,
+                requested_mode="presigned",
+            )
+        except ApiError as exc:
+            if self.audit_service is not None:
+                await self.audit_service.record(
+                    event=AuditEvent(
+                        tenant_id=current_user.tenant_id,
+                        actor_id=current_user.id,
+                        action="file.version.downloaded",
+                        resource_type="node",
+                        resource_id=node.id,
+                        result="denied",
+                        risk_level="medium",
+                        metadata={
+                            "space_id": str(node.space_id),
+                            "version_id": str(version.id),
+                            "version_no": version.version_no,
+                            "reason": exc.code.lower(),
+                            **decision.audit_metadata(),
+                        },
+                    ),
+                    context=audit_context or AuditContext(),
+                )
+                await self.repository.commit()
+            raise
+        return decision
+
+
+def _security_metadata(decision: FileSecurityDecision | None) -> dict[str, object]:
+    return decision.audit_metadata() if decision is not None else {}

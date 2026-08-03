@@ -36,6 +36,9 @@ _SHARE_ID = "00000000-0000-4000-8000-000000000006"
 _UPLOAD_SESSION_ID = "00000000-0000-4000-8000-000000000007"
 _VERSION_ID = "00000000-0000-4000-8000-000000000008"
 _FILE_TREE_OPERATION_ID = "00000000-0000-4000-8000-000000000009"
+_QUOTA_OWNER_ID = "00000000-0000-4000-8000-00000000000a"
+_QUOTA_POLICY_ID = "00000000-0000-4000-8000-00000000000b"
+_FILE_SECURITY_POLICY_ID = "00000000-0000-4000-8000-00000000000c"
 _RAW_SHARE_TOKEN = "0" * 32
 _CONTENT_HASH = "0" * 64
 
@@ -74,6 +77,111 @@ ROUTE_SECURITY_MATRIX: tuple[SecurityRouteCase, ...] = (
         tenant_scope="session",
         csrf_mode="none",
         authorization="super_admin",
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/admin/quotas/accounts",
+        request_path="/api/v1/admin/quotas/accounts",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="super_admin",
+    ),
+    SecurityRouteCase(
+        method="PUT",
+        template_path="/api/v1/admin/quotas/accounts/{owner_type}/{owner_id}",
+        request_path=f"/api/v1/admin/quotas/accounts/user/{_QUOTA_OWNER_ID}",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="required",
+        authorization="super_admin",
+        json_body={"limit_bytes": 1024},
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/admin/quotas/policies",
+        request_path="/api/v1/admin/quotas/policies",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="super_admin",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/admin/quotas/policies",
+        request_path="/api/v1/admin/quotas/policies",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="required",
+        authorization="super_admin",
+        json_body={
+            "name": "matrix-quota-policy",
+            "limit_bytes": 1024,
+            "extensions": [".matrix"],
+        },
+    ),
+    SecurityRouteCase(
+        method="PATCH",
+        template_path="/api/v1/admin/quotas/policies/{policy_id}",
+        request_path=f"/api/v1/admin/quotas/policies/{_QUOTA_POLICY_ID}",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="required",
+        authorization="super_admin",
+        json_body={"expected_limit_bytes": 1024, "priority": 10},
+    ),
+    SecurityRouteCase(
+        method="DELETE",
+        template_path="/api/v1/admin/quotas/policies/{policy_id}",
+        request_path=f"/api/v1/admin/quotas/policies/{_QUOTA_POLICY_ID}",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="required",
+        authorization="super_admin",
+        query={"expected_limit_bytes": 1024},
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/admin/file-security/policies",
+        request_path="/api/v1/admin/file-security/policies",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="super_admin",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/admin/file-security/policies",
+        request_path="/api/v1/admin/file-security/policies",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="required",
+        authorization="super_admin",
+        json_body={
+            "name": "matrix-file-security",
+            "download_mode": "proxy",
+            "extensions": [".matrix"],
+        },
+    ),
+    SecurityRouteCase(
+        method="PATCH",
+        template_path="/api/v1/admin/file-security/policies/{policy_id}",
+        request_path=f"/api/v1/admin/file-security/policies/{_FILE_SECURITY_POLICY_ID}",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="required",
+        authorization="super_admin",
+        json_body={"expected_version": 1, "priority": 10},
+    ),
+    SecurityRouteCase(
+        method="DELETE",
+        template_path="/api/v1/admin/file-security/policies/{policy_id}",
+        request_path=f"/api/v1/admin/file-security/policies/{_FILE_SECURITY_POLICY_ID}",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="required",
+        authorization="super_admin",
+        query={"expected_version": 1},
     ),
     SecurityRouteCase(
         method="POST",
@@ -396,6 +504,15 @@ ROUTE_SECURITY_MATRIX: tuple[SecurityRouteCase, ...] = (
         csrf_mode="none",
         authorization="node_download",
         headers={"Range": "bytes=0-0"},
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/files/{node_id}/watermarked-content",
+        request_path=f"/api/v1/files/{_NODE_ID}/watermarked-content",
+        access_mode="session",
+        tenant_scope="resource",
+        csrf_mode="none",
+        authorization="node_download",
     ),
     SecurityRouteCase(
         method="GET",
