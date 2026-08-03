@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Annotated
 from uuid import UUID
 
+from celery import Celery  # type: ignore[import-untyped]
 from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,7 +15,6 @@ from app.api.deps import (
 )
 from app.core.config import Settings, get_settings
 from app.db.session import get_db_session
-from app.infrastructure.queue.celery_app import celery_app
 from app.infrastructure.storage.base import StorageAdapter
 from app.modules.admin.governance_repository import AdminGovernanceRepository
 from app.modules.admin.governance_schemas import (
@@ -37,6 +38,15 @@ from app.modules.auth.models import User
 router = APIRouter()
 
 
+@lru_cache
+def _admin_task_client(*, broker_url: str, result_backend: str) -> Celery:
+    return Celery(
+        "enterprise_drive_admin_client",
+        broker=broker_url,
+        backend=result_backend,
+    )
+
+
 def get_admin_governance_service(
     session: Annotated[AsyncSession, Depends(get_db_session)],
     settings: Annotated[Settings, Depends(get_settings)],
@@ -46,7 +56,10 @@ def get_admin_governance_service(
         repository=AdminGovernanceRepository(session),
         job_repository=AdminJobRepository(session),
         audit_service=AuditService(repository=AuditRepository(session)),
-        celery_app=celery_app,
+        celery_app=_admin_task_client(
+            broker_url=settings.celery_broker_url,
+            result_backend=settings.celery_result_backend,
+        ),
         storage=storage,
         settings=settings,
     )

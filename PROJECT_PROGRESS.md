@@ -33,9 +33,11 @@
 - Prometheus 3.13.1 `promtool`、Alertmanager 0.33.1 `amtool`、Grafana dashboard JSON 和三镜像 `wget` healthcheck 可用性通过。
 - 监控语义修正后仅重跑受影响的 `platform-alerts.yml`：`promtool check rules` 通过并识别 8 条规则；maintenance dashboard JSON 重新解析通过，确认 alert/stale selector 已更新。
 - 管理任务审计摘要修正后只运行对应安全防护用例，结果 `1 passed`；受影响 Worker/测试 Ruff 与 format 通过，Worker 定向 Mypy 通过。
+- observability 根因修正后，管理路由 Ruff/format/Mypy 通过；全新 Python 进程创建 FastAPI app 后确认未导入 `app.core.worker_metrics`，API registry 不含 `worker_tasks_total` 或 `trash_cleanup_released_bytes_total`。
 - 本机/TLS Nginx 模板 `nginx -t` 通过；真实 raw HTTP smoke 验证未知 API/S3 Host、CL/TE、重复 Content-Length、API 413、S3 streaming 和本机 Host 兼容。
 - `docker compose --profile monitoring --profile tls-tools ... config` 通过，确认只有 gateway 发布宿主端口；GitHub Actions YAML 可解析。
 - 首次推送提交 `35b3831` 触发 `backend-ci` run `30827760952`：Windows 部署、MinIO image policy 和两组 supply-chain job 全部成功；backend 仅在 Ruff format check 报告 `tests/test_celery_schedule.py` 一处格式差异，其余步骤因 fail-fast 未执行。已按 Ruff diff 精确修正该文件，不重跑无关测试。
+- 格式修复提交 `7cab5f6` 触发 `backend-ci` run `30828070314`：Ruff、Bandit、依赖审计、Mypy、完整 Pytest、Compose/监控/TLS/Nginx、Windows 和 MinIO job 均已通过；backend 仅在 observability Docker smoke 发现 API metrics 混入 Worker 指标。根因是管理路由导入 Worker 专用 `celery_app` 触发 Worker observability 模块副作用，已改为只含 broker/backend 的缓存 Celery 发送客户端。
 - 未重复运行全量 pytest、旧 Sprint 集合、真实 MinIO、完整备份恢复或 Sprint 3 性能测试；这些未受本轮代码路径影响，继续复用已有通过证据。推送后只跟踪 `backend-ci`，若失败仅修复对应失败项。
 
 ### 阻塞与风险
