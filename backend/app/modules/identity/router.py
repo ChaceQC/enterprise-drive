@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import lru_cache
 from typing import Annotated
 from uuid import UUID
 
+from celery import Celery  # type: ignore[import-untyped]
 from fastapi import APIRouter, Depends, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import build_audit_context, get_current_user
 from app.api.errors import ApiError
 from app.core.config import Settings, get_settings
+from app.core.metrics import record_identity_provider_operation
 from app.db.session import get_db_session
 from app.infrastructure.identity.ldap import Ldap3ProviderAdapter
 from app.infrastructure.identity.oidc import HttpOidcProviderAdapter
@@ -50,7 +53,6 @@ from app.modules.identity.schemas import (
     OidcStartResponse,
     PublicOidcProviderListResponse,
 )
-from app.workers.identity_tasks import enqueue_ldap_sync
 
 router = APIRouter()
 admin_router = APIRouter()
@@ -85,11 +87,35 @@ def get_ldap_identity_service(
         secret_resolver=EnvironmentSecretResolver(),
         settings=settings,
         audit_service=AuditService(repository=AuditRepository(session)),
+        provider_operation_recorder=record_identity_provider_operation,
     )
 
 
-def get_ldap_sync_enqueuer() -> Callable[[UUID], None]:
-    return enqueue_ldap_sync
+@lru_cache
+def _identity_task_client(*, broker_url: str, result_backend: str) -> Celery:
+    return Celery(
+        "enterprise_drive_identity_client",
+        broker=broker_url,
+        backend=result_backend,
+    )
+
+
+def get_ldap_sync_enqueuer(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> Callable[[UUID], None]:
+    task_client = _identity_task_client(
+        broker_url=settings.celery_broker_url,
+        result_backend=settings.celery_result_backend,
+    )
+
+    def enqueue(run_id: UUID) -> None:
+        task_client.send_task(
+            "identity.sync_ldap",
+            args=[str(run_id)],
+            queue="maintenance",
+        )
+
+    return enqueue
 
 
 @router.get("/oidc/providers", response_model=PublicOidcProviderListResponse)

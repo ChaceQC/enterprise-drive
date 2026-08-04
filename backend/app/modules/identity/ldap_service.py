@@ -4,7 +4,7 @@ import secrets
 from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Literal, cast
+from typing import Literal, Protocol, cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -12,7 +12,6 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.errors import ApiError
 from app.core.config import Settings
-from app.core.metrics import record_identity_provider_operation
 from app.core.security import hash_password, utc_now
 from app.infrastructure.identity.base import (
     LdapDepartmentRecord,
@@ -51,6 +50,25 @@ from app.modules.org.models import Department, DepartmentMember, UserGroup, User
 from app.modules.share.events import emit_share_recipients_rebuild_requested
 
 
+class _IdentityProviderOperationRecorder(Protocol):
+    def __call__(
+        self,
+        *,
+        provider_type: str,
+        operation: str,
+        outcome: str,
+    ) -> None: ...
+
+
+def _ignore_identity_provider_operation(
+    *,
+    provider_type: str,
+    operation: str,
+    outcome: str,
+) -> None:
+    del provider_type, operation, outcome
+
+
 @dataclass(slots=True)
 class _LdapPermissionChanges:
     user_ids: set[UUID] = field(default_factory=set)
@@ -71,12 +89,16 @@ class LdapIdentityService:
         secret_resolver: SecretResolver,
         settings: Settings,
         audit_service: AuditService | None = None,
+        provider_operation_recorder: _IdentityProviderOperationRecorder = (
+            _ignore_identity_provider_operation
+        ),
     ) -> None:
         self.repository = repository
         self.provider_adapter = provider_adapter
         self.secret_resolver = secret_resolver
         self.settings = settings
         self.audit_service = audit_service
+        self.provider_operation_recorder = provider_operation_recorder
 
     async def list_sources(
         self,
@@ -257,7 +279,7 @@ class LdapIdentityService:
         try:
             result = await self.provider_adapter.test_connection(source_config)
         except Exception:
-            record_identity_provider_operation(
+            self.provider_operation_recorder(
                 provider_type="ldap",
                 operation="connection_test",
                 outcome="failure",
@@ -277,7 +299,7 @@ class LdapIdentityService:
             )
             await self.repository.commit()
             raise
-        record_identity_provider_operation(
+        self.provider_operation_recorder(
             provider_type="ldap",
             operation="connection_test",
             outcome="success",

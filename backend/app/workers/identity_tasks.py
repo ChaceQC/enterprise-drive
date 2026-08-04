@@ -18,10 +18,6 @@ from app.modules.identity.ldap_service import LdapIdentityService
 from app.modules.identity.repository import IdentityRepository
 
 
-def enqueue_ldap_sync(run_id: UUID) -> None:
-    celery_app.send_task("identity.sync_ldap", args=[str(run_id)])
-
-
 def sync_ldap_run(run_id: str) -> dict[str, object]:
     try:
         return asyncio.run(_sync_ldap_run(run_id=UUID(run_id)))
