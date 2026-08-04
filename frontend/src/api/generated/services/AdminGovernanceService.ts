@@ -2,17 +2,32 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { AdminAuditGovernanceResponse } from '../models/AdminAuditGovernanceResponse';
 import type { AdminExportCreateRequest } from '../models/AdminExportCreateRequest';
 import type { AdminExportDownloadResponse } from '../models/AdminExportDownloadResponse';
 import type { AdminJobListResponse } from '../models/AdminJobListResponse';
 import type { AdminJobResponse } from '../models/AdminJobResponse';
 import type { AdminMaintenanceOverviewResponse } from '../models/AdminMaintenanceOverviewResponse';
 import type { AdminMaintenanceRunRequest } from '../models/AdminMaintenanceRunRequest';
+import type { AdminOutboxDeadLetterListResponse } from '../models/AdminOutboxDeadLetterListResponse';
+import type { AdminOutboxDeadLetterResponse } from '../models/AdminOutboxDeadLetterResponse';
+import type { AdminOutboxReplayResponse } from '../models/AdminOutboxReplayResponse';
 import type { AdminOverviewStatsResponse } from '../models/AdminOverviewStatsResponse';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class AdminGovernanceService {
+    /**
+     * Get Admin Audit Governance
+     * @returns AdminAuditGovernanceResponse Successful Response
+     * @throws ApiError
+     */
+    public static getAdminAuditGovernanceApiV1AdminAuditGovernanceGet(): CancelablePromise<AdminAuditGovernanceResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/admin/audit/governance',
+        });
+    }
     /**
      * List Admin Exports
      * @returns AdminJobListResponse Successful Response
@@ -117,7 +132,7 @@ export class AdminGovernanceService {
         pageSize = 50,
     }: {
         status?: ('pending' | 'running' | 'succeeded' | 'failed' | 'expired' | null),
-        taskName?: ('upload.expire_sessions' | 'file.cleanup_expired_trash' | 'share.expire_shares' | 'preview.cleanup_artifacts' | 'file.process_tree_operations' | 'file.cleanup_unreferenced_blobs' | 'file.cleanup_orphaned_objects' | 'quota.reconcile_space_usage' | 'admin.cleanup_expired_exports' | null),
+        taskName?: ('audit.ensure_partitions' | 'audit.archive_retention' | 'upload.expire_sessions' | 'file.cleanup_expired_trash' | 'share.expire_shares' | 'preview.cleanup_artifacts' | 'file.process_tree_operations' | 'file.cleanup_unreferenced_blobs' | 'file.cleanup_orphaned_objects' | 'quota.reconcile_space_usage' | 'admin.cleanup_expired_exports' | null),
         cursor?: (string | null),
         pageSize?: number,
     }): CancelablePromise<AdminJobListResponse> {
@@ -185,6 +200,78 @@ export class AdminGovernanceService {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/v1/admin/maintenance/tasks',
+        });
+    }
+    /**
+     * List Admin Outbox Dead Letters
+     * @returns AdminOutboxDeadLetterListResponse Successful Response
+     * @throws ApiError
+     */
+    public static listAdminOutboxDeadLettersApiV1AdminOutboxDeadLettersGet({
+        eventType,
+        errorKind,
+        cursor,
+        pageSize = 50,
+    }: {
+        eventType?: (string | null),
+        errorKind?: (string | null),
+        cursor?: (string | null),
+        pageSize?: number,
+    }): CancelablePromise<AdminOutboxDeadLetterListResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/admin/outbox/dead-letters',
+            query: {
+                'event_type': eventType,
+                'error_kind': errorKind,
+                'cursor': cursor,
+                'page_size': pageSize,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Get Admin Outbox Dead Letter
+     * @returns AdminOutboxDeadLetterResponse Successful Response
+     * @throws ApiError
+     */
+    public static getAdminOutboxDeadLetterApiV1AdminOutboxDeadLettersEventIdGet({
+        eventId,
+    }: {
+        eventId: string,
+    }): CancelablePromise<AdminOutboxDeadLetterResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/v1/admin/outbox/dead-letters/{event_id}',
+            path: {
+                'event_id': eventId,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Replay Admin Outbox Dead Letter
+     * @returns AdminOutboxReplayResponse Successful Response
+     * @throws ApiError
+     */
+    public static replayAdminOutboxDeadLetterApiV1AdminOutboxDeadLettersEventIdReplayPost({
+        eventId,
+    }: {
+        eventId: string,
+    }): CancelablePromise<AdminOutboxReplayResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/admin/outbox/dead-letters/{event_id}/replay',
+            path: {
+                'event_id': eventId,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
         });
     }
     /**

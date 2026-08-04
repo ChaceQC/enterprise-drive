@@ -152,6 +152,273 @@
         "title": "AddSpaceMemberRequest",
         "type": "object"
       },
+      "AdminAuditArchiveResponse": {
+        "properties": {
+          "content_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Sha256"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "delete_source": {
+            "title": "Delete Source",
+            "type": "boolean"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "file_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Name"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "period_end": {
+            "format": "date-time",
+            "title": "Period End",
+            "type": "string"
+          },
+          "period_start": {
+            "format": "date-time",
+            "title": "Period Start",
+            "type": "string"
+          },
+          "row_count": {
+            "title": "Row Count",
+            "type": "integer"
+          },
+          "signature_algorithm": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature Algorithm"
+          },
+          "signature_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature Key Id"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          },
+          "source_deleted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Deleted At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "period_start",
+          "period_end",
+          "status",
+          "row_count",
+          "file_name",
+          "size_bytes",
+          "content_sha256",
+          "signature_algorithm",
+          "signature_key_id",
+          "delete_source",
+          "source_deleted_at",
+          "error_code",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminAuditArchiveResponse",
+        "type": "object"
+      },
+      "AdminAuditGovernanceResponse": {
+        "properties": {
+          "archive_delete_source": {
+            "title": "Archive Delete Source",
+            "type": "boolean"
+          },
+          "archives_failed": {
+            "title": "Archives Failed",
+            "type": "integer"
+          },
+          "archives_total": {
+            "title": "Archives Total",
+            "type": "integer"
+          },
+          "external_delivery_enabled": {
+            "title": "External Delivery Enabled",
+            "type": "boolean"
+          },
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "last_archive_succeeded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Archive Succeeded At"
+          },
+          "last_delivery_failed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Delivery Failed At"
+          },
+          "last_delivery_succeeded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Delivery Succeeded At"
+          },
+          "oldest_pending_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest Pending At"
+          },
+          "outbox_dead": {
+            "title": "Outbox Dead",
+            "type": "integer"
+          },
+          "outbox_failed": {
+            "title": "Outbox Failed",
+            "type": "integer"
+          },
+          "outbox_pending": {
+            "title": "Outbox Pending",
+            "type": "integer"
+          },
+          "outbox_processing": {
+            "title": "Outbox Processing",
+            "type": "integer"
+          },
+          "outbox_sent": {
+            "title": "Outbox Sent",
+            "type": "integer"
+          },
+          "partition_months_ahead": {
+            "title": "Partition Months Ahead",
+            "type": "integer"
+          },
+          "recent_archives": {
+            "items": {
+              "$ref": "#/components/schemas/AdminAuditArchiveResponse"
+            },
+            "title": "Recent Archives",
+            "type": "array"
+          },
+          "retention_days": {
+            "title": "Retention Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "generated_at",
+          "external_delivery_enabled",
+          "partition_months_ahead",
+          "retention_days",
+          "archive_delete_source",
+          "outbox_pending",
+          "outbox_processing",
+          "outbox_failed",
+          "outbox_dead",
+          "outbox_sent",
+          "oldest_pending_at",
+          "last_delivery_succeeded_at",
+          "last_delivery_failed_at",
+          "archives_total",
+          "archives_failed",
+          "last_archive_succeeded_at",
+          "recent_archives"
+        ],
+        "title": "AdminAuditGovernanceResponse",
+        "type": "object"
+      },
       "AdminAuditLogListResponse": {
         "properties": {
           "items": {
@@ -529,6 +796,17 @@
       },
       "AdminExportDownloadResponse": {
         "properties": {
+          "content_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Sha256"
+          },
           "content_type": {
             "title": "Content Type",
             "type": "string"
@@ -551,6 +829,39 @@
             "title": "Job Id",
             "type": "string"
           },
+          "signature_algorithm": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature Algorithm"
+          },
+          "signature_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature Key Id"
+          },
+          "signature_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature Value"
+          },
           "size_bytes": {
             "title": "Size Bytes",
             "type": "integer"
@@ -561,6 +872,10 @@
           "file_name",
           "content_type",
           "size_bytes",
+          "content_sha256",
+          "signature_algorithm",
+          "signature_key_id",
+          "signature_value",
           "download_url",
           "expires_at"
         ],
@@ -1190,6 +1505,17 @@
             ],
             "title": "Completed At"
           },
+          "content_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Sha256"
+          },
           "content_type": {
             "anyOf": [
               {
@@ -1271,6 +1597,39 @@
             "title": "Result",
             "type": "object"
           },
+          "signature_algorithm": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature Algorithm"
+          },
+          "signature_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature Key Id"
+          },
+          "signature_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature Value"
+          },
           "size_bytes": {
             "anyOf": [
               {
@@ -1332,6 +1691,10 @@
           "file_name",
           "content_type",
           "size_bytes",
+          "content_sha256",
+          "signature_algorithm",
+          "signature_key_id",
+          "signature_value",
           "error_code",
           "error_message",
           "version",
@@ -1367,6 +1730,11 @@
       },
       "AdminMaintenanceRunRequest": {
         "properties": {
+          "delete_source": {
+            "default": false,
+            "title": "Delete Source",
+            "type": "boolean"
+          },
           "dry_run": {
             "default": true,
             "title": "Dry Run",
@@ -1404,6 +1772,8 @@
           },
           "task_name": {
             "enum": [
+              "audit.ensure_partitions",
+              "audit.archive_retention",
               "upload.expire_sessions",
               "file.cleanup_expired_trash",
               "share.expire_shares",
@@ -1484,6 +1854,8 @@
           },
           "task_name": {
             "enum": [
+              "audit.ensure_partitions",
+              "audit.archive_retention",
               "upload.expire_sessions",
               "file.cleanup_expired_trash",
               "share.expire_shares",
@@ -1616,6 +1988,191 @@
           "organization_version"
         ],
         "title": "AdminOrganizationMemberResponse",
+        "type": "object"
+      },
+      "AdminOutboxDeadLetterListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminOutboxDeadLetterResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AdminOutboxDeadLetterListResponse",
+        "type": "object"
+      },
+      "AdminOutboxDeadLetterResponse": {
+        "properties": {
+          "aggregate_id": {
+            "format": "uuid",
+            "title": "Aggregate Id",
+            "type": "string"
+          },
+          "aggregate_type": {
+            "title": "Aggregate Type",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dead_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dead At"
+          },
+          "event_type": {
+            "title": "Event Type",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Code"
+          },
+          "last_error_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Error Kind"
+          },
+          "last_failed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Failed At"
+          },
+          "last_replayed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Replayed At"
+          },
+          "last_replayed_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Replayed By"
+          },
+          "payload_keys": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Payload Keys",
+            "type": "array"
+          },
+          "replay_count": {
+            "title": "Replay Count",
+            "type": "integer"
+          },
+          "retry_count": {
+            "title": "Retry Count",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "event_type",
+          "aggregate_type",
+          "aggregate_id",
+          "retry_count",
+          "last_error_kind",
+          "last_error_code",
+          "last_failed_at",
+          "dead_at",
+          "replay_count",
+          "last_replayed_at",
+          "last_replayed_by",
+          "created_at",
+          "updated_at",
+          "payload_keys"
+        ],
+        "title": "AdminOutboxDeadLetterResponse",
+        "type": "object"
+      },
+      "AdminOutboxReplayResponse": {
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/AdminOutboxDeadLetterResponse"
+          },
+          "replayed": {
+            "title": "Replayed",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "event",
+          "replayed"
+        ],
+        "title": "AdminOutboxReplayResponse",
         "type": "object"
       },
       "AdminOverviewStatsResponse": {
@@ -2354,6 +2911,143 @@
           "expected_version"
         ],
         "title": "AdminSpaceUpdateRequest",
+        "type": "object"
+      },
+      "AdminTreeOperationListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminTreeOperationResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AdminTreeOperationListResponse",
+        "type": "object"
+      },
+      "AdminTreeOperationResponse": {
+        "properties": {
+          "attempt_count": {
+            "title": "Attempt Count",
+            "type": "integer"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "node_id": {
+            "format": "uuid",
+            "title": "Node Id",
+            "type": "string"
+          },
+          "operation": {
+            "enum": [
+              "delete",
+              "restore",
+              "purge"
+            ],
+            "title": "Operation",
+            "type": "string"
+          },
+          "processed_count": {
+            "title": "Processed Count",
+            "type": "integer"
+          },
+          "released_bytes": {
+            "title": "Released Bytes",
+            "type": "integer"
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "completed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "total_count": {
+            "title": "Total Count",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "user_id",
+          "space_id",
+          "node_id",
+          "operation",
+          "status",
+          "total_count",
+          "processed_count",
+          "released_bytes",
+          "attempt_count",
+          "error_code",
+          "created_at",
+          "updated_at",
+          "completed_at"
+        ],
+        "title": "AdminTreeOperationResponse",
         "type": "object"
       },
       "AdminUserCreateRequest": {
@@ -4769,6 +5463,80 @@
         "title": "FileVersionRollbackResponse",
         "type": "object"
       },
+      "GovernanceOverviewResponse": {
+        "properties": {
+          "generated_at": {
+            "format": "date-time",
+            "title": "Generated At",
+            "type": "string"
+          },
+          "lifecycle_runs_failed": {
+            "title": "Lifecycle Runs Failed",
+            "type": "integer"
+          },
+          "lifecycle_runs_pending": {
+            "title": "Lifecycle Runs Pending",
+            "type": "integer"
+          },
+          "maintenance_alerts": {
+            "title": "Maintenance Alerts",
+            "type": "integer"
+          },
+          "maintenance_stale": {
+            "title": "Maintenance Stale",
+            "type": "integer"
+          },
+          "permission_rebuild_completed": {
+            "title": "Permission Rebuild Completed",
+            "type": "integer"
+          },
+          "permission_rebuild_failed": {
+            "title": "Permission Rebuild Failed",
+            "type": "integer"
+          },
+          "permission_rebuild_pending": {
+            "title": "Permission Rebuild Pending",
+            "type": "integer"
+          },
+          "permission_rebuild_running": {
+            "title": "Permission Rebuild Running",
+            "type": "integer"
+          },
+          "tree_operations_completed": {
+            "title": "Tree Operations Completed",
+            "type": "integer"
+          },
+          "tree_operations_failed": {
+            "title": "Tree Operations Failed",
+            "type": "integer"
+          },
+          "tree_operations_pending": {
+            "title": "Tree Operations Pending",
+            "type": "integer"
+          },
+          "tree_operations_running": {
+            "title": "Tree Operations Running",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "generated_at",
+          "permission_rebuild_pending",
+          "permission_rebuild_running",
+          "permission_rebuild_completed",
+          "permission_rebuild_failed",
+          "tree_operations_pending",
+          "tree_operations_running",
+          "tree_operations_completed",
+          "tree_operations_failed",
+          "lifecycle_runs_pending",
+          "lifecycle_runs_failed",
+          "maintenance_alerts",
+          "maintenance_stale"
+        ],
+        "title": "GovernanceOverviewResponse",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -5943,6 +6711,269 @@
         "title": "LdapSyncRunResponse",
         "type": "object"
       },
+      "LifecyclePolicyResponse": {
+        "properties": {
+          "cleanup_orphaned_objects": {
+            "title": "Cleanup Orphaned Objects",
+            "type": "boolean"
+          },
+          "cleanup_unreferenced_blobs": {
+            "title": "Cleanup Unreferenced Blobs",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "expire_shares": {
+            "title": "Expire Shares",
+            "type": "boolean"
+          },
+          "expire_uploads": {
+            "title": "Expire Uploads",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "preview_retention_days": {
+            "title": "Preview Retention Days",
+            "type": "integer"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "trash_retention_days": {
+            "title": "Trash Retention Days",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "updated_by": {
+            "format": "uuid",
+            "title": "Updated By",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "trash_retention_days",
+          "preview_retention_days",
+          "expire_uploads",
+          "expire_shares",
+          "cleanup_unreferenced_blobs",
+          "cleanup_orphaned_objects",
+          "version",
+          "updated_by",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "LifecyclePolicyResponse",
+        "type": "object"
+      },
+      "LifecyclePolicyUpdateRequest": {
+        "properties": {
+          "cleanup_orphaned_objects": {
+            "default": false,
+            "title": "Cleanup Orphaned Objects",
+            "type": "boolean"
+          },
+          "cleanup_unreferenced_blobs": {
+            "default": true,
+            "title": "Cleanup Unreferenced Blobs",
+            "type": "boolean"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "expire_shares": {
+            "default": true,
+            "title": "Expire Shares",
+            "type": "boolean"
+          },
+          "expire_uploads": {
+            "default": true,
+            "title": "Expire Uploads",
+            "type": "boolean"
+          },
+          "preview_retention_days": {
+            "maximum": 3650.0,
+            "minimum": 1.0,
+            "title": "Preview Retention Days",
+            "type": "integer"
+          },
+          "trash_retention_days": {
+            "maximum": 3650.0,
+            "minimum": 1.0,
+            "title": "Trash Retention Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "trash_retention_days",
+          "preview_retention_days",
+          "expected_version"
+        ],
+        "title": "LifecyclePolicyUpdateRequest",
+        "type": "object"
+      },
+      "LifecycleRunCreateRequest": {
+        "properties": {
+          "dry_run": {
+            "default": true,
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "limit": {
+            "default": 100,
+            "maximum": 10000.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "type": "integer"
+          }
+        },
+        "title": "LifecycleRunCreateRequest",
+        "type": "object"
+      },
+      "LifecycleRunListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LifecycleRunResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "LifecycleRunListResponse",
+        "type": "object"
+      },
+      "LifecycleRunResponse": {
+        "properties": {
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "format": "uuid",
+            "title": "Created By",
+            "type": "string"
+          },
+          "dry_run": {
+            "title": "Dry Run",
+            "type": "boolean"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "policy_version": {
+            "title": "Policy Version",
+            "type": "integer"
+          },
+          "result": {
+            "additionalProperties": true,
+            "title": "Result",
+            "type": "object"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "dry_run",
+          "policy_version",
+          "result",
+          "error_code",
+          "created_by",
+          "created_at",
+          "updated_at",
+          "started_at",
+          "completed_at"
+        ],
+        "title": "LifecycleRunResponse",
+        "type": "object"
+      },
       "LoginRequest": {
         "properties": {
           "captcha_token": {
@@ -6611,6 +7642,207 @@
           "require_special"
         ],
         "title": "PasswordPolicyResponse",
+        "type": "object"
+      },
+      "PermissionRebuildCreateRequest": {
+        "properties": {
+          "root_node_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Node Id"
+          },
+          "scope": {
+            "enum": [
+              "space",
+              "node"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "space_id"
+        ],
+        "title": "PermissionRebuildCreateRequest",
+        "type": "object"
+      },
+      "PermissionRebuildOperationListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PermissionRebuildOperationResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "PermissionRebuildOperationListResponse",
+        "type": "object"
+      },
+      "PermissionRebuildOperationResponse": {
+        "properties": {
+          "attempt_count": {
+            "title": "Attempt Count",
+            "type": "integer"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "indexed_count": {
+            "title": "Indexed Count",
+            "type": "integer"
+          },
+          "permission_version": {
+            "title": "Permission Version",
+            "type": "integer"
+          },
+          "processed_count": {
+            "title": "Processed Count",
+            "type": "integer"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By"
+          },
+          "restart_requested": {
+            "title": "Restart Requested",
+            "type": "boolean"
+          },
+          "root_node_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Root Node Id"
+          },
+          "scope": {
+            "enum": [
+              "space",
+              "node"
+            ],
+            "title": "Scope",
+            "type": "string"
+          },
+          "space_id": {
+            "format": "uuid",
+            "title": "Space Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "completed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "total_count": {
+            "title": "Total Count",
+            "type": "integer"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "space_id",
+          "root_node_id",
+          "scope",
+          "permission_version",
+          "status",
+          "total_count",
+          "processed_count",
+          "indexed_count",
+          "attempt_count",
+          "restart_requested",
+          "error_code",
+          "requested_by",
+          "created_at",
+          "updated_at",
+          "completed_at"
+        ],
+        "title": "PermissionRebuildOperationResponse",
         "type": "object"
       },
       "PreviewArtifactResponse": {
@@ -8196,7 +9428,7 @@
   },
   "info": {
     "title": "企业网盘",
-    "version": "0.8.0"
+    "version": "0.9.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -8435,6 +9667,27 @@
         "summary": "List Admin Audit Logs",
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/audit/governance": {
+      "get": {
+        "operationId": "get_admin_audit_governance_api_v1_admin_audit_governance_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminAuditGovernanceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Admin Audit Governance",
+        "tags": [
+          "admin-governance"
         ]
       }
     },
@@ -9460,6 +10713,501 @@
         ]
       }
     },
+    "/api/v1/admin/governance/lifecycle-policy": {
+      "get": {
+        "operationId": "get_lifecycle_policy_api_v1_admin_governance_lifecycle_policy_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LifecyclePolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Lifecycle Policy",
+        "tags": [
+          "admin-governance-sprint12"
+        ]
+      },
+      "patch": {
+        "operationId": "update_lifecycle_policy_api_v1_admin_governance_lifecycle_policy_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LifecyclePolicyUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LifecyclePolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Lifecycle Policy",
+        "tags": [
+          "admin-governance-sprint12"
+        ]
+      }
+    },
+    "/api/v1/admin/governance/lifecycle-runs": {
+      "get": {
+        "operationId": "list_lifecycle_runs_api_v1_admin_governance_lifecycle_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LifecycleRunListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Lifecycle Runs",
+        "tags": [
+          "admin-governance-sprint12"
+        ]
+      },
+      "post": {
+        "operationId": "create_lifecycle_run_api_v1_admin_governance_lifecycle_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LifecycleRunCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LifecycleRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Lifecycle Run",
+        "tags": [
+          "admin-governance-sprint12"
+        ]
+      }
+    },
+    "/api/v1/admin/governance/overview": {
+      "get": {
+        "operationId": "get_governance_overview_api_v1_admin_governance_overview_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GovernanceOverviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Governance Overview",
+        "tags": [
+          "admin-governance-sprint12"
+        ]
+      }
+    },
+    "/api/v1/admin/governance/permission-rebuilds": {
+      "get": {
+        "operationId": "list_permission_rebuilds_api_v1_admin_governance_permission_rebuilds_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "running",
+                    "completed",
+                    "failed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "space",
+                    "node"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionRebuildOperationListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Permission Rebuilds",
+        "tags": [
+          "admin-governance-sprint12"
+        ]
+      },
+      "post": {
+        "operationId": "create_permission_rebuild_api_v1_admin_governance_permission_rebuilds_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PermissionRebuildCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionRebuildOperationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Permission Rebuild",
+        "tags": [
+          "admin-governance-sprint12"
+        ]
+      }
+    },
+    "/api/v1/admin/governance/permission-rebuilds/{operation_id}": {
+      "get": {
+        "operationId": "get_permission_rebuild_api_v1_admin_governance_permission_rebuilds__operation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionRebuildOperationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Permission Rebuild",
+        "tags": [
+          "admin-governance-sprint12"
+        ]
+      }
+    },
+    "/api/v1/admin/governance/permission-rebuilds/{operation_id}/retry": {
+      "post": {
+        "operationId": "retry_permission_rebuild_api_v1_admin_governance_permission_rebuilds__operation_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "operation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Operation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PermissionRebuildOperationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Retry Permission Rebuild",
+        "tags": [
+          "admin-governance-sprint12"
+        ]
+      }
+    },
+    "/api/v1/admin/governance/tree-operations": {
+      "get": {
+        "operationId": "list_governance_tree_operations_api_v1_admin_governance_tree_operations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "running",
+                    "completed",
+                    "failed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminTreeOperationListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Governance Tree Operations",
+        "tags": [
+          "admin-governance-sprint12"
+        ]
+      }
+    },
     "/api/v1/admin/groups": {
       "get": {
         "operationId": "list_admin_groups_api_v1_admin_groups_get",
@@ -10469,6 +12217,8 @@
               "anyOf": [
                 {
                   "enum": [
+                    "audit.ensure_partitions",
+                    "audit.archive_retention",
                     "upload.expire_sessions",
                     "file.cleanup_expired_trash",
                     "share.expire_shares",
@@ -10644,6 +12394,189 @@
           }
         },
         "summary": "Get Admin Maintenance Tasks",
+        "tags": [
+          "admin-governance"
+        ]
+      }
+    },
+    "/api/v1/admin/outbox/dead-letters": {
+      "get": {
+        "operationId": "list_admin_outbox_dead_letters_api_v1_admin_outbox_dead_letters_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "event_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error_kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^(transient|permanent)$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error Kind"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOutboxDeadLetterListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Admin Outbox Dead Letters",
+        "tags": [
+          "admin-governance"
+        ]
+      }
+    },
+    "/api/v1/admin/outbox/dead-letters/{event_id}": {
+      "get": {
+        "operationId": "get_admin_outbox_dead_letter_api_v1_admin_outbox_dead_letters__event_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOutboxDeadLetterResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Admin Outbox Dead Letter",
+        "tags": [
+          "admin-governance"
+        ]
+      }
+    },
+    "/api/v1/admin/outbox/dead-letters/{event_id}/replay": {
+      "post": {
+        "operationId": "replay_admin_outbox_dead_letter_api_v1_admin_outbox_dead_letters__event_id__replay_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminOutboxReplayResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Replay Admin Outbox Dead Letter",
         "tags": [
           "admin-governance"
         ]

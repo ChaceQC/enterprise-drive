@@ -12,6 +12,7 @@ import {
   Plus,
   RefreshCw,
   Shield,
+  ShieldCheck,
   Users,
   Wrench,
 } from 'lucide-react'
@@ -44,6 +45,7 @@ import {
 import { formatBytes, formatDate } from '../../lib/format'
 import { queryClient } from '../../app/query-client'
 import { AdminAccountSecurity } from './AdminAccountSecurity'
+import { AdminGovernancePage } from './AdminGovernancePage'
 import { AdminIdentityPage } from './AdminIdentityPage'
 
 const tabs = [
@@ -57,6 +59,7 @@ const tabs = [
   { label: '审计', icon: Shield, to: '/admin/audit' },
   { label: '维护', icon: Wrench, to: '/admin/maintenance' },
   { label: '导出', icon: Download, to: '/admin/exports' },
+  { label: '治理看板', icon: ShieldCheck, to: '/admin/governance' },
 ]
 
 export function AdminPage() {
@@ -86,6 +89,7 @@ export function AdminPage() {
       {section === 'audit' ? <AdminAudit /> : null}
       {section === 'maintenance' ? <AdminMaintenance /> : null}
       {section === 'exports' ? <AdminExports /> : null}
+      {section === 'governance' ? <AdminGovernancePage /> : null}
     </div>
   )
 }

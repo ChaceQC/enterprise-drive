@@ -125,6 +125,12 @@ const adminExportsRoute = createRoute({
   path: '/exports',
 })
 
+const adminGovernanceRoute = createRoute({
+  component: AdminPage,
+  getParentRoute: () => adminRoute,
+  path: '/governance',
+})
+
 const publicShareRoute = createRoute({
   component: PublicSharePage,
   getParentRoute: () => rootRoute,
@@ -156,6 +162,7 @@ const routeTree = rootRoute.addChildren([
       adminAuditRoute,
       adminMaintenanceRoute,
       adminExportsRoute,
+      adminGovernanceRoute,
     ]),
   ]),
   publicShareRoute,

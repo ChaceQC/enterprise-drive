@@ -1,5 +1,13 @@
 import type { Page, Route } from '@playwright/test'
 
+import type {
+  AdminAuditGovernanceResponse,
+  AdminOutboxDeadLetterResponse,
+  LifecyclePolicyResponse,
+  LifecycleRunResponse,
+  PermissionRebuildOperationResponse,
+} from '../../src/api/generated'
+
 const user = {
   display_name: '系统管理员',
   email: 'admin@example.com',
@@ -143,6 +151,110 @@ const ldapConflict = {
   source_id: ldapSource.id,
 }
 
+const auditGovernance: AdminAuditGovernanceResponse = {
+  archive_delete_source: false,
+  archives_failed: 0,
+  archives_total: 12,
+  external_delivery_enabled: true,
+  generated_at: '2026-08-04T03:00:00Z',
+  last_archive_succeeded_at: '2026-08-04T02:30:00Z',
+  last_delivery_failed_at: null,
+  last_delivery_succeeded_at: '2026-08-04T02:58:00Z',
+  oldest_pending_at: '2026-08-04T02:55:00Z',
+  outbox_dead: 1,
+  outbox_failed: 0,
+  outbox_pending: 2,
+  outbox_processing: 1,
+  outbox_sent: 128,
+  partition_months_ahead: 2,
+  recent_archives: [{
+    content_sha256: 'a'.repeat(64),
+    created_at: '2026-08-04T02:29:00Z',
+    delete_source: false,
+    error_code: null,
+    file_name: 'audit-2026-07.jsonl.gz',
+    id: '95959595-9595-4595-8595-959595959596',
+    period_end: '2026-08-01T00:00:00Z',
+    period_start: '2026-07-01T00:00:00Z',
+    row_count: 12000,
+    signature_algorithm: 'Ed25519',
+    signature_key_id: 'audit-export-2026',
+    size_bytes: 2048000,
+    source_deleted_at: null,
+    status: 'succeeded',
+    updated_at: '2026-08-04T02:30:00Z',
+  }],
+  retention_days: 365,
+}
+
+const lifecyclePolicy: LifecyclePolicyResponse = {
+  cleanup_orphaned_objects: false,
+  cleanup_unreferenced_blobs: true,
+  created_at: '2026-08-01T00:00:00Z',
+  expire_shares: true,
+  expire_uploads: true,
+  id: '98989898-9898-4898-8898-989898989898',
+  preview_retention_days: 30,
+  tenant_id: user.tenant_id,
+  trash_retention_days: 90,
+  updated_at: '2026-08-04T02:00:00Z',
+  updated_by: user.id,
+  version: 2,
+}
+
+const lifecycleRun: LifecycleRunResponse = {
+  completed_at: '2026-08-04T02:31:00Z',
+  created_at: '2026-08-04T02:30:00Z',
+  created_by: user.id,
+  dry_run: false,
+  error_code: null,
+  id: '99989898-9898-4898-8898-989898989898',
+  policy_version: 2,
+  result: { processed: 24 },
+  started_at: '2026-08-04T02:30:00Z',
+  status: 'succeeded',
+  updated_at: '2026-08-04T02:31:00Z',
+}
+
+const permissionRebuild: PermissionRebuildOperationResponse = {
+  attempt_count: 2,
+  completed_at: null,
+  created_at: '2026-08-04T02:20:00Z',
+  error_code: 'OPENSEARCH_UNAVAILABLE',
+  id: '98979797-9797-4797-8797-979797979797',
+  indexed_count: 3200,
+  permission_version: 4,
+  processed_count: 4000,
+  requested_by: user.id,
+  restart_requested: false,
+  root_node_id: null,
+  scope: 'space',
+  space_id: space.id,
+  status: 'failed',
+  tenant_id: user.tenant_id,
+  total_count: 10000,
+  updated_at: '2026-08-04T02:38:00Z',
+}
+
+const outboxDeadLetter: AdminOutboxDeadLetterResponse = {
+  aggregate_id: file.id,
+  aggregate_type: 'file',
+  created_at: '2026-08-04T01:50:00Z',
+  dead_at: '2026-08-04T02:10:00Z',
+  event_type: 'search.index_requested',
+  id: '96969696-9696-4696-8696-969696969696',
+  last_error_code: 'OPENSEARCH_UNAVAILABLE',
+  last_error_kind: 'dependency_unavailable',
+  last_failed_at: '2026-08-04T02:10:00Z',
+  last_replayed_at: null,
+  last_replayed_by: null,
+  payload_keys: ['node_id', 'reason', 'tenant_id'],
+  replay_count: 0,
+  retry_count: 8,
+  status: 'dead',
+  updated_at: '2026-08-04T02:10:00Z',
+}
+
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
     body: JSON.stringify(body),
@@ -231,6 +343,11 @@ export async function installMockApi(
     stats: { ...ldapRun.stats },
     status: 'succeeded',
   }]
+  let lifecyclePolicyState = { ...lifecyclePolicy }
+  let lifecycleRuns = [{ ...lifecycleRun }]
+  let permissionRebuilds = [{ ...permissionRebuild }]
+  let outboxDeadLetters = [{ ...outboxDeadLetter }]
+  let replayedDeadLetter: AdminOutboxDeadLetterResponse | null = null
 
   await page.context().addCookies([{
     domain: '127.0.0.1',
@@ -644,7 +761,7 @@ export async function installMockApi(
         generated_at: '2026-08-04T03:00:00Z',
         nodes_deleted: 2,
         nodes_total: 42,
-        outbox_dead: 0,
+        outbox_dead: outboxDeadLetters.length,
         outbox_pending: 1,
         pending_uploads: 1,
         quota_limit_bytes: 1000000000,
@@ -659,17 +776,299 @@ export async function installMockApi(
     if (path === '/api/v1/admin/maintenance/tasks') {
       return json(route, {
         generated_at: '2026-08-04T03:00:00Z',
-        tasks: [{
-          alert_active: false,
-          consecutive_failures: 0,
-          expected_interval_seconds: 3600,
-          last_failure_at: null,
-          last_finished_at: '2026-08-04T03:00:00Z',
-          last_status: 'succeeded',
-          last_success_at: '2026-08-04T03:00:00Z',
-          stale: false,
-          task_name: 'quota.reconcile_space_usage',
+        tasks: [
+          {
+            alert_active: false,
+            consecutive_failures: 0,
+            expected_interval_seconds: 3600,
+            last_failure_at: null,
+            last_finished_at: '2026-08-04T03:00:00Z',
+            last_status: 'succeeded',
+            last_success_at: '2026-08-04T03:00:00Z',
+            stale: false,
+            task_name: 'quota.reconcile_space_usage',
+          },
+          {
+            alert_active: false,
+            consecutive_failures: 0,
+            expected_interval_seconds: 5,
+            last_failure_at: null,
+            last_finished_at: '2026-08-04T02:59:58Z',
+            last_status: 'succeeded',
+            last_success_at: '2026-08-04T02:59:58Z',
+            stale: false,
+            task_name: 'file.process_tree_operations',
+          },
+        ],
+      })
+    }
+    if (path === '/api/v1/admin/governance/overview') {
+      return json(route, {
+        generated_at: '2026-08-04T03:00:00Z',
+        lifecycle_runs_failed: lifecycleRuns
+          .filter((run) => run.status === 'failed').length,
+        lifecycle_runs_pending: lifecycleRuns
+          .filter((run) => run.status === 'pending').length,
+        maintenance_alerts: 1,
+        maintenance_stale: 0,
+        permission_rebuild_completed: permissionRebuilds
+          .filter((operation) => operation.status === 'completed').length,
+        permission_rebuild_failed: permissionRebuilds
+          .filter((operation) => operation.status === 'failed').length,
+        permission_rebuild_pending: permissionRebuilds
+          .filter((operation) => operation.status === 'pending').length,
+        permission_rebuild_running: permissionRebuilds
+          .filter((operation) => operation.status === 'running').length,
+        tree_operations_completed: 12,
+        tree_operations_failed: 0,
+        tree_operations_pending: 1,
+        tree_operations_running: 1,
+      })
+    }
+    if (
+      path === '/api/v1/admin/tree-operations'
+      || path === '/api/v1/admin/governance/tree-operations'
+    ) {
+      return json(route, {
+        items: [{
+          attempt_count: 1,
+          completed_at: null,
+          created_at: '2026-08-04T02:40:00Z',
+          error_code: null,
+          id: '97979797-9797-4797-8797-979797979797',
+          node_id: folder.id,
+          operation: 'delete',
+          processed_count: 4200,
+          released_bytes: 0,
+          space_id: space.id,
+          status: 'running',
+          total_count: 10000,
+          updated_at: '2026-08-04T02:59:00Z',
+          user_id: user.id,
         }],
+        next_cursor: null,
+      })
+    }
+    if (
+      path === '/api/v1/admin/governance/permission-rebuilds'
+      && method === 'GET'
+    ) {
+      return json(route, {
+        items: permissionRebuilds,
+        next_cursor: null,
+      })
+    }
+    if (
+      path === '/api/v1/admin/governance/permission-rebuilds'
+      && method === 'POST'
+    ) {
+      const payload = request.postDataJSON() as {
+        root_node_id?: string | null
+        scope: 'space' | 'node'
+        space_id: string
+      }
+      const created: PermissionRebuildOperationResponse = {
+        attempt_count: 0,
+        completed_at: null,
+        created_at: '2026-08-04T03:02:00Z',
+        error_code: null,
+        id: `permission-rebuild-${permissionRebuilds.length + 1}`,
+        indexed_count: 0,
+        permission_version: 1,
+        processed_count: 0,
+        requested_by: user.id,
+        restart_requested: false,
+        root_node_id: payload.root_node_id ?? null,
+        scope: payload.scope,
+        space_id: payload.space_id,
+        status: 'pending',
+        tenant_id: user.tenant_id,
+        total_count: 0,
+        updated_at: '2026-08-04T03:02:00Z',
+      }
+      permissionRebuilds = [created, ...permissionRebuilds]
+      return json(route, created, 202)
+    }
+    if (
+      path.match(
+        /^\/api\/v1\/admin\/governance\/permission-rebuilds\/[^/]+\/retry$/,
+      )
+      && method === 'POST'
+    ) {
+      const operationId = path.split('/').at(-2)!
+      const operation = permissionRebuilds.find(
+        (item) => item.id === operationId,
+      )
+      if (!operation) {
+        return json(route, {
+          code: 'PERMISSION_REBUILD_NOT_FOUND',
+          message: '权限重算任务不存在',
+          request_id: 'req_permission_rebuild_missing',
+        }, 404)
+      }
+      const retried: PermissionRebuildOperationResponse = {
+        ...operation,
+        attempt_count: operation.attempt_count + 1,
+        error_code: null,
+        restart_requested: false,
+        status: 'pending',
+        updated_at: '2026-08-04T03:03:00Z',
+      }
+      permissionRebuilds = permissionRebuilds.map((item) => (
+        item.id === operationId ? retried : item
+      ))
+      return json(route, retried)
+    }
+    if (path === '/api/v1/admin/lifecycle/policies') {
+      return json(route, {
+        items: [{
+          enabled: true,
+          id: '98989898-9898-4898-8898-989898989898',
+          name: '默认内容生命周期',
+          retention_days: 365,
+          scope: 'tenant',
+          version: 2,
+        }],
+        next_cursor: null,
+      })
+    }
+    if (path === '/api/v1/admin/lifecycle/runs') {
+      return json(route, {
+        items: [{
+          completed_at: '2026-08-04T02:31:00Z',
+          created_at: '2026-08-04T02:30:00Z',
+          created_by: user.id,
+          dry_run: true,
+          error_code: null,
+          id: '99989898-9898-4898-8898-989898989898',
+          policy_version: 2,
+          result: { processed: 24 },
+          started_at: '2026-08-04T02:30:00Z',
+          status: 'succeeded',
+          updated_at: '2026-08-04T02:31:00Z',
+        }],
+        next_cursor: null,
+      })
+    }
+    if (
+      path === '/api/v1/admin/governance/lifecycle-policy'
+      && method === 'GET'
+    ) {
+      return json(route, lifecyclePolicyState)
+    }
+    if (
+      path === '/api/v1/admin/governance/lifecycle-policy'
+      && method === 'PATCH'
+    ) {
+      const payload = request.postDataJSON() as {
+        cleanup_orphaned_objects?: boolean
+        cleanup_unreferenced_blobs?: boolean
+        expire_shares?: boolean
+        expire_uploads?: boolean
+        preview_retention_days: number
+        trash_retention_days: number
+      }
+      lifecyclePolicyState = {
+        ...lifecyclePolicyState,
+        ...payload,
+        updated_at: '2026-08-04T03:04:00Z',
+        updated_by: user.id,
+        version: lifecyclePolicyState.version + 1,
+      }
+      return json(route, lifecyclePolicyState)
+    }
+    if (
+      path === '/api/v1/admin/governance/lifecycle-runs'
+      && method === 'GET'
+    ) {
+      return json(route, {
+        items: lifecycleRuns,
+        next_cursor: null,
+      })
+    }
+    if (
+      path === '/api/v1/admin/governance/lifecycle-runs'
+      && method === 'POST'
+    ) {
+      const payload = request.postDataJSON() as {
+        dry_run?: boolean
+        limit?: number
+      }
+      const created: LifecycleRunResponse = {
+        completed_at: null,
+        created_at: '2026-08-04T03:05:00Z',
+        created_by: user.id,
+        dry_run: payload.dry_run ?? true,
+        error_code: null,
+        id: `lifecycle-run-${lifecycleRuns.length + 1}`,
+        policy_version: lifecyclePolicyState.version,
+        result: {
+          requested_limit: payload.limit ?? 100,
+        },
+        started_at: null,
+        status: 'pending',
+        updated_at: '2026-08-04T03:05:00Z',
+      }
+      lifecycleRuns = [created, ...lifecycleRuns]
+      return json(route, created, 202)
+    }
+    if (path === '/api/v1/admin/audit/governance') {
+      return json(route, auditGovernance)
+    }
+    if (
+      path === '/api/v1/admin/outbox/dead-letters'
+      && method === 'GET'
+    ) {
+      return json(route, {
+        items: outboxDeadLetters,
+        next_cursor: null,
+      })
+    }
+    if (
+      path.match(/^\/api\/v1\/admin\/outbox\/dead-letters\/[^/]+$/)
+      && method === 'GET'
+    ) {
+      const eventId = path.split('/').at(-1)
+      const event = outboxDeadLetters.find((item) => item.id === eventId)
+      return event
+        ? json(route, event)
+        : json(route, {
+          code: 'OUTBOX_DEAD_LETTER_NOT_FOUND',
+          message: 'dead-letter 不存在',
+          request_id: 'req_outbox_missing',
+        }, 404)
+    }
+    if (
+      path.match(/^\/api\/v1\/admin\/outbox\/dead-letters\/[^/]+\/replay$/)
+      && method === 'POST'
+    ) {
+      const eventId = path.split('/').at(-2)!
+      const event = outboxDeadLetters.find((item) => item.id === eventId)
+        ?? (replayedDeadLetter?.id === eventId ? replayedDeadLetter : null)
+      if (!event) {
+        return json(route, {
+          code: 'OUTBOX_DEAD_LETTER_NOT_FOUND',
+          message: 'dead-letter 不存在',
+          request_id: 'req_outbox_missing',
+        }, 404)
+      }
+      if (replayedDeadLetter?.id === eventId) {
+        return json(route, {
+          event: replayedDeadLetter,
+          replayed: false,
+        })
+      }
+      replayedDeadLetter = {
+        ...event,
+        last_replayed_at: '2026-08-04T03:01:00Z',
+        last_replayed_by: user.id,
+        replay_count: event.replay_count + 1,
+        updated_at: '2026-08-04T03:01:00Z',
+      }
+      outboxDeadLetters = outboxDeadLetters.filter((item) => item.id !== eventId)
+      return json(route, {
+        event: replayedDeadLetter,
+        replayed: true,
       })
     }
     if (path === '/api/v1/admin/identity/oidc/providers' && method === 'GET') {

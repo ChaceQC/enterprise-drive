@@ -1441,6 +1441,355 @@ div.file-name-button {
   font-size: 0.78rem;
 }
 
+.governance-page {
+  display: grid;
+  gap: 18px;
+}
+
+.governance-metric-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.governance-metric {
+  display: grid;
+  min-width: 0;
+  min-height: 152px;
+  align-content: space-between;
+  gap: 12px;
+  border: 1px solid #dedfdb;
+  border-top: 3px solid #79908d;
+  border-radius: 14px;
+  padding: 17px;
+  background: rgb(255 255 255 / 68%);
+  box-shadow: 0 10px 34px rgb(30 40 50 / 4%);
+}
+
+.governance-metric.success {
+  border-top-color: #3d9785;
+}
+
+.governance-metric.warning {
+  border-top-color: #c69445;
+}
+
+.governance-metric.danger {
+  border-top-color: #c45f55;
+}
+
+.governance-metric > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #596879;
+  font-size: 0.76rem;
+  font-weight: 750;
+}
+
+.governance-metric > div svg {
+  color: var(--accent-dark);
+}
+
+.governance-metric strong {
+  overflow: hidden;
+  color: #213141;
+  font-size: clamp(1.35rem, 2.5vw, 2rem);
+  letter-spacing: -0.04em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.governance-metric small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.72rem;
+  line-height: 1.5;
+  text-overflow: ellipsis;
+}
+
+.governance-layout {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.governance-panel {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #dedfdb;
+  border-radius: 14px;
+  background: rgb(255 255 255 / 62%);
+  box-shadow: 0 10px 34px rgb(30 40 50 / 4%);
+}
+
+.governance-panel.wide {
+  grid-column: 1 / -1;
+}
+
+.governance-panel > header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 20px 22px;
+}
+
+.governance-panel > header > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border-radius: 10px;
+  color: var(--accent-dark);
+  background: #e5f0ed;
+}
+
+.governance-panel > header h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.governance-panel > header p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+  line-height: 1.55;
+}
+
+.governance-panel > header > div:not(.governance-panel-actions) {
+  min-width: 0;
+}
+
+.governance-panel-actions {
+  flex: 0 0 auto;
+  margin-left: auto;
+}
+
+.governance-panel-actions .inline-actions {
+  justify-content: flex-end;
+}
+
+.governance-panel-body {
+  border-top: 1px solid var(--line);
+}
+
+.governance-panel-body > .empty-state {
+  min-height: 210px;
+  border: 0;
+  border-radius: 0;
+}
+
+.governance-healthy {
+  display: flex;
+  min-height: 126px;
+  align-items: center;
+  gap: 14px;
+  padding: 22px;
+  color: #1e7365;
+}
+
+.governance-healthy > div {
+  display: grid;
+  gap: 5px;
+}
+
+.governance-healthy span {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.governance-alert-list {
+  display: grid;
+}
+
+.governance-alert-list article {
+  display: flex;
+  min-height: 70px;
+  align-items: flex-start;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding: 15px 22px;
+  color: #9a4d42;
+}
+
+.governance-alert-list article:last-child {
+  border-bottom: 0;
+}
+
+.governance-alert-list article > div {
+  display: grid;
+  gap: 5px;
+}
+
+.governance-alert-list span {
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.governance-definition-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.governance-definition-grid > div {
+  display: grid;
+  min-width: 0;
+  gap: 8px;
+  border-right: 1px solid var(--line);
+  padding: 20px;
+}
+
+.governance-definition-grid > div:last-of-type {
+  border-right: 0;
+}
+
+.governance-definition-grid span,
+.governance-definition-grid small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.governance-definition-grid strong {
+  color: #263746;
+}
+
+.governance-definition-grid > p {
+  grid-column: 1 / -1;
+  margin: 0;
+  border-top: 1px solid var(--line);
+  padding: 12px 20px;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.governance-archive-line {
+  display: grid;
+  align-items: center;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  border-top: 1px solid var(--line);
+  padding: 13px 20px;
+  color: #314252;
+}
+
+.governance-archive-line > svg {
+  color: var(--accent-dark);
+}
+
+.governance-archive-line > span {
+  overflow: hidden;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.governance-archive-line > small {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.governance-subsection {
+  border-bottom: 1px solid var(--line);
+}
+
+.governance-subsection:last-child {
+  border-bottom: 0;
+}
+
+.governance-subsection > h3 {
+  margin: 0;
+  padding: 13px 20px;
+  color: #526172;
+  background: rgb(238 242 240 / 70%);
+  font-size: 0.78rem;
+  letter-spacing: 0.02em;
+}
+
+.governance-panel .table-plane {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.governance-table td {
+  vertical-align: top;
+}
+
+.governance-table .button.compact {
+  min-height: 32px;
+  padding-inline: 10px;
+  font-size: 0.73rem;
+}
+
+.governance-progress {
+  overflow: hidden;
+  width: 150px;
+  height: 6px;
+  border-radius: 999px;
+  margin-bottom: 6px;
+  background: #dfe5e2;
+}
+
+.governance-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+.governance-table td > small {
+  color: var(--muted);
+  font-size: 0.7rem;
+}
+
+.governance-cell-error {
+  margin: 6px 0 0;
+  color: var(--danger);
+  font-size: 0.7rem;
+}
+
+.governance-lifecycle {
+  display: grid;
+}
+
+.governance-policy-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.governance-policy-grid > div {
+  display: grid;
+  gap: 7px;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 17px 20px;
+}
+
+.governance-policy-grid > div:last-child {
+  border-right: 0;
+}
+
+.governance-policy-grid span {
+  color: var(--muted);
+  font-size: 0.71rem;
+}
+
+.governance-policy-grid strong {
+  color: #263746;
+  font-size: 0.86rem;
+}
+
+.governance-result {
+  margin: 0;
+  border-top: 1px solid var(--line);
+  padding: 12px 20px;
+  color: #227266;
+  font-size: 0.78rem;
+}
+
 .subheading {
   margin: 0 0 10px 4px;
   font-size: 0.92rem;
@@ -1703,6 +2052,24 @@ div.file-name-button {
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .governance-metric-grid,
+  .governance-definition-grid,
+  .governance-policy-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .governance-definition-grid > div:nth-child(2) {
+    border-right: 0;
+  }
+
+  .governance-definition-grid > div:nth-child(-n + 2) {
+    border-bottom: 1px solid var(--line);
+  }
+
+  .governance-policy-grid > div:nth-child(2) {
+    border-right: 0;
+  }
 }
 
 @media (max-width: 720px) {
@@ -1784,6 +2151,7 @@ div.file-name-button {
   }
 
   .split-grid,
+  .governance-layout,
   .share-summary,
   .security-grid {
     grid-template-columns: 1fr;
@@ -1803,6 +2171,59 @@ div.file-name-button {
 
   .metric-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .governance-metric-grid,
+  .governance-definition-grid,
+  .governance-policy-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .governance-definition-grid > div {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .governance-definition-grid > div:last-of-type {
+    border-bottom: 0;
+  }
+
+  .governance-policy-grid > div {
+    border-right: 0;
+  }
+
+  .governance-progress {
+    width: 110px;
+  }
+
+  .governance-panel > header {
+    flex-wrap: wrap;
+  }
+
+  .governance-panel-actions {
+    width: calc(100% - 46px);
+    margin-left: 46px;
+  }
+
+  .governance-panel-actions > .button {
+    width: 100%;
+  }
+
+  .governance-panel-actions .inline-actions {
+    flex-wrap: wrap;
+    justify-content: stretch;
+  }
+
+  .governance-panel-actions .inline-actions .button {
+    flex: 1 1 130px;
+  }
+
+  .governance-archive-line {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .governance-archive-line > small {
+    grid-column: 2 / -1;
   }
 
   .modal {

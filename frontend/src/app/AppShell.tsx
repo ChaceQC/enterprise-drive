@@ -84,7 +84,7 @@ export function ProtectedShell() {
           <span className="brand-mark"><HardDrive size={20} /></span>
           <div>
             <strong>企业网盘</strong>
-            <span>Web 0.8</span>
+            <span>Web 0.9</span>
           </div>
         </div>
 

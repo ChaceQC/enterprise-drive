@@ -3,10 +3,14 @@
 /* tslint:disable */
 /* eslint-disable */
 export type AdminExportDownloadResponse = {
+    content_sha256: (string | null);
     content_type: string;
     download_url: string;
     expires_at: string;
     file_name: string;
     job_id: string;
+    signature_algorithm: (string | null);
+    signature_key_id: (string | null);
+    signature_value: (string | null);
     size_bytes: number;
 };
