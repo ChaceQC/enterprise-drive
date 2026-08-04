@@ -1,3 +1,11 @@
+if ($null -eq (Get-Command -Name "New-WindowsManifestSignature" -ErrorAction SilentlyContinue)) {
+    $BackupSecurityScript = Join-Path $PSScriptRoot "backup-security.ps1"
+    if (-not (Test-Path -LiteralPath $BackupSecurityScript -PathType Leaf)) {
+        throw "Windows backup security helper does not exist: $BackupSecurityScript"
+    }
+    . $BackupSecurityScript
+}
+
 function Get-WindowsRedactedDockerArguments {
     param(
         [Parameter(Mandatory = $true)]
@@ -2394,8 +2402,18 @@ function Test-WindowsBackup {
     ) {
         throw "Backup format version must be an integer."
     }
-    if ([int64]$Manifest.format_version -ne 1) {
+    if ([int64]$Manifest.format_version -notin @(1, 2)) {
         throw "Unsupported backup format version: $($Manifest.format_version)"
+    }
+    if ([int64]$Manifest.format_version -eq 2) {
+        foreach ($RequiredProperty in @(
+            "source_authentication",
+            "package_encryption"
+        )) {
+            if ($null -eq $Manifest.PSObject.Properties[$RequiredProperty]) {
+                throw "Backup manifest is missing '$RequiredProperty'."
+            }
+        }
     }
 
     $CurrentComposeModel = Get-WindowsComposeModel `
@@ -2407,11 +2425,19 @@ function Test-WindowsBackup {
     Assert-WindowsManifestNestedData `
         -Manifest $Manifest `
         -ExpectedImageServices $ExpectedImageServices
+    Test-WindowsManifestSignature `
+        -BackupRoot $Root `
+        -Manifest $Manifest
 
-    $SeenPaths = New-Object "System.Collections.Generic.HashSet[string]" (
-        [System.StringComparer]::OrdinalIgnoreCase
-    )
-    foreach ($Artifact in @($Manifest.artifacts)) {
+    $PayloadResolution = Resolve-WindowsBackupPayload `
+        -BackupRoot $Root `
+        -Manifest $Manifest
+    $ArtifactRoot = [string]$PayloadResolution.root
+    try {
+        $SeenPaths = New-Object "System.Collections.Generic.HashSet[string]" (
+            [System.StringComparer]::OrdinalIgnoreCase
+        )
+        foreach ($Artifact in @($Manifest.artifacts)) {
         foreach ($PropertyName in @("path", "size_bytes", "sha256")) {
             if ($null -eq $Artifact.PSObject.Properties[$PropertyName]) {
                 throw "Backup artifact is missing '$PropertyName'."
@@ -2439,8 +2465,8 @@ function Test-WindowsBackup {
         ) {
             throw "Backup artifact metadata is invalid: $RelativePath"
         }
-        $ArtifactPath = Resolve-WindowsBackupArtifactPath `
-            -BackupRoot $Root `
+            $ArtifactPath = Resolve-WindowsBackupArtifactPath `
+            -BackupRoot $ArtifactRoot `
             -RelativePath $RelativePath
         if (-not (Test-Path -LiteralPath $ArtifactPath -PathType Leaf)) {
             throw "Backup artifact is missing: $RelativePath"
@@ -2455,9 +2481,9 @@ function Test-WindowsBackup {
         if ((Get-WindowsSha256 -Path $ArtifactPath) -ne [string]$Artifact.sha256) {
             throw "Backup artifact SHA-256 verification failed: $RelativePath"
         }
-    }
+        }
 
-    foreach ($RequiredArtifact in @(
+        foreach ($RequiredArtifact in @(
         "postgres/postgres.dump",
         "volumes/minio-data.tar.gz",
         "volumes/redis-data.tar.gz",
@@ -2467,58 +2493,58 @@ function Test-WindowsBackup {
         "config/nginx/acme-bootstrap.conf.template",
         "config/nginx/default.conf.template",
         "config/nginx/tls.conf.template"
-    )) {
-        $null = Get-WindowsManifestArtifact `
-            -Manifest $Manifest `
-            -RelativePath $RequiredArtifact
-    }
-    if ([bool]$Manifest.environment.included) {
-        $null = Get-WindowsManifestArtifact `
-            -Manifest $Manifest `
-            -RelativePath "secrets/environment.cms"
-    }
-    elseif (
+        )) {
+            $null = Get-WindowsManifestArtifact `
+                -Manifest $Manifest `
+                -RelativePath $RequiredArtifact
+        }
+        if ([bool]$Manifest.environment.included) {
+            $null = Get-WindowsManifestArtifact `
+                -Manifest $Manifest `
+                -RelativePath "secrets/environment.cms"
+        }
+        elseif (
         @(
             $Manifest.artifacts |
                 Where-Object {
                     [string]$_.path -eq "secrets/environment.cms"
                 }
         ).Count -gt 0
-    ) {
-        throw "Backup manifest contains CMS environment data marked as skipped."
-    }
-    else {
-        $EnvironmentArtifacts = @(
-            @($Manifest.artifacts) |
-                Where-Object {
-                    [string]$_.path -eq "secrets/environment.cms"
-                }
-        )
-        if ($EnvironmentArtifacts.Count -gt 0) {
-            throw "Skipped environment backup contains an unexpected CMS artifact."
+        ) {
+            throw "Backup manifest contains CMS environment data marked as skipped."
         }
-    }
+        else {
+            $EnvironmentArtifacts = @(
+                @($Manifest.artifacts) |
+                    Where-Object {
+                        [string]$_.path -eq "secrets/environment.cms"
+                    }
+            )
+            if ($EnvironmentArtifacts.Count -gt 0) {
+                throw "Skipped environment backup contains an unexpected CMS artifact."
+            }
+        }
 
-    $ComposeArtifact = Get-WindowsManifestArtifact `
-        -Manifest $Manifest `
-        -RelativePath "config/compose.windows.yml"
-    if ([string]$ComposeArtifact.sha256 -ne [string]$Manifest.compose_sha256) {
-        throw "Backup manifest Compose SHA-256 does not match the archived Compose file."
-    }
-    if ((Get-WindowsSha256 -Path $ComposeFile) -ne [string]$Manifest.compose_sha256) {
-        throw "Current Compose file does not match the backup manifest."
-    }
-    if (
+        $ComposeArtifact = Get-WindowsManifestArtifact `
+            -Manifest $Manifest `
+            -RelativePath "config/compose.windows.yml"
+        if ([string]$ComposeArtifact.sha256 -ne [string]$Manifest.compose_sha256) {
+            throw "Backup manifest Compose SHA-256 does not match the archived Compose file."
+        }
+        if ((Get-WindowsSha256 -Path $ComposeFile) -ne [string]$Manifest.compose_sha256) {
+            throw "Current Compose file does not match the backup manifest."
+        }
+        if (
         (Get-WindowsProjectVersion -RepoRoot $RepoRoot) -ne
         [string]$Manifest.project_version
-    ) {
-        throw "Current project version does not match the backup manifest."
-    }
-    if ((Get-WindowsGitCommit -RepoRoot $RepoRoot) -ne [string]$Manifest.git_commit) {
-        throw "Current Git commit does not match the backup manifest."
-    }
+        ) {
+            throw "Current project version does not match the backup manifest."
+        }
+        if ((Get-WindowsGitCommit -RepoRoot $RepoRoot) -ne [string]$Manifest.git_commit) {
+            throw "Current Git commit does not match the backup manifest."
+        }
 
-    $ArchiveToolImage = [string]$Manifest.archive_tool_image
+        $ArchiveToolImage = [string]$Manifest.archive_tool_image
     $ArchiveToolImageId = [string]$Manifest.archive_tool_image_id
     $ExpectedArchiveToolImage = Get-WindowsModelServiceImage `
         -ComposeModel $CurrentComposeModel `
@@ -2536,7 +2562,7 @@ function Test-WindowsBackup {
     if ([string]$PostgresImageRecord.id -ne $ArchiveToolImageId) {
         throw "Backup archive tool image ID does not match its image record."
     }
-    foreach ($ServiceName in $ExpectedImageServices) {
+        foreach ($ServiceName in $ExpectedImageServices) {
         $TargetReference = Get-WindowsModelServiceImage `
             -ComposeModel $CurrentComposeModel `
             -ServiceName $ServiceName
@@ -2548,7 +2574,7 @@ function Test-WindowsBackup {
         if ([string]$ImageRecord.id -ne [string]$TargetImageInfo.id) {
             throw "Backup image ID mismatch for $ServiceName."
         }
-    }
+        }
 
     $ExpectedDatabaseName = Get-WindowsModelEnvironmentValue `
         -ComposeModel $CurrentComposeModel `
@@ -2578,28 +2604,28 @@ function Test-WindowsBackup {
             -ServiceName "gateway" `
             -Name "DRIVE_TLS_CERT_NAME"
     }
-    foreach ($PropertyName in $ExpectedConfiguration.Keys) {
+        foreach ($PropertyName in $ExpectedConfiguration.Keys) {
         if (
             [string]$Manifest.configuration.$PropertyName -ne
             [string]$ExpectedConfiguration[$PropertyName]
         ) {
             throw "Backup configuration mismatch: $PropertyName"
         }
-    }
+        }
 
     Write-Host (
         "[backup-verify] validating PostgreSQL dump ({0:N1}s elapsed)" -f
         $VerifyStopwatch.Elapsed.TotalSeconds
     )
-    $null = Invoke-WindowsBackupHelperContainer -Arguments @(
+        $null = Invoke-WindowsBackupHelperContainer -Arguments @(
         "--network", "none",
         "--entrypoint", "sh",
-        "--mount", "type=bind,source=$Root,target=/backup,readonly",
+        "--mount", "type=bind,source=$ArtifactRoot,target=/backup,readonly",
         $ArchiveToolImageId,
         "-ec",
         "pg_restore --list /backup/postgres/postgres.dump >/dev/null"
     )
-    foreach ($ArchivePath in @(
+        foreach ($ArchivePath in @(
         "volumes/minio-data.tar.gz",
         "volumes/redis-data.tar.gz",
         "volumes/opensearch-data.tar.gz",
@@ -2612,13 +2638,17 @@ function Test-WindowsBackup {
         )
         Test-WindowsTarArchiveEntries `
             -ArchiveToolImage $ArchiveToolImageId `
-            -BackupDirectory $Root `
+            -BackupDirectory $ArtifactRoot `
             -RelativePath $ArchivePath
+        }
+        Write-Host (
+            "[backup-verify:done] {0:N1}s" -f
+            $VerifyStopwatch.Elapsed.TotalSeconds
+        )
     }
-    Write-Host (
-        "[backup-verify:done] {0:N1}s" -f
-        $VerifyStopwatch.Elapsed.TotalSeconds
-    )
+    finally {
+        Remove-WindowsBackupPayloadResolution -Resolution $PayloadResolution
+    }
     return $Manifest
 }
 
@@ -2642,6 +2672,12 @@ function Invoke-WindowsBackup {
         [string]$ConfigEncryptionCertificateThumbprint,
 
         [switch]$SkipEnvironmentBackup,
+
+        [ValidatePattern("^[A-Fa-f0-9]{40}$")]
+        [string]$BackupSigningCertificateThumbprint,
+
+        [ValidatePattern("^[A-Fa-f0-9]{40}$")]
+        [string]$PackageEncryptionCertificateThumbprint,
 
         [ValidateRange(30, 3600)]
         [int]$QuiesceTimeoutSeconds = 300
@@ -2949,6 +2985,29 @@ function Invoke-WindowsBackup {
                 sha256 = Get-WindowsSha256 -Path $File.FullName
             }
         }
+        $PackageEncryption = if (
+            -not [string]::IsNullOrWhiteSpace(
+                $PackageEncryptionCertificateThumbprint
+            )
+        ) {
+            New-WindowsEncryptedBackupPackage `
+                -StagingRoot $PartialPath `
+                -CertificateThumbprint $PackageEncryptionCertificateThumbprint `
+                -PayloadDirectories @("postgres", "volumes", "config", "secrets")
+        }
+        else {
+            [ordered]@{
+                included = $false
+                protection = "skipped"
+                certificate_thumbprint = ""
+                certificate_subject = ""
+                payload_path = ""
+                payload_size_bytes = [int64]0
+                payload_sha256 = ""
+                envelope_path = ""
+                envelope_sha256 = ""
+            }
+        }
 
         $VolumeRecords = @()
         foreach ($LogicalName in @(
@@ -2984,8 +3043,43 @@ function Invoke-WindowsBackup {
                 -ServiceName "gateway" `
                 -Name "DRIVE_TLS_CERT_NAME"
         }
+        $SourceAuthentication = if (
+            -not [string]::IsNullOrWhiteSpace(
+                $BackupSigningCertificateThumbprint
+            )
+        ) {
+            $SigningCertificate = Get-WindowsBackupCertificate `
+                -Thumbprint $BackupSigningCertificateThumbprint `
+                -RequirePrivateKey
+            [ordered]@{
+                included = $true
+                protection = "cms-detached"
+                digest_algorithm = "sha256"
+                signed_artifact = "manifest.json"
+                signature_path = "manifest.p7s"
+                certificate_thumbprint = (
+                    $SigningCertificate.Thumbprint.ToUpperInvariant()
+                )
+                certificate_subject = [string]$SigningCertificate.Subject
+                certificate_not_after_utc = (
+                    $SigningCertificate.NotAfter.ToUniversalTime().ToString("o")
+                )
+            }
+        }
+        else {
+            [ordered]@{
+                included = $false
+                protection = "skipped"
+                digest_algorithm = ""
+                signed_artifact = ""
+                signature_path = ""
+                certificate_thumbprint = ""
+                certificate_subject = ""
+                certificate_not_after_utc = ""
+            }
+        }
         $Manifest = [ordered]@{
-            format_version = 1
+            format_version = 2
             backup_id = $BackupId
             created_at_utc = [System.DateTime]::UtcNow.ToString("o")
             quiesced_at_utc = $QuiescedAt
@@ -3020,6 +3114,8 @@ function Invoke-WindowsBackup {
                     ""
                 }
             }
+            source_authentication = $SourceAuthentication
+            package_encryption = $PackageEncryption
             configuration = $Configuration
             volumes = $VolumeRecords
             images = $ImageRecords
@@ -3028,6 +3124,12 @@ function Invoke-WindowsBackup {
         $ManifestPath = Join-Path $PartialPath "manifest.json"
         $ManifestJson = $Manifest | ConvertTo-Json -Depth 12
         Write-WindowsUtf8File -Path $ManifestPath -Content ($ManifestJson + "`n")
+        if ([bool]$SourceAuthentication.included) {
+            $null = New-WindowsManifestSignature `
+                -ManifestPath $ManifestPath `
+                -SignaturePath (Join-Path $PartialPath "manifest.p7s") `
+                -CertificateThumbprint $BackupSigningCertificateThumbprint
+        }
         $ManifestHash = Get-WindowsSha256 -Path $ManifestPath
         Write-WindowsUtf8File `
             -Path (Join-Path $PartialPath "manifest.sha256") `
@@ -3149,6 +3251,11 @@ function Invoke-WindowsRestore {
         -EnvFile $EnvFile `
         -ComposeBaseArguments $ComposeBaseArguments `
         -BackupPath $Root
+    $PayloadResolution = Resolve-WindowsBackupPayload `
+        -BackupRoot $Root `
+        -Manifest $Manifest
+    $PayloadRoot = [string]$PayloadResolution.root
+    try {
 
     $ComposeModel = Get-WindowsComposeModel `
         -ComposeBaseArguments $ComposeBaseArguments
@@ -3201,7 +3308,7 @@ function Invoke-WindowsRestore {
             -Manifest $Manifest `
             -RelativePath "secrets/environment.cms"
         $EnvironmentPath = Resolve-WindowsBackupArtifactPath `
-            -BackupRoot $Root `
+            -BackupRoot $PayloadRoot `
             -RelativePath ([string]$EnvironmentArtifact.path)
         if (-not [System.IO.Path]::IsPathRooted($RestoreEnvironmentOutput)) {
             throw "RestoreEnvironmentOutput must be an absolute path."
@@ -3410,7 +3517,7 @@ function Invoke-WindowsRestore {
             Restore-WindowsVolumeArchive `
                 -ArchiveToolImage $ArchiveToolImage `
                 -VolumeName $VolumeMap[$LogicalName] `
-                -BackupDirectory $Root `
+                -BackupDirectory $PayloadRoot `
                 -ArchiveRelativePath "volumes/$LogicalName.tar.gz"
         }
 
@@ -3449,7 +3556,7 @@ function Invoke-WindowsRestore {
         $null = Invoke-WindowsBackupHelperContainer -Arguments @(
             "--network", $BackendNetwork,
             "--entrypoint", "sh",
-            "--mount", "type=bind,source=$Root,target=/backup,readonly",
+            "--mount", "type=bind,source=$PayloadRoot,target=/backup,readonly",
             "-e", "PGHOST=postgres",
             "-e", "PGUSER=$PostgresUser",
             "-e", "PGDATABASE=$PostgresDatabase",
@@ -3728,4 +3835,8 @@ function Invoke-WindowsRestore {
         throw "Restore completed, but maintenance cleanup failed: $($RestoreRecoveryErrors -join '; ')"
     }
     Write-Output "Restore completed for project '$TargetProject' from '$Root'."
+    }
+    finally {
+        Remove-WindowsBackupPayloadResolution -Resolution $PayloadResolution
+    }
 }

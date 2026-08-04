@@ -11,11 +11,15 @@ param(
         "backup-verify",
         "restore",
         "backup-retention",
+        "backup-offline-rotate",
         "backup-retention-register",
         "backup-retention-unregister",
         "restore-drill",
         "restore-drill-register",
         "restore-drill-unregister",
+        "data-migration-export",
+        "data-migration-apply",
+        "data-migration-rollback",
         "tls-init",
         "tls-renew",
         "tls-certificates",
@@ -54,6 +58,16 @@ param(
 
     [switch]$ApplyRetention,
 
+    [string]$OfflineBackupDirectory,
+
+    [string]$MigrationDirectory,
+
+    [string]$MigrationPath,
+
+    [string]$MigrationRollbackDirectory,
+
+    [string]$MigrationRecordDirectory,
+
     [string]$RestoreDrillDirectory,
 
     [string]$TlsValidationDirectory,
@@ -62,6 +76,12 @@ param(
     [string]$ConfigEncryptionCertificateThumbprint,
 
     [switch]$SkipEnvironmentBackup,
+
+    [ValidatePattern("^[A-Fa-f0-9]{40}$")]
+    [string]$BackupSigningCertificateThumbprint,
+
+    [ValidatePattern("^[A-Fa-f0-9]{40}$")]
+    [string]$PackageEncryptionCertificateThumbprint,
 
     [string]$RestoreEnvironmentOutput,
 
@@ -324,6 +344,22 @@ if (
 ) {
     $TlsValidationDirectory = Join-Path $GovernanceRecordRoot "tls-validations"
 }
+if (
+    [string]::IsNullOrWhiteSpace($MigrationRollbackDirectory) -and
+    -not [string]::IsNullOrWhiteSpace($GovernanceRecordRoot)
+) {
+    $MigrationRollbackDirectory = Join-Path (
+        $GovernanceRecordRoot
+    ) "data-migration-rollbacks"
+}
+if (
+    [string]::IsNullOrWhiteSpace($MigrationRecordDirectory) -and
+    -not [string]::IsNullOrWhiteSpace($GovernanceRecordRoot)
+) {
+    $MigrationRecordDirectory = Join-Path (
+        $GovernanceRecordRoot
+    ) "data-migrations"
+}
 
 function Set-ProcessEnvironmentValue {
     param(
@@ -355,10 +391,17 @@ function Assert-ActionParameters {
         "RetentionDays",
         "RetentionCount",
         "ApplyRetention",
+        "OfflineBackupDirectory",
+        "MigrationDirectory",
+        "MigrationPath",
+        "MigrationRollbackDirectory",
+        "MigrationRecordDirectory",
         "RestoreDrillDirectory",
         "TlsValidationDirectory",
         "ConfigEncryptionCertificateThumbprint",
         "SkipEnvironmentBackup",
+        "BackupSigningCertificateThumbprint",
+        "PackageEncryptionCertificateThumbprint",
         "RestoreEnvironmentOutput",
         "ForceRestore",
         "NoStartAfterRestore",
@@ -386,6 +429,8 @@ function Assert-ActionParameters {
                 "BackupDirectory",
                 "ConfigEncryptionCertificateThumbprint",
                 "SkipEnvironmentBackup",
+                "BackupSigningCertificateThumbprint",
+                "PackageEncryptionCertificateThumbprint",
                 "QuiesceTimeoutSeconds"
             )
         }
@@ -401,6 +446,16 @@ function Assert-ActionParameters {
         "backup-retention" {
             @(
                 "BackupDirectory",
+                "RetentionDays",
+                "RetentionCount",
+                "ApplyRetention"
+            )
+        }
+        "backup-offline-rotate" {
+            @(
+                "BackupDirectory",
+                "BackupPath",
+                "OfflineBackupDirectory",
                 "RetentionDays",
                 "RetentionCount",
                 "ApplyRetention"
@@ -429,6 +484,21 @@ function Assert-ActionParameters {
                 "RestoreDrillTaskName",
                 "RestoreDrillAt",
                 "RestoreDrillDayOfWeek"
+            )
+        }
+        "data-migration-export" { @("MigrationDirectory") }
+        "data-migration-apply" {
+            @(
+                "MigrationPath",
+                "MigrationRollbackDirectory",
+                "MigrationRecordDirectory"
+            )
+        }
+        "data-migration-rollback" {
+            @(
+                "MigrationPath",
+                "MigrationRollbackDirectory",
+                "MigrationRecordDirectory"
             )
         }
         "tls-init" { @("Tls", "TlsEmail", "TlsStaging") }
@@ -485,6 +555,17 @@ function Assert-ActionParameters {
                 throw "backup-retention requires -BackupDirectory."
             }
         }
+        "backup-offline-rotate" {
+            if (
+                [string]::IsNullOrWhiteSpace($BackupPath) -eq
+                [string]::IsNullOrWhiteSpace($BackupDirectory)
+            ) {
+                throw "backup-offline-rotate requires exactly one of -BackupPath or -BackupDirectory."
+            }
+            if ([string]::IsNullOrWhiteSpace($OfflineBackupDirectory)) {
+                throw "backup-offline-rotate requires -OfflineBackupDirectory."
+            }
+        }
         "backup-retention-register" {
             if ([string]::IsNullOrWhiteSpace($BackupDirectory)) {
                 throw "backup-retention-register requires -BackupDirectory."
@@ -511,6 +592,28 @@ function Assert-ActionParameters {
             if ([string]::IsNullOrWhiteSpace($RestoreDrillDirectory)) {
                 throw (
                     "restore-drill-register requires -RestoreDrillDirectory or " +
+                    "DRIVE_GOVERNANCE_RECORD_ROOT."
+                )
+            }
+        }
+        "data-migration-export" {
+            if ([string]::IsNullOrWhiteSpace($MigrationDirectory)) {
+                throw "data-migration-export requires -MigrationDirectory."
+            }
+        }
+        { $_ -in @("data-migration-apply", "data-migration-rollback") } {
+            if ([string]::IsNullOrWhiteSpace($MigrationPath)) {
+                throw "$Action requires -MigrationPath."
+            }
+            if ([string]::IsNullOrWhiteSpace($MigrationRollbackDirectory)) {
+                throw (
+                    "$Action requires -MigrationRollbackDirectory or " +
+                    "DRIVE_GOVERNANCE_RECORD_ROOT."
+                )
+            }
+            if ([string]::IsNullOrWhiteSpace($MigrationRecordDirectory)) {
+                throw (
+                    "$Action requires -MigrationRecordDirectory or " +
                     "DRIVE_GOVERNANCE_RECORD_ROOT."
                 )
             }
@@ -1212,13 +1315,22 @@ function Register-TlsRenewalTask {
 
 $BackupRestoreScript = Join-Path $PSScriptRoot "backup-restore.ps1"
 $GovernanceScript = Join-Path $PSScriptRoot "governance.ps1"
-foreach ($HelperScript in @($BackupRestoreScript, $GovernanceScript)) {
+$OfflineBackupScript = Join-Path $PSScriptRoot "offline-backup.ps1"
+$DataMigrationScript = Join-Path $PSScriptRoot "data-migration.ps1"
+foreach ($HelperScript in @(
+    $BackupRestoreScript,
+    $GovernanceScript,
+    $OfflineBackupScript,
+    $DataMigrationScript
+)) {
     if (-not (Test-Path -LiteralPath $HelperScript -PathType Leaf)) {
         throw "Windows deployment helper does not exist: $HelperScript"
     }
 }
 . $BackupRestoreScript
 . $GovernanceScript
+. $OfflineBackupScript
+. $DataMigrationScript
 Assert-ActionParameters
 
 $DeploymentMutex = $null
@@ -1322,6 +1434,16 @@ try {
                     $ConfigEncryptionCertificateThumbprint
                 )
             }
+            if (-not [string]::IsNullOrWhiteSpace($BackupSigningCertificateThumbprint)) {
+                $BackupArguments["BackupSigningCertificateThumbprint"] = (
+                    $BackupSigningCertificateThumbprint
+                )
+            }
+            if (-not [string]::IsNullOrWhiteSpace($PackageEncryptionCertificateThumbprint)) {
+                $BackupArguments["PackageEncryptionCertificateThumbprint"] = (
+                    $PackageEncryptionCertificateThumbprint
+                )
+            }
             Invoke-WindowsBackup @BackupArguments
         }
         "backup-verify" {
@@ -1364,6 +1486,24 @@ try {
                 -Apply:$ApplyRetention
             $Result | ConvertTo-Json -Depth 8
         }
+        "backup-offline-rotate" {
+            $Arguments = @{
+                RepoRoot = $RepoRoot
+                ComposeBaseArguments = $ComposeBaseArguments
+                OfflineBackupDirectory = $OfflineBackupDirectory
+                RetentionDays = $RetentionDays
+                RetentionCount = $RetentionCount
+                ApplyRetention = [bool]$ApplyRetention
+            }
+            if (-not [string]::IsNullOrWhiteSpace($BackupPath)) {
+                $Arguments["BackupPath"] = $BackupPath
+            }
+            else {
+                $Arguments["BackupDirectory"] = $BackupDirectory
+            }
+            $Result = Invoke-WindowsOfflineBackupRotation @Arguments
+            $Result | ConvertTo-Json -Depth 12
+        }
         "backup-retention-register" {
             Register-WindowsBackupRetentionTask `
                 -RepoRoot $RepoRoot `
@@ -1403,6 +1543,36 @@ try {
                 -TaskName $RestoreDrillTaskName `
                 -At $RestoreDrillAt `
                 -DayOfWeek $RestoreDrillDayOfWeek
+        }
+        "data-migration-export" {
+            Assert-DockerEngine
+            $ExportPath = New-WindowsPortableDataExport `
+                -RepoRoot $RepoRoot `
+                -ComposeBaseArguments $ComposeBaseArguments `
+                -ExportDirectory $MigrationDirectory
+            Write-Output "Portable data export created: $ExportPath"
+        }
+        "data-migration-apply" {
+            Assert-DockerEngine
+            $Result = Invoke-WindowsPortableDataMigration `
+                -RepoRoot $RepoRoot `
+                -ComposeBaseArguments $ComposeBaseArguments `
+                -ExportPath $MigrationPath `
+                -RollbackExportDirectory $MigrationRollbackDirectory `
+                -RecordDirectory $MigrationRecordDirectory `
+                -Mode "apply"
+            $Result | ConvertTo-Json -Depth 16
+        }
+        "data-migration-rollback" {
+            Assert-DockerEngine
+            $Result = Invoke-WindowsPortableDataMigration `
+                -RepoRoot $RepoRoot `
+                -ComposeBaseArguments $ComposeBaseArguments `
+                -ExportPath $MigrationPath `
+                -RollbackExportDirectory $MigrationRollbackDirectory `
+                -RecordDirectory $MigrationRecordDirectory `
+                -Mode "rollback"
+            $Result | ConvertTo-Json -Depth 16
         }
         "tls-init" {
             Assert-DockerEngine

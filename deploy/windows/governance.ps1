@@ -58,9 +58,10 @@ function Get-WindowsBackupRecord {
     }
 
     $Manifest = Get-WindowsGovernanceJson -Path $ManifestPath
-    if ([int]$Manifest.format_version -ne 1) {
+    if ([int]$Manifest.format_version -notin @(1, 2)) {
         throw "Unsupported backup manifest format: $($Manifest.format_version)"
     }
+    Test-WindowsManifestSignature -BackupRoot $Path -Manifest $Manifest
     if ([string]$Manifest.backup_id -ne $DirectoryBackupId) {
         throw "Backup directory ID does not match manifest backup_id: $Path"
     }

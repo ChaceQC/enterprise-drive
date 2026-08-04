@@ -276,4 +276,19 @@ finally {
     }
 }
 
+foreach ($Sprint12Smoke in @(
+    "ops-sprint12.security.smoke.ps1",
+    "ops-sprint12.governance.smoke.ps1",
+    "ops-sprint12.export.smoke.ps1"
+)) {
+    $SmokePath = Join-Path $PSScriptRoot $Sprint12Smoke
+    & powershell.exe `
+        -NoProfile `
+        -ExecutionPolicy Bypass `
+        -File $SmokePath
+    if ($LASTEXITCODE -ne 0) {
+        throw "Sprint 12 OPS smoke failed: $Sprint12Smoke"
+    }
+}
+
 Write-Output "Windows governance smoke tests passed."
