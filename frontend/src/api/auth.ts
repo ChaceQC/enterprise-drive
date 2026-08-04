@@ -1,7 +1,12 @@
 import {
   AuthService,
+  type BrowserSessionListResponse,
+  type BrowserSessionRevokeResponse,
   type LoginRequest,
   type LogoutResponse,
+  type PasswordChangeRequest,
+  type PasswordChangeResponse,
+  type PasswordPolicyResponse,
   type SessionResponse,
   type UserProfileResponse,
 } from './generated'
@@ -40,5 +45,38 @@ export function getCurrentUser({
 export function rotateSession(): Promise<SessionResponse> {
   return executeApi(
     () => AuthService.rotateSessionApiV1AuthSessionRotatePost(),
+  )
+}
+
+export function getPasswordPolicy(): Promise<PasswordPolicyResponse> {
+  return executeApi(
+    () => AuthService.getPasswordPolicyApiV1AuthPasswordPolicyGet(),
+    { notifySessionExpired: false },
+  )
+}
+
+export function changePassword(
+  requestBody: PasswordChangeRequest,
+): Promise<PasswordChangeResponse> {
+  return executeApi(
+    () => AuthService.changePasswordApiV1AuthPasswordChangePost({
+      requestBody,
+    }),
+  )
+}
+
+export function listBrowserSessions(): Promise<BrowserSessionListResponse> {
+  return executeApi(
+    () => AuthService.listBrowserSessionsApiV1AuthSessionsGet(),
+  )
+}
+
+export function revokeBrowserSession(
+  sessionId: string,
+): Promise<BrowserSessionRevokeResponse> {
+  return executeApi(
+    () => AuthService.revokeBrowserSessionApiV1AuthSessionsSessionIdDelete({
+      sessionId,
+    }),
   )
 }

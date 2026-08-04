@@ -150,7 +150,8 @@ router -> service -> domain/policy -> repository -> db/infrastructure
 
 每个模块必须交付代码、迁移、测试和文档，不允许只交付接口空壳。
 
-- `auth`：用户登录、密码哈希、服务端 opaque session、HttpOnly Cookie、CSRF、管理员 seed、登录失败防护、密码与会话管理、OIDC。
+- `auth`：用户登录、密码哈希、服务端 opaque session、HttpOnly Cookie、CSRF、管理员 seed、登录失败防护、密码与会话管理、OIDC/OAuth 2.1 + PKCE。
+- `identity`：OIDC provider/账号绑定/回调/登出、LDAP 目录源/dry-run/全量/增量同步、稳定外部 ID、冲突和离职处理；外部网络调用与 secret 解析只能位于 service/infrastructure 边界。
 - `org`：用户、部门、用户组、成员关系。
 - `space`：空间、空间成员、空间角色、空间配额。
 - `file`：node、file_blob、file_version、文件夹、移动、重命名、回收站、版本列表/下载/回滚、批量操作。
@@ -305,14 +306,18 @@ uv run mypy app
 
 ## 16. 认证与安全
 
-- 一期支持本地账号，预留 OIDC / LDAP。
+- 当前支持本地账号、OIDC/OAuth 2.1 + PKCE 和 LDAP 只读目录同步；三类身份最终都必须映射到当前租户的本地 `users` 事实，外部 provider/目录不能绕过本地停用、权限、审计或会话撤销。
 - 密码哈希使用 Argon2id。
 - 浏览器端认证采用 BFF + HttpOnly Cookie Session，不向浏览器返回或保存 JWT，不保留 Bearer token 兼容入口。
 - 会话令牌使用服务端生成的 opaque random token，仅以哈希形式保存到 `auth_sessions`，原始令牌只写入 `HttpOnly`、`SameSite` Cookie。
 - 所有 `POST`、`PUT`、`PATCH`、`DELETE` 等有副作用请求必须校验 `X-CSRF-Token`，CSRF token 可放在非 HttpOnly Cookie 中供前端读取并回传。
 - 会话轮换必须签发新的 session token 和 CSRF token，旧 session 立即标记为 replaced；检测到旧 session 被复用时，必须吊销整个 session family。
 - 新项目尚未上线，不为旧 JWT、refresh token、`Authorization: Bearer` 或 `/auth/refresh` 路径做兼容保留；相关命名、迁移、文档和测试应直接改为当前会话模型。
-- 后续接入第三方身份认证时，优先使用 OIDC/OAuth 2.1 + PKCE 和成熟开源库，在 BFF 层完成 code flow 并继续向浏览器签发本项目服务端 session cookie。
+- OIDC/OAuth 2.1 必须使用 Authorization Code + PKCE、一次性 state/nonce、issuer/JWKS/签名/claims 校验和返回路径 allowlist；BFF 回调完成后只签发本项目服务端 session cookie，不把 provider access/id token 交给浏览器持久化。
+- OIDC provider secret、LDAP bind password 等身份凭据只允许保存受保护引用；当前实现使用 `env:VARIABLE_NAME`，读取响应只返回是否已配置，不回显引用解析后的明文。空值、缺失值和未知引用格式必须按凭据不可用处理。
+- LDAP 同步必须使用稳定外部 ID，不得按用户名、邮箱、DN、部门路径或组名猜测绑定；dry-run 不写核心用户/组织/映射/cursor，全量缺失只能影响当前 Source 的权威绑定，目录读取失败或分页不完整不得进入“未出现即离职”流程。
+- LDAP 成员关系必须区分目录 claim 与既有手工成员关系；移除目录 claim 时，不得删除仍由管理员手工保留或其他 Source 声明的核心成员边。
+- 用户改密、管理员重置、用户停用和 LDAP 离职必须吊销浏览器与桌面设备会话；强制改密期间只允许读取当前账号、提交改密和退出，不得依赖前端页面隐藏代替服务端阻断。
 - 管理员重置密码后必须强制用户下次登录修改。
 - 文件名最大 255 字符，禁止 `/`、`\`、控制字符、NUL、路径穿越片段。
 - Unicode 文件名必须 normalize，避免肉眼相同但二进制不同导致绕过重名检查。
@@ -382,6 +387,7 @@ uv run mypy app
 - 审计：验证成功和失败操作都写入 audit log，outbox 投递失败可重试。
 - 部署：检查 Dockerfile、根 `compose.windows.yml`、Nginx gateway、`.env.windows.example`、`deploy/windows/manage.ps1`、named volumes、自动化备份/校验/隔离恢复、回滚说明和 Windows Docker Desktop 启停流程；必须确认只有 gateway 发布宿主端口。
 - 安全：检查公网端口、后台入口、文件访问路径、对象存储 bucket、敏感日志；Nginx gateway 或请求体策略变化还必须执行 `scripts/smoke_gateway_security_docker.py`，以真实原始 HTTP 验证冲突 CL/TE、重复 Content-Length、API body limit 和 storage 流式边界。该 smoke 必须先显式准备镜像，运行阶段使用 `--pull never` 和 CPU/memory/PID 上限。
+- 身份：按受影响范围验证账号锁定/解锁、密码策略与全会话吊销、OIDC state/nonce/PKCE/重放/开放重定向/绑定冲突、LDAP dry-run/稳定映射/禁用/离职/手工成员保留/冲突，以及 secret 不回显；真实 provider/目录联调与本地 fake adapter 测试必须明确区分。
 
 如果某项验证无法执行，必须在最终说明和 `PROJECT_PROGRESS.md` 中记录原因。
 
@@ -485,6 +491,7 @@ Windows Docker Compose 要求：
 - API 契约、错误码、枚举值和 OpenAPI 变化。
 - 上传下载、对象存储 key、预览、搜索策略变化。
 - 权限、认证、分享、安全策略变化。
+- OIDC/LDAP provider、身份映射、secret 引用、账号锁定、密码策略和会话撤销变化；身份相关设计与运维说明同步到 `docs/identity-security.md`。
 - 容量账本和配额策略变化。
 - 部署方式、CI/CD、环境变量和运维脚本变化。
 - 影响开发流程的规范变化。

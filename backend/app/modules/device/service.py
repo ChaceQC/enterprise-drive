@@ -60,6 +60,7 @@ class DeviceSessionService:
             username=username,
             password=password,
             audit_action="auth.device.register",
+            allow_password_change_required=False,
             audit_context=audit_context,
         )
         now = utc_now()

@@ -123,7 +123,7 @@ async def test_super_admin_manages_user_lifecycle_with_cursor_and_preconditions(
         json={
             "tenant_slug": "default",
             "username": "alice",
-            "password": "alice-password-2026",
+            "password": "Alice-password-2026!",
         },
     )
     assert alice_login.status_code == 200
@@ -494,7 +494,7 @@ async def _create_admin_user(
             "username": username,
             "email": email,
             "display_name": display_name,
-            "password": f"{username}-password-2026",
+            "password": f"{username.capitalize()}-password-2026!",
         },
     )
     assert response.status_code == 201

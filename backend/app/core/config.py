@@ -117,7 +117,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "企业网盘"
-    app_version: str = "0.7.0"
+    app_version: str = "0.8.0"
     service_name: str = "enterprise-drive-api"
     environment: Literal["local", "test", "staging", "production"] = "local"
     debug: bool = False
@@ -210,6 +210,28 @@ class Settings(BaseSettings):
     login_ip_rate_limit_count: int = Field(default=30, ge=1)
     login_account_rate_limit_count: int = Field(default=10, ge=1)
     login_rate_limit_window_seconds: int = Field(default=60, ge=1)
+    login_failure_lock_threshold: int = Field(default=5, ge=2, le=100)
+    login_failure_window_seconds: int = Field(default=900, ge=1, le=86400)
+    login_lock_seconds: int = Field(default=900, ge=1, le=86400)
+    login_delay_base_seconds: float = Field(default=0.25, ge=0, le=10)
+    login_delay_max_seconds: float = Field(default=4.0, ge=0, le=60)
+    login_captcha_after_failures: int = Field(default=3, ge=0, le=100)
+    password_min_length: int = Field(default=12, ge=8, le=255)
+    password_require_uppercase: bool = True
+    password_require_lowercase: bool = True
+    password_require_digit: bool = True
+    password_require_special: bool = True
+    oidc_state_ttl_seconds: int = Field(default=600, ge=60, le=3600)
+    identity_allowed_redirect_paths: list[str] = Field(
+        default_factory=lambda: [
+            "/",
+            "/account",
+            "/auth/oidc/callback",
+            "/admin/identity",
+        ]
+    )
+    identity_http_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    ldap_sync_page_size: int = Field(default=500, ge=1, le=5000)
     upload_init_rate_limit_count: int = 60
     upload_init_rate_limit_window_seconds: int = 60
     upload_part_presign_rate_limit_count: int = 300

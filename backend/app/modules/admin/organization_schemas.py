@@ -18,6 +18,9 @@ class AdminUserResponse(BaseModel):
     is_active: bool
     is_super_admin: bool
     must_change_password: bool
+    failed_login_attempts: int
+    locked_until: datetime | None
+    locked: bool
     version: int
     created_at: datetime
     updated_at: datetime
@@ -68,6 +71,15 @@ class AdminUserUpdateRequest(BaseModel):
         ):
             raise ValueError("至少提供一个用户变更字段")
         return self
+
+
+class AdminUserPasswordResetRequest(BaseModel):
+    expected_version: int = Field(ge=1)
+    new_password: str = Field(min_length=1, max_length=255)
+
+
+class AdminUserUnlockRequest(BaseModel):
+    expected_version: int = Field(ge=1)
 
 
 class AdminDepartmentResponse(BaseModel):

@@ -11,6 +11,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from app.core.pagination import PageCursor
 from app.core.security import utc_now
 from app.modules.auth.models import AuthSession, Tenant, User
+from app.modules.device.models import DeviceSession
 from app.modules.org.models import Department, DepartmentMember, UserGroup, UserGroupMember
 
 
@@ -95,6 +96,8 @@ class AdminOrganizationRepository:
             is_active=is_active,
             is_super_admin=is_super_admin,
             must_change_password=must_change_password,
+            local_password_enabled=True,
+            password_changed_at=utc_now(),
         )
         self.session.add(user)
         await self.session.flush()
@@ -132,6 +135,15 @@ class AdminOrganizationRepository:
                 AuthSession.tenant_id == tenant_id,
                 AuthSession.user_id == user_id,
                 AuthSession.revoked_at.is_(None),
+            )
+            .values(revoked_at=now, revoked_reason=reason)
+        )
+        await self.session.execute(
+            update(DeviceSession)
+            .where(
+                DeviceSession.tenant_id == tenant_id,
+                DeviceSession.user_id == user_id,
+                DeviceSession.revoked_at.is_(None),
             )
             .values(revoked_at=now, revoked_reason=reason)
         )

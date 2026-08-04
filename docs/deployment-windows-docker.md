@@ -1,8 +1,8 @@
 # Windows 11 Docker 正式部署说明
 
-> 适用项目版本：`v0.7.0`
+> 适用项目版本：`v0.8.0`
 >
-> 当前代码基线：Windows 本机 HTTP `18080/19000`、公网 ACME/TLS `80/443`、可选 monitoring profile、备份轮换和隔离恢复演练均已落地；真实受信证书签发和双域名 HTTPS 记录仍需要生产 DNS/网络环境。
+> 当前代码基线：Windows 本机 HTTP `18080/19000`、公网 ACME/TLS `80/443`、可选 monitoring profile、备份轮换、隔离恢复、账号安全、OIDC/PKCE 和 LDAP 同步均已落地；真实受信证书、企业 OIDC provider 和 LDAPS 目录验收仍需要生产 DNS/网络环境。
 
 ## 1. 部署目标
 
@@ -60,7 +60,7 @@ docker info --format '{{.OSType}}'
 | `worker-search` | 文本/OCR/旧格式抽取、索引写入 | 不发布 |
 | `worker-audit` | 审计 outbox | 不发布 |
 | `worker-permission` | 权限缓存失效 | 不发布 |
-| `worker-maintenance` | 生命周期与治理任务 | 不发布 |
+| `worker-maintenance` | 生命周期、治理与异步 LDAP 同步任务 | 不发布 |
 | `beat` | 独立运行 Celery beat，负责周期任务调度 | 不发布 |
 | `postgres` | PostgreSQL 事实库 | 不发布 |
 | `redis` | 缓存、限流、Celery broker/result backend | 不发布 |
@@ -170,6 +170,23 @@ DRIVE_RATE_LIMIT_ENABLED=true
 DRIVE_LOGIN_IP_RATE_LIMIT_COUNT=30
 DRIVE_LOGIN_ACCOUNT_RATE_LIMIT_COUNT=10
 DRIVE_LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
+DRIVE_LOGIN_FAILURE_LOCK_THRESHOLD=5
+DRIVE_LOGIN_FAILURE_WINDOW_SECONDS=900
+DRIVE_LOGIN_LOCK_SECONDS=900
+DRIVE_LOGIN_DELAY_BASE_SECONDS=0.25
+DRIVE_LOGIN_DELAY_MAX_SECONDS=4.0
+DRIVE_LOGIN_CAPTCHA_AFTER_FAILURES=3
+DRIVE_PASSWORD_MIN_LENGTH=12
+DRIVE_PASSWORD_REQUIRE_UPPERCASE=true
+DRIVE_PASSWORD_REQUIRE_LOWERCASE=true
+DRIVE_PASSWORD_REQUIRE_DIGIT=true
+DRIVE_PASSWORD_REQUIRE_SPECIAL=true
+DRIVE_OIDC_STATE_TTL_SECONDS=600
+DRIVE_IDENTITY_ALLOWED_REDIRECT_PATHS=["/","/account","/auth/oidc/callback","/admin/identity"]
+DRIVE_IDENTITY_HTTP_TIMEOUT_SECONDS=10.0
+DRIVE_LDAP_SYNC_PAGE_SIZE=500
+OIDC_CLIENT_SECRET=
+LDAP_BIND_PASSWORD=
 DRIVE_OPENSEARCH_URL=http://opensearch:9200
 DRIVE_S3_ENDPOINT_URL=http://minio:9000
 DRIVE_S3_PUBLIC_ENDPOINT_URL=http://localhost:19000
@@ -224,8 +241,22 @@ GRAFANA_ROOT_URL=https://drive.example.com/grafana/
 - OpenTelemetry exporter 默认 `none`，不会向外部发送 span。生产接入 collector 时使用 `DRIVE_TRACING_EXPORTER=otlp_http`，把 `DRIVE_TRACING_OTLP_ENDPOINT` 设为完整 traces endpoint，例如 `http://otel-collector:4318/v1/traces`。`DRIVE_TRACING_OTLP_HEADERS` 必须是 JSON 对象，认证信息只放在未提交的 `.env.windows` 或受控 secret 管理中。
 - `outbox_pending_total` 和 `search_index_lag_seconds` 在 API scrape 时以短超时刷新。PostgreSQL 不可用时 `/metrics` 仍返回已有进程指标，但数据库 gauge 可能短暂保留上次成功值。
 - `DRIVE_RATE_LIMIT_ENABLED` 默认必须保持 `true`；根 Compose 会把该值传入 API 和 Worker。只有隔离容量基准可以临时设为 `false`，并应通过 `PERF_RATE_LIMIT_MODE` 写入性能报告，不能把关闭限流的测试配置直接用于生产。
-- 登录同时按来源 IP 和规范化账号标识限流；账号 key 只保存哈希，不保存原始用户名。默认分别为每分钟 `30` 和 `10` 次，正式环境可收紧但不能关闭；阶梯延迟、临时锁定和验证码由 Sprint 11 继续实现。
+- 登录同时按来源 IP 和规范化账号标识限流；账号 key 只保存哈希，不保存原始用户名。默认分别为每分钟 `30` 和 `10` 次，正式环境可收紧但不能关闭，并与 PostgreSQL 失败窗口、阶梯延迟和临时锁定共同生效。
+- Sprint 11 已实现阶梯延迟、失败时间窗口、临时锁定、管理员解锁和验证码阈值。默认连续 5 次失败后锁定 900 秒，失败窗口为 900 秒，延迟从 0.25 秒指数增长并在 4 秒封顶；正式环境调整阈值时必须同时评估 Redis 限流、Argon2id CPU、客服解锁流程和告警噪声。
+- `/metrics` 暴露低基数 `auth_security_events_total`、`identity_provider_operations_total` 和 `ldap_sync_runs_total`。Prometheus/Alertmanager 规则必须使用固定 event/provider/operation/outcome 值，禁止把 username、tenant、provider slug、external ID、DN、state、token 或错误原文作为 label。
 - `DRIVE_ENVIRONMENT=production` 会触发应用内 `Settings` fail-fast 校验，覆盖 API、Worker、beat、migration 和 seed。即使绕过 `manage.ps1`，示例/过短 secret、无强密码数据库或 Redis/Celery URL、关闭限流、Wildcard Trusted Hosts、带凭据或路径的公共端点，以及非回环 HTTP CORS/S3 或未启用 Secure Cookie 的公网配置也会阻断进程启动。默认本机 HTTP 模式只有在全部公共 Host 均为 localhost/回环地址时才允许。
+
+### 身份与账号安全
+
+- `DRIVE_LOGIN_FAILURE_*`、`DRIVE_LOGIN_LOCK_SECONDS`、`DRIVE_LOGIN_DELAY_*` 和 `DRIVE_LOGIN_CAPTCHA_AFTER_FAILURES` 会透传到 API；验证码 verifier 是可插拔适配器，当前默认关闭，接入真实 provider 时应通过项目基础设施层完成，不在 Compose 文件中硬编码第三方密钥。
+- `DRIVE_PASSWORD_*` 是用户改密、管理员创建/重置和前端策略提示的同一服务端事实。管理员 seed 默认要求首次改密；弱化策略前必须完成安全评审，不能只修改前端 `minLength`。
+- OIDC provider/LDAP Source 行只保存 `env:VARIABLE_NAME` 引用。示例 `env:OIDC_CLIENT_SECRET` 由 API 容器中的 `OIDC_CLIENT_SECRET` 解析；`env:LDAP_BIND_PASSWORD` 同时由 API 连接测试和 maintenance Worker 同步任务解析，因此两个容器都必须注入同一受控值。
+- `.env.windows` 中的身份 secret 不得提交 Git。空字符串、变量缺失和未知引用格式都按 `IDENTITY_SECRET_UNAVAILABLE`/`IDENTITY_SECRET_REF_INVALID` 处理；管理响应只返回 `client_secret_configured` 或 `bind_password_configured`。
+- OIDC issuer、authorization/token/JWKS/end-session endpoint 对非回环地址必须使用 HTTPS；生产回调 URL 由 gateway API 域名生成，provider 侧登记应为 `https://drive.example.com/api/v1/auth/oidc/{provider_slug}/callback`。`DRIVE_IDENTITY_ALLOWED_REDIRECT_PATHS` 只允许站内路径，禁止完整外部 URL。
+- LDAP 生产连接优先使用 `ldaps://` 并验证目录证书链。同步由 `worker-maintenance` 的 `identity.sync_ldap` 执行；扩容 maintenance Worker 前必须保证同一 Source 的 run 锁和目录侧连接上限，不能用并发 Worker 绕过 run 状态机。
+- dry-run 不更新用户、部门、组、绑定或 cursor；首次接入必须先执行 dry-run，检查冲突和变更统计，再执行 full。目录读取失败、分页不完整或凭据不可用时不得把“未返回对象”解释为离职。
+- 用户改密、管理员重置、停用和 LDAP 离职会吊销浏览器与桌面设备会话。运维排障时应同时检查 `auth_sessions`、`device_sessions`、身份审计和 LDAP run，不应手工恢复旧 token。
+- 详细数据模型、接口、错误码、测试和真实 provider 验收清单见 `docs/identity-security.md`。
 
 ### 可选 monitoring profile
 

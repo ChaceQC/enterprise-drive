@@ -4,9 +4,11 @@ import {
   ClipboardList,
   Database,
   Download,
+  Fingerprint,
   Gauge,
   Layers3,
   ListChecks,
+  LockKeyhole,
   Plus,
   RefreshCw,
   Shield,
@@ -41,6 +43,8 @@ import {
 } from '../../components/ui'
 import { formatBytes, formatDate } from '../../lib/format'
 import { queryClient } from '../../app/query-client'
+import { AdminAccountSecurity } from './AdminAccountSecurity'
+import { AdminIdentityPage } from './AdminIdentityPage'
 
 const tabs = [
   { label: '概览', icon: BarChart3, to: '/admin' },
@@ -48,6 +52,8 @@ const tabs = [
   { label: '部门与组', icon: Building2, to: '/admin/organization' },
   { label: '空间', icon: Layers3, to: '/admin/spaces' },
   { label: '配额', icon: Gauge, to: '/admin/quotas' },
+  { label: '账号安全', icon: LockKeyhole, to: '/admin/security' },
+  { label: '身份源', icon: Fingerprint, to: '/admin/identity' },
   { label: '审计', icon: Shield, to: '/admin/audit' },
   { label: '维护', icon: Wrench, to: '/admin/maintenance' },
   { label: '导出', icon: Download, to: '/admin/exports' },
@@ -55,7 +61,7 @@ const tabs = [
 
 export function AdminPage() {
   const pathname = useRouterState({ select: (state) => state.location.pathname })
-  const section = pathname.split('/')[2] ?? 'overview'
+  const section = pathname.split('/')[2] || 'overview'
   return (
     <div className="page-stack admin-page">
       <PageHeader
@@ -75,6 +81,8 @@ export function AdminPage() {
       {section === 'organization' ? <AdminOrganization /> : null}
       {section === 'spaces' ? <AdminSpaces /> : null}
       {section === 'quotas' ? <AdminQuotas /> : null}
+      {section === 'security' ? <AdminAccountSecurity /> : null}
+      {section === 'identity' ? <AdminIdentityPage /> : null}
       {section === 'audit' ? <AdminAudit /> : null}
       {section === 'maintenance' ? <AdminMaintenance /> : null}
       {section === 'exports' ? <AdminExports /> : null}

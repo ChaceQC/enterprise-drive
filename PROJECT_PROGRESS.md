@@ -1,5 +1,74 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-04 Sprint 11 身份与账号安全代码侧交付
+
+### 当前状态
+
+- 分支：`dev`；本轮基于 `257f9a5` 开始集成，项目版本已统一为 `0.8.0`。当前工作树尚未由本记录提交或推送，最终提交使用插槽 `{{SPRINT11_COMMIT}}`，远端 `backend-ci` 使用 `{{SPRINT11_CI_RUN_ID}}`。
+- Sprint 11 范围 `BE-040` 至 `BE-043`、`FE-010` 至 `FE-011` 已完成代码侧实现；migration head 为 `20260804_0024`。
+- 当前运行时 OpenAPI 归档、生成 client 与 route matrix 已对账为 105 个路径、134 个操作、162 个 schemas。
+- 本轮继续遵循“不重复测试、不运行无关测试”：账号安全只运行 Sprint 11 新增专项与受影响登录/限流/管理员/设备回归；OIDC、LDAP、前端、迁移和契约均按新增或直接受影响范围完成验证，CI 结果待回填 `{{SPRINT11_CI_JOB_SUMMARY}}`。
+
+### 已完成
+
+- `BE-040`：登录保留来源 IP 与规范化账号哈希 Redis 双维限流；用户行锁内维护失败次数、时间窗口、阶梯延迟、验证码阈值和临时锁定，返回 `423 ACCOUNT_LOCKED`、`Retry-After`，并提供管理员乐观解锁、审计和低基数指标。
+- `BE-041`：新增密码策略查询、用户改密、管理员密码重置、首次登录强制改密、浏览器会话列表/本人吊销；用户改密、管理员重置、用户停用和 LDAP 离职会同时吊销浏览器与桌面设备会话。
+- `BE-042`：新增 OIDC provider 配置/连接测试、Authorization Code + PKCE、一次性 state/nonce、issuer/JWKS/RS256/ES256/claims 校验、账号绑定/解除、单点登录和 RP-Initiated Logout；回调只签发本项目 opaque Cookie Session，返回路径使用 allowlist。
+- `BE-043`：新增 LDAP Source 配置/连接测试、dry-run/full/incremental run、稳定 external ID 绑定、用户/部门/组同步、目录成员 claim、冲突记录、禁用/离职和最后超级管理员保护；`identity.sync_ldap` 运行在 maintenance 队列。
+- migration `20260804_0024` 增加账号安全字段、浏览器会话上下文、OIDC/LDAP/同步/映射/冲突/成员 claim 表与索引，并把模型注册到统一 metadata。
+- `FE-010`：登录页支持验证码和锁定反馈、OIDC provider 登录；强制改密壳、账号密码策略/改密、浏览器会话吊销、OIDC 绑定/解除和回调页面已接入生成 client。
+- `FE-011`：管理后台支持账号解锁/密码重置、OIDC provider 创建/启停/连接测试、LDAP Source 创建/启停/连接测试、dry-run/full/incremental 同步、run 统计和冲突列表；secret 只显示配置状态。
+- Windows Compose 与 `.env.windows.example` 已透传登录锁定/延迟/验证码/密码/OIDC/LDAP 参数；API 注入 OIDC/LDAP secret，maintenance Worker 注入 LDAP bind secret，空 `env:` 引用按不可用处理。
+- 新增 `docs/identity-security.md`，并同步 README、后端/桌面说明、协作规则、计划、阶段表、安全测试、Windows 部署和完整技术计划书；Sprint 10 `0.7.0`、提交 `8da1abe`、run `30893658311` 的历史验证记录保留。
+
+### 验证
+
+- 账号安全新增专项 `tests/test_sprint11_account_security.py` 的 4 个用例均已分别通过；受影响既有回归最终结果为 `tests/test_auth.py` 8 passed、登录限流 2 passed、管理员用户生命周期 1 passed、桌面设备会话 1 passed。
+- 账号安全相关 15 个文件 Ruff check/format 通过；Auth/Admin/Device 相关 12 个源码文件 Mypy 通过；`git diff --check` 当时无空白错误。
+- 管理用户测试 helper 已改为符合新密码策略的强密码，修正后对应生命周期用例通过。
+- OIDC/LDAP 10 项、route matrix 134 条路由及 6 项集合校验、前端三浏览器 12 场景均通过；Ruff/format、Mypy（223 个源码文件）、uv lock、frontend lint/typecheck/build/api:check、PostgreSQL `0024` 往返、Compose config、Cargo metadata 和 `git diff --check` 均通过。
+- 最终远端证据：提交 `{{SPRINT11_COMMIT}}`，`backend-ci` run `{{SPRINT11_CI_RUN_ID}}`，job 结果 `{{SPRINT11_CI_JOB_SUMMARY}}`。
+
+### 阻塞与风险
+
+- 本地 adapter 测试不能替代真实企业 OIDC provider、LDAPS 目录、代理/DNS/证书和 provider 故障环境；正式试点前仍需使用生产配置执行 discovery/JWKS、回调、RP logout、LDAP 分页/超时/证书链和离职演练。
+- 当前 secret resolver 只接受 `env:VARIABLE_NAME`；环境变量空值、缺失或未知引用返回凭据不可用。生产应使用受控 `.env.windows`/宿主 secret 注入并限制文件 ACL，不在数据库或管理响应中保存/回显明文。
+- 生产 DNS/受信证书证据和 MinIO 修复镜像仍不在当前本机环境内，正式 `v0.4.0` tag/Release 继续保持阻塞。
+
+### 下一步
+
+1. 提交并推送已通过本地相关门禁的 Sprint 11 改动，只处理远端 CI 实际失败项。
+2. 将最终提交和 CI 结果写入 `{{SPRINT11_COMMIT}}`、`{{SPRINT11_CI_RUN_ID}}`、`{{SPRINT11_CI_JOB_SUMMARY}}`。
+3. Sprint 11 远端门禁全绿后进入 Sprint 12 规模化治理；真实生产网络继续补齐 OIDC/LDAP、DNS/受信证书和 MinIO 修复镜像外部证据。
+
+### 涉及文件
+
+- `backend/app/modules/auth/`
+- `backend/app/modules/identity/`
+- `backend/app/infrastructure/captcha/`
+- `backend/app/infrastructure/identity/`
+- `backend/app/modules/admin/`
+- `backend/app/workers/identity_tasks.py`
+- `backend/migrations/versions/20260804_0024_sprint11_identity.py`
+- `backend/tests/test_sprint11_account_security.py`
+- `backend/tests/test_identity_oidc.py`
+- `backend/tests/test_identity_ldap.py`
+- `frontend/`
+- `desktop/`
+- `compose.windows.yml`
+- `.env.windows.example`
+- `docs/identity-security.md`
+- `docs/security-testing.md`
+- `docs/deployment-windows-docker.md`
+- `README.md`
+- `backend/README.md`
+- `desktop/README.md`
+- `AGENT.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `PROJECT_STAGE_STATUS.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-08-04 Sprint 10 Web 用户端与管理后台交付
 
 ### 当前状态

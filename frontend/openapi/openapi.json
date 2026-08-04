@@ -2440,6 +2440,27 @@
         "title": "AdminUserListResponse",
         "type": "object"
       },
+      "AdminUserPasswordResetRequest": {
+        "properties": {
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "new_password": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "New Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expected_version",
+          "new_password"
+        ],
+        "title": "AdminUserPasswordResetRequest",
+        "type": "object"
+      },
       "AdminUserResponse": {
         "properties": {
           "created_at": {
@@ -2462,6 +2483,10 @@
             ],
             "title": "Email"
           },
+          "failed_login_attempts": {
+            "title": "Failed Login Attempts",
+            "type": "integer"
+          },
           "id": {
             "format": "uuid",
             "title": "Id",
@@ -2474,6 +2499,22 @@
           "is_super_admin": {
             "title": "Is Super Admin",
             "type": "boolean"
+          },
+          "locked": {
+            "title": "Locked",
+            "type": "boolean"
+          },
+          "locked_until": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Locked Until"
           },
           "must_change_password": {
             "title": "Must Change Password",
@@ -2507,11 +2548,28 @@
           "is_active",
           "is_super_admin",
           "must_change_password",
+          "failed_login_attempts",
+          "locked_until",
+          "locked",
           "version",
           "created_at",
           "updated_at"
         ],
         "title": "AdminUserResponse",
+        "type": "object"
+      },
+      "AdminUserUnlockRequest": {
+        "properties": {
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "expected_version"
+        ],
+        "title": "AdminUserUnlockRequest",
         "type": "object"
       },
       "AdminUserUpdateRequest": {
@@ -2873,6 +2931,126 @@
           "node_ids"
         ],
         "title": "BatchRestoreRequest",
+        "type": "object"
+      },
+      "BrowserSessionListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BrowserSessionResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "BrowserSessionListResponse",
+        "type": "object"
+      },
+      "BrowserSessionResponse": {
+        "properties": {
+          "auth_method": {
+            "title": "Auth Method",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current": {
+            "title": "Current",
+            "type": "boolean"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "family_id": {
+            "format": "uuid",
+            "title": "Family Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip"
+          },
+          "last_seen_at": {
+            "format": "date-time",
+            "title": "Last Seen At",
+            "type": "string"
+          },
+          "oidc_provider_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oidc Provider Id"
+          },
+          "user_agent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Agent"
+          }
+        },
+        "required": [
+          "id",
+          "family_id",
+          "auth_method",
+          "oidc_provider_id",
+          "ip",
+          "user_agent",
+          "current",
+          "created_at",
+          "last_seen_at",
+          "expires_at"
+        ],
+        "title": "BrowserSessionResponse",
+        "type": "object"
+      },
+      "BrowserSessionRevokeResponse": {
+        "properties": {
+          "current_session_revoked": {
+            "title": "Current Session Revoked",
+            "type": "boolean"
+          },
+          "revoked_session_id": {
+            "format": "uuid",
+            "title": "Revoked Session Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "revoked_session_id",
+          "current_session_revoked"
+        ],
+        "title": "BrowserSessionRevokeResponse",
         "type": "object"
       },
       "CompleteUploadPartRequest": {
@@ -4949,8 +5127,837 @@
         "title": "InternalShareItemsResponse",
         "type": "object"
       },
+      "LdapConnectionTestResponse": {
+        "properties": {
+          "base_dn_found": {
+            "title": "Base Dn Found",
+            "type": "boolean"
+          },
+          "connected": {
+            "const": true,
+            "default": true,
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "server": {
+            "title": "Server",
+            "type": "string"
+          }
+        },
+        "required": [
+          "server",
+          "base_dn_found"
+        ],
+        "title": "LdapConnectionTestResponse",
+        "type": "object"
+      },
+      "LdapSourceCreateRequest": {
+        "properties": {
+          "attribute_mapping": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Attribute Mapping",
+            "type": "object"
+          },
+          "base_dn": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Base Dn",
+            "type": "string"
+          },
+          "bind_dn": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bind Dn"
+          },
+          "bind_password_ref": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bind Password Ref"
+          },
+          "department_base_dn": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department Base Dn"
+          },
+          "department_filter": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department Filter"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "group_base_dn": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Base Dn"
+          },
+          "group_filter": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Filter"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "server_url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Server Url",
+            "type": "string"
+          },
+          "slug": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+            "title": "Slug",
+            "type": "string"
+          },
+          "user_base_dn": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "User Base Dn",
+            "type": "string"
+          },
+          "user_filter": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "User Filter",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "server_url",
+          "base_dn",
+          "user_base_dn",
+          "user_filter",
+          "attribute_mapping"
+        ],
+        "title": "LdapSourceCreateRequest",
+        "type": "object"
+      },
+      "LdapSourceListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LdapSourceResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "LdapSourceListResponse",
+        "type": "object"
+      },
+      "LdapSourceResponse": {
+        "properties": {
+          "attribute_mapping": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Attribute Mapping",
+            "type": "object"
+          },
+          "base_dn": {
+            "title": "Base Dn",
+            "type": "string"
+          },
+          "bind_dn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bind Dn"
+          },
+          "bind_password_configured": {
+            "title": "Bind Password Configured",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "department_base_dn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department Base Dn"
+          },
+          "department_filter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department Filter"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "group_base_dn": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Base Dn"
+          },
+          "group_filter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Filter"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_success_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success At"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "server_url": {
+            "title": "Server Url",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "sync_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sync Cursor"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "user_base_dn": {
+            "title": "User Base Dn",
+            "type": "string"
+          },
+          "user_filter": {
+            "title": "User Filter",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "slug",
+          "name",
+          "server_url",
+          "base_dn",
+          "bind_dn",
+          "bind_password_configured",
+          "user_base_dn",
+          "user_filter",
+          "department_base_dn",
+          "department_filter",
+          "group_base_dn",
+          "group_filter",
+          "attribute_mapping",
+          "enabled",
+          "sync_cursor",
+          "last_success_at",
+          "version",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "LdapSourceResponse",
+        "type": "object"
+      },
+      "LdapSourceUpdateRequest": {
+        "properties": {
+          "attribute_mapping": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attribute Mapping"
+          },
+          "base_dn": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Dn"
+          },
+          "bind_dn": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bind Dn"
+          },
+          "bind_password_ref": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bind Password Ref"
+          },
+          "clear_bind_dn": {
+            "default": false,
+            "title": "Clear Bind Dn",
+            "type": "boolean"
+          },
+          "clear_bind_password_ref": {
+            "default": false,
+            "title": "Clear Bind Password Ref",
+            "type": "boolean"
+          },
+          "clear_department_base_dn": {
+            "default": false,
+            "title": "Clear Department Base Dn",
+            "type": "boolean"
+          },
+          "clear_department_filter": {
+            "default": false,
+            "title": "Clear Department Filter",
+            "type": "boolean"
+          },
+          "clear_group_base_dn": {
+            "default": false,
+            "title": "Clear Group Base Dn",
+            "type": "boolean"
+          },
+          "clear_group_filter": {
+            "default": false,
+            "title": "Clear Group Filter",
+            "type": "boolean"
+          },
+          "department_base_dn": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department Base Dn"
+          },
+          "department_filter": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Department Filter"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "group_base_dn": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Base Dn"
+          },
+          "group_filter": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group Filter"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "server_url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Url"
+          },
+          "user_base_dn": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Base Dn"
+          },
+          "user_filter": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Filter"
+          }
+        },
+        "required": [
+          "expected_version"
+        ],
+        "title": "LdapSourceUpdateRequest",
+        "type": "object"
+      },
+      "LdapSyncConflictListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LdapSyncConflictResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "LdapSyncConflictListResponse",
+        "type": "object"
+      },
+      "LdapSyncConflictResponse": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "details": {
+            "additionalProperties": true,
+            "title": "Details",
+            "type": "object"
+          },
+          "external_id": {
+            "title": "External Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "object_type": {
+            "enum": [
+              "user",
+              "department",
+              "group",
+              "membership"
+            ],
+            "title": "Object Type",
+            "type": "string"
+          },
+          "run_id": {
+            "format": "uuid",
+            "title": "Run Id",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "run_id",
+          "source_id",
+          "object_type",
+          "external_id",
+          "code",
+          "details",
+          "created_at"
+        ],
+        "title": "LdapSyncConflictResponse",
+        "type": "object"
+      },
+      "LdapSyncRequest": {
+        "properties": {
+          "mode": {
+            "enum": [
+              "dry_run",
+              "full",
+              "incremental"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "LdapSyncRequest",
+        "type": "object"
+      },
+      "LdapSyncRunListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/LdapSyncRunResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "LdapSyncRunListResponse",
+        "type": "object"
+      },
+      "LdapSyncRunResponse": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "cursor_after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor After"
+          },
+          "cursor_before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor Before"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "mode": {
+            "enum": [
+              "dry_run",
+              "full",
+              "incremental"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "requested_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requested By"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_version": {
+            "title": "Source Version",
+            "type": "integer"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "stats": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Stats",
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "title": "Tenant Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "source_id",
+          "requested_by",
+          "source_version",
+          "mode",
+          "status",
+          "cursor_before",
+          "cursor_after",
+          "stats",
+          "error_code",
+          "error_message",
+          "started_at",
+          "finished_at",
+          "created_at"
+        ],
+        "title": "LdapSyncRunResponse",
+        "type": "object"
+      },
       "LoginRequest": {
         "properties": {
+          "captcha_token": {
+            "anyOf": [
+              {
+                "maxLength": 4096,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Captcha Token"
+          },
           "password": {
             "maxLength": 255,
             "minLength": 1,
@@ -5103,6 +6110,509 @@
         "title": "MultipartUploadResponse",
         "type": "object"
       },
+      "OidcIdentityLinkListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OidcIdentityLinkResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "OidcIdentityLinkListResponse",
+        "type": "object"
+      },
+      "OidcIdentityLinkResponse": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "issuer": {
+            "title": "Issuer",
+            "type": "string"
+          },
+          "last_login_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Login At"
+          },
+          "provider_id": {
+            "format": "uuid",
+            "title": "Provider Id",
+            "type": "string"
+          },
+          "provider_name": {
+            "title": "Provider Name",
+            "type": "string"
+          },
+          "provider_slug": {
+            "title": "Provider Slug",
+            "type": "string"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider_id",
+          "provider_slug",
+          "provider_name",
+          "issuer",
+          "subject",
+          "email",
+          "display_name",
+          "created_at",
+          "last_login_at"
+        ],
+        "title": "OidcIdentityLinkResponse",
+        "type": "object"
+      },
+      "OidcIdentityUnlinkResponse": {
+        "properties": {
+          "removed_link_id": {
+            "format": "uuid",
+            "title": "Removed Link Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "removed_link_id"
+        ],
+        "title": "OidcIdentityUnlinkResponse",
+        "type": "object"
+      },
+      "OidcLogoutResponse": {
+        "properties": {
+          "authenticated": {
+            "const": false,
+            "default": false,
+            "title": "Authenticated",
+            "type": "boolean"
+          },
+          "logout_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Logout Url"
+          }
+        },
+        "required": [
+          "logout_url"
+        ],
+        "title": "OidcLogoutResponse",
+        "type": "object"
+      },
+      "OidcProviderCreateRequest": {
+        "properties": {
+          "client_id": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_secret_ref": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Secret Ref"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "issuer_url": {
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Issuer Url",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "slug": {
+            "maxLength": 64,
+            "minLength": 1,
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]*$",
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "issuer_url",
+          "client_id"
+        ],
+        "title": "OidcProviderCreateRequest",
+        "type": "object"
+      },
+      "OidcProviderListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OidcProviderResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "OidcProviderListResponse",
+        "type": "object"
+      },
+      "OidcProviderResponse": {
+        "properties": {
+          "client_id": {
+            "title": "Client Id",
+            "type": "string"
+          },
+          "client_secret_configured": {
+            "title": "Client Secret Configured",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "issuer_url": {
+            "title": "Issuer Url",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "scopes": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Scopes",
+            "type": "array"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "tenant_id": {
+            "format": "uuid",
+            "title": "Tenant Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "tenant_id",
+          "slug",
+          "name",
+          "issuer_url",
+          "client_id",
+          "client_secret_configured",
+          "scopes",
+          "enabled",
+          "version",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "OidcProviderResponse",
+        "type": "object"
+      },
+      "OidcProviderTestResponse": {
+        "properties": {
+          "connected": {
+            "const": true,
+            "default": true,
+            "title": "Connected",
+            "type": "boolean"
+          },
+          "issuer": {
+            "title": "Issuer",
+            "type": "string"
+          },
+          "supports_logout": {
+            "title": "Supports Logout",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "issuer",
+          "supports_logout"
+        ],
+        "title": "OidcProviderTestResponse",
+        "type": "object"
+      },
+      "OidcProviderUpdateRequest": {
+        "properties": {
+          "clear_client_secret_ref": {
+            "default": false,
+            "title": "Clear Client Secret Ref",
+            "type": "boolean"
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "client_secret_ref": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Secret Ref"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "expected_version": {
+            "minimum": 1.0,
+            "title": "Expected Version",
+            "type": "integer"
+          },
+          "issuer_url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issuer Url"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "scopes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scopes"
+          }
+        },
+        "required": [
+          "expected_version"
+        ],
+        "title": "OidcProviderUpdateRequest",
+        "type": "object"
+      },
+      "OidcStartResponse": {
+        "properties": {
+          "authorization_url": {
+            "title": "Authorization Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorization_url"
+        ],
+        "title": "OidcStartResponse",
+        "type": "object"
+      },
+      "PasswordChangeRequest": {
+        "properties": {
+          "current_password": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Current Password",
+            "type": "string"
+          },
+          "new_password": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "New Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "current_password",
+          "new_password"
+        ],
+        "title": "PasswordChangeRequest",
+        "type": "object"
+      },
+      "PasswordChangeResponse": {
+        "properties": {
+          "changed": {
+            "const": true,
+            "default": true,
+            "title": "Changed",
+            "type": "boolean"
+          },
+          "reauthentication_required": {
+            "const": true,
+            "default": true,
+            "title": "Reauthentication Required",
+            "type": "boolean"
+          }
+        },
+        "title": "PasswordChangeResponse",
+        "type": "object"
+      },
+      "PasswordPolicyResponse": {
+        "properties": {
+          "max_length": {
+            "default": 255,
+            "title": "Max Length",
+            "type": "integer"
+          },
+          "min_length": {
+            "title": "Min Length",
+            "type": "integer"
+          },
+          "require_digit": {
+            "title": "Require Digit",
+            "type": "boolean"
+          },
+          "require_lowercase": {
+            "title": "Require Lowercase",
+            "type": "boolean"
+          },
+          "require_special": {
+            "title": "Require Special",
+            "type": "boolean"
+          },
+          "require_uppercase": {
+            "title": "Require Uppercase",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "min_length",
+          "require_uppercase",
+          "require_lowercase",
+          "require_digit",
+          "require_special"
+        ],
+        "title": "PasswordPolicyResponse",
+        "type": "object"
+      },
       "PreviewArtifactResponse": {
         "properties": {
           "artifact_id": {
@@ -5149,6 +6659,40 @@
           "headers"
         ],
         "title": "PreviewArtifactResponse",
+        "type": "object"
+      },
+      "PublicOidcProviderListResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PublicOidcProviderResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "PublicOidcProviderListResponse",
+        "type": "object"
+      },
+      "PublicOidcProviderResponse": {
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          }
+        },
+        "required": [
+          "slug",
+          "name"
+        ],
+        "title": "PublicOidcProviderResponse",
         "type": "object"
       },
       "PurgeNodeResponse": {
@@ -6652,7 +8196,7 @@
   },
   "info": {
     "title": "企业网盘",
-    "version": "0.7.0"
+    "version": "0.8.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -8420,6 +9964,476 @@
         ]
       }
     },
+    "/api/v1/admin/identity/ldap/runs": {
+      "get": {
+        "operationId": "list_ldap_sync_runs_api_v1_admin_identity_ldap_runs_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "source_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LdapSyncRunListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Ldap Sync Runs",
+        "tags": [
+          "admin-identity"
+        ]
+      }
+    },
+    "/api/v1/admin/identity/ldap/runs/{run_id}/conflicts": {
+      "get": {
+        "operationId": "list_ldap_sync_conflicts_api_v1_admin_identity_ldap_runs__run_id__conflicts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LdapSyncConflictListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Ldap Sync Conflicts",
+        "tags": [
+          "admin-identity"
+        ]
+      }
+    },
+    "/api/v1/admin/identity/ldap/sources": {
+      "get": {
+        "operationId": "list_ldap_sources_api_v1_admin_identity_ldap_sources_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LdapSourceListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Ldap Sources",
+        "tags": [
+          "admin-identity"
+        ]
+      },
+      "post": {
+        "operationId": "create_ldap_source_api_v1_admin_identity_ldap_sources_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LdapSourceCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LdapSourceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Ldap Source",
+        "tags": [
+          "admin-identity"
+        ]
+      }
+    },
+    "/api/v1/admin/identity/ldap/sources/{source_id}": {
+      "patch": {
+        "operationId": "update_ldap_source_api_v1_admin_identity_ldap_sources__source_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LdapSourceUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LdapSourceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Ldap Source",
+        "tags": [
+          "admin-identity"
+        ]
+      }
+    },
+    "/api/v1/admin/identity/ldap/sources/{source_id}/sync": {
+      "post": {
+        "operationId": "start_ldap_sync_api_v1_admin_identity_ldap_sources__source_id__sync_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LdapSyncRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LdapSyncRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Ldap Sync",
+        "tags": [
+          "admin-identity"
+        ]
+      }
+    },
+    "/api/v1/admin/identity/ldap/sources/{source_id}/test": {
+      "post": {
+        "operationId": "test_ldap_source_api_v1_admin_identity_ldap_sources__source_id__test_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LdapConnectionTestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Test Ldap Source",
+        "tags": [
+          "admin-identity"
+        ]
+      }
+    },
+    "/api/v1/admin/identity/oidc/providers": {
+      "get": {
+        "operationId": "list_oidc_providers_api_v1_admin_identity_oidc_providers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcProviderListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Oidc Providers",
+        "tags": [
+          "admin-identity"
+        ]
+      },
+      "post": {
+        "operationId": "create_oidc_provider_api_v1_admin_identity_oidc_providers_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OidcProviderCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcProviderResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Oidc Provider",
+        "tags": [
+          "admin-identity"
+        ]
+      }
+    },
+    "/api/v1/admin/identity/oidc/providers/{provider_id}": {
+      "patch": {
+        "operationId": "update_oidc_provider_api_v1_admin_identity_oidc_providers__provider_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Provider Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OidcProviderUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcProviderResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Oidc Provider",
+        "tags": [
+          "admin-identity"
+        ]
+      }
+    },
+    "/api/v1/admin/identity/oidc/providers/{provider_id}/test": {
+      "post": {
+        "operationId": "test_oidc_provider_api_v1_admin_identity_oidc_providers__provider_id__test_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Provider Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcProviderTestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Test Oidc Provider",
+        "tags": [
+          "admin-identity"
+        ]
+      }
+    },
     "/api/v1/admin/maintenance/runs": {
       "get": {
         "operationId": "list_admin_maintenance_runs_api_v1_admin_maintenance_runs_get",
@@ -9676,6 +11690,176 @@
         ]
       }
     },
+    "/api/v1/admin/users/{user_id}/password-reset": {
+      "post": {
+        "operationId": "reset_admin_user_password_api_v1_admin_users__user_id__password_reset_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminUserPasswordResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Reset Admin User Password",
+        "tags": [
+          "admin-organization"
+        ]
+      }
+    },
+    "/api/v1/admin/users/{user_id}/unlock": {
+      "post": {
+        "operationId": "unlock_admin_user_api_v1_admin_users__user_id__unlock_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdminUserUnlockRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminUserResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unlock Admin User",
+        "tags": [
+          "admin-organization"
+        ]
+      }
+    },
+    "/api/v1/auth/identity-links": {
+      "get": {
+        "operationId": "list_identity_links_api_v1_auth_identity_links_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcIdentityLinkListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Identity Links",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/auth/identity-links/{link_id}": {
+      "delete": {
+        "operationId": "unlink_identity_api_v1_auth_identity_links__link_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "link_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Link Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcIdentityUnlinkResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Unlink Identity",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "operationId": "login_api_v1_auth_login_post",
@@ -9759,6 +11943,356 @@
         ]
       }
     },
+    "/api/v1/auth/oidc/providers": {
+      "get": {
+        "operationId": "list_public_oidc_providers_api_v1_auth_oidc_providers_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tenant_slug",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Tenant Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicOidcProviderListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Public Oidc Providers",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/auth/oidc/{provider_slug}/bind/start": {
+      "post": {
+        "operationId": "start_oidc_binding_api_v1_auth_oidc__provider_slug__bind_start_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_slug",
+            "required": true,
+            "schema": {
+              "title": "Provider Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "redirect_path",
+            "required": false,
+            "schema": {
+              "default": "/account",
+              "maxLength": 1024,
+              "minLength": 1,
+              "title": "Redirect Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Oidc Binding",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/auth/oidc/{provider_slug}/callback": {
+      "get": {
+        "operationId": "oidc_callback_api_v1_auth_oidc__provider_slug__callback_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_slug",
+            "required": true,
+            "schema": {
+              "title": "Provider Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "state",
+            "required": true,
+            "schema": {
+              "maxLength": 1024,
+              "minLength": 16,
+              "title": "State",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "error",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Error"
+            }
+          }
+        ],
+        "responses": {
+          "307": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Oidc Callback",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/auth/oidc/{provider_slug}/logout": {
+      "post": {
+        "operationId": "oidc_logout_api_v1_auth_oidc__provider_slug__logout_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_slug",
+            "required": true,
+            "schema": {
+              "title": "Provider Slug",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcLogoutResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Oidc Logout",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/auth/oidc/{provider_slug}/start": {
+      "get": {
+        "operationId": "start_oidc_login_api_v1_auth_oidc__provider_slug__start_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider_slug",
+            "required": true,
+            "schema": {
+              "title": "Provider Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "tenant_slug",
+            "required": false,
+            "schema": {
+              "default": "default",
+              "maxLength": 64,
+              "minLength": 1,
+              "title": "Tenant Slug",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "redirect_path",
+            "required": false,
+            "schema": {
+              "default": "/",
+              "maxLength": 1024,
+              "minLength": 1,
+              "title": "Redirect Path",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OidcStartResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Start Oidc Login",
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/auth/password/change": {
+      "post": {
+        "operationId": "change_password_api_v1_auth_password_change_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PasswordChangeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordChangeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Change Password",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/password/policy": {
+      "get": {
+        "operationId": "get_password_policy_api_v1_auth_password_policy_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordPolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Password Policy",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/session/rotate": {
       "post": {
         "operationId": "rotate_session_api_v1_auth_session_rotate_post",
@@ -9775,6 +12309,70 @@
           }
         },
         "summary": "Rotate Session",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sessions": {
+      "get": {
+        "operationId": "list_browser_sessions_api_v1_auth_sessions_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserSessionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Browser Sessions",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/sessions/{session_id}": {
+      "delete": {
+        "operationId": "revoke_browser_session_api_v1_auth_sessions__session_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BrowserSessionRevokeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Browser Session",
         "tags": [
           "auth"
         ]

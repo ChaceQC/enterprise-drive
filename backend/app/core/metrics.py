@@ -61,6 +61,27 @@ download_requests_total = Counter(
     registry=API_METRICS_REGISTRY,
 )
 
+auth_security_events_total = Counter(
+    "auth_security_events_total",
+    "认证与账号安全事件数量",
+    ("event", "outcome"),
+    registry=API_METRICS_REGISTRY,
+)
+
+identity_provider_operations_total = Counter(
+    "identity_provider_operations_total",
+    "外部身份提供商操作数量",
+    ("provider_type", "operation", "outcome"),
+    registry=API_METRICS_REGISTRY,
+)
+
+ldap_sync_runs_total = Counter(
+    "ldap_sync_runs_total",
+    "LDAP 同步运行数量",
+    ("mode", "outcome"),
+    registry=API_METRICS_REGISTRY,
+)
+
 permission_decision_duration_seconds = Histogram(
     "permission_decision_duration_seconds",
     "权限判断耗时",
@@ -127,6 +148,33 @@ def record_upload_failure(*, stage: str, reason: str) -> None:
 def record_download_request(*, channel: str, outcome: str) -> None:
     download_requests_total.labels(
         channel=_bounded_label(channel),
+        outcome=_bounded_label(outcome),
+    ).inc()
+
+
+def record_auth_security_event(*, event: str, outcome: str) -> None:
+    auth_security_events_total.labels(
+        event=_bounded_label(event),
+        outcome=_bounded_label(outcome),
+    ).inc()
+
+
+def record_identity_provider_operation(
+    *,
+    provider_type: str,
+    operation: str,
+    outcome: str,
+) -> None:
+    identity_provider_operations_total.labels(
+        provider_type=_bounded_label(provider_type),
+        operation=_bounded_label(operation),
+        outcome=_bounded_label(outcome),
+    ).inc()
+
+
+def record_ldap_sync_run(*, mode: str, outcome: str) -> None:
+    ldap_sync_runs_total.labels(
+        mode=_bounded_label(mode),
         outcome=_bounded_label(outcome),
     ).inc()
 

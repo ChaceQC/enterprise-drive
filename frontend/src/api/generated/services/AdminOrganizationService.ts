@@ -16,7 +16,9 @@ import type { AdminOrganizationMemberRequest } from '../models/AdminOrganization
 import type { AdminOrganizationMemberResponse } from '../models/AdminOrganizationMemberResponse';
 import type { AdminUserCreateRequest } from '../models/AdminUserCreateRequest';
 import type { AdminUserListResponse } from '../models/AdminUserListResponse';
+import type { AdminUserPasswordResetRequest } from '../models/AdminUserPasswordResetRequest';
 import type { AdminUserResponse } from '../models/AdminUserResponse';
+import type { AdminUserUnlockRequest } from '../models/AdminUserUnlockRequest';
 import type { AdminUserUpdateRequest } from '../models/AdminUserUpdateRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
@@ -565,6 +567,56 @@ export class AdminOrganizationService {
         return __request(OpenAPI, {
             method: 'PATCH',
             url: '/api/v1/admin/users/{user_id}',
+            path: {
+                'user_id': userId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Reset Admin User Password
+     * @returns AdminUserResponse Successful Response
+     * @throws ApiError
+     */
+    public static resetAdminUserPasswordApiV1AdminUsersUserIdPasswordResetPost({
+        userId,
+        requestBody,
+    }: {
+        userId: string,
+        requestBody: AdminUserPasswordResetRequest,
+    }): CancelablePromise<AdminUserResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/admin/users/{user_id}/password-reset',
+            path: {
+                'user_id': userId,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Unlock Admin User
+     * @returns AdminUserResponse Successful Response
+     * @throws ApiError
+     */
+    public static unlockAdminUserApiV1AdminUsersUserIdUnlockPost({
+        userId,
+        requestBody,
+    }: {
+        userId: string,
+        requestBody: AdminUserUnlockRequest,
+    }): CancelablePromise<AdminUserResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/v1/admin/users/{user_id}/unlock',
             path: {
                 'user_id': userId,
             },

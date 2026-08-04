@@ -18,6 +18,7 @@ import {
 } from '@tanstack/react-router'
 
 import { useAuth } from './useAuth'
+import { PasswordChangeForm } from '../modules/account/PasswordChangeForm'
 import { LoginForm } from '../modules/auth/LoginForm'
 
 const userNavigation = [
@@ -33,7 +34,7 @@ function isActivePath(pathname: string, to: string) {
 }
 
 export function ProtectedShell() {
-  const { error, isPending, logout, status, user } = useAuth()
+  const { error, isPending, logout, refresh, status, user } = useAuth()
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   })
@@ -55,6 +56,27 @@ export function ProtectedShell() {
     )
   }
 
+  if (user?.must_change_password) {
+    return (
+      <main className="login-canvas">
+        <section className="login-form forced-password-panel">
+          <PasswordChangeForm
+            forced
+            onChanged={refresh}
+          />
+          <button
+            className="text-button"
+            disabled={isPending}
+            onClick={() => void logout().catch(() => undefined)}
+            type="button"
+          >
+            退出当前会话
+          </button>
+        </section>
+      </main>
+    )
+  }
+
   return (
     <div className="workspace-shell">
       <aside className="navigation-rail">
@@ -62,7 +84,7 @@ export function ProtectedShell() {
           <span className="brand-mark"><HardDrive size={20} /></span>
           <div>
             <strong>企业网盘</strong>
-            <span>Web 0.7</span>
+            <span>Web 0.8</span>
           </div>
         </div>
 

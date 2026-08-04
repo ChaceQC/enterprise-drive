@@ -22,6 +22,7 @@ import {
 import { formatDate } from '../../lib/format'
 import { queryClient } from '../../app/query-client'
 import { useAuth } from '../../app/useAuth'
+import { AccountSecurityPanel } from './AccountSecurityPanel'
 
 export function AccountPage() {
   const { refresh, user } = useAuth()
@@ -49,6 +50,7 @@ export function AccountPage() {
         <div className="account-avatar">{user?.display_name.slice(0, 1)}</div>
         <div><h2>{user?.display_name}</h2><p>{user?.username} · {user?.email ?? '未设置邮箱'}</p><div className="permission-dots"><StatusBadge tone="success"><ShieldCheck size={13} /> 会话已验证</StatusBadge>{user?.is_super_admin ? <StatusBadge tone="info">系统管理员</StatusBadge> : null}</div></div>
       </section>
+      <AccountSecurityPanel />
       <div className="section-heading"><div><h2>桌面设备会话</h2><p>设备吊销会立即停止对应同步会话。</p></div></div>
       {devices.isLoading ? <LoadingBlock /> : null}
       {devices.error ? <ErrorNotice error={devices.error} /> : null}

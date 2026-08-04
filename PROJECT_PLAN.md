@@ -1,6 +1,6 @@
 # PROJECT_PLAN.md
 
-本文件是《企业网盘开发者技术计划书.md》的执行版摘要。完整架构、数据模型、接口契约、安全策略和里程碑以技术计划书为准。当前一期以可试点上线的后端为交付目标，后续路线已纳入 Rust 桌面客户端、Web 用户端与管理后台、核心产品闭环、企业身份、安全治理和稳定版发布。
+本文件是《企业网盘开发者技术计划书.md》的执行版摘要。完整架构、数据模型、接口契约、安全策略和里程碑以技术计划书为准。当前代码基线为 Sprint 11 / `0.8.0`，已完成后端主链路、Rust 桌面端、Web 用户端与管理后台、账号安全、OIDC 和 LDAP；下一产品阶段进入 Sprint 12 规模化治理。
 
 ## 1. 项目目标
 
@@ -145,7 +145,7 @@
 
 ### Sprint 10：Web 用户端与管理后台（目标版本 `0.7.0`）
 
-- 在 `frontend/` 建立 TypeScript + React + Vite 工程，生成并锁定 OpenAPI client，统一 API 错误、Cookie Session、CSRF、request_id 和权限枚举处理。（`FE-001`、`FE-002` 已完成；当前 OpenAPI 归档为 83 paths / 110 operations / 132 schemas）
+- 在 `frontend/` 建立 TypeScript + React + Vite 工程，生成并锁定 OpenAPI client，统一 API 错误、Cookie Session、CSRF、request_id 和权限枚举处理。（`FE-001`、`FE-002` 已完成；Sprint 10 当时归档为 83 paths / 110 operations / 132 schemas）
 - 用户端覆盖登录、空间/目录、批量操作、上传队列、下载、搜索、预览、回收站、文件版本、分享创建、分享给我的、通知中心和账号基础页面。（`FE-003` 至 `FE-005` 已完成）
 - 管理后台覆盖用户、部门、用户组、空间、配额、审计、统计、维护任务状态和导出；管理员路由与后端管理权限同时校验。（`FE-006`、`FE-007` 已完成）
 - 构建产物通过 Compose 内部 Web 服务交给 gateway，同一 API 域名下使用 `/api/v1`，Web 服务不直接发布宿主端口。（`FE-009` 已完成：`web` 内部 `8080`，默认无 profile 服务 16 个，gateway 是唯一宿主端口发布者）
@@ -153,12 +153,14 @@
 
 ### Sprint 11：身份与账号安全（目标版本 `0.8.0`）
 
-- 登录失败按用户与 IP 限流，支持阶梯延迟、临时锁定、管理员解锁和可插拔验证码，并写成功、失败、锁定和解锁审计。
-- 密码管理支持用户改密、管理员重置、首次登录强制改密、全会话吊销、密码策略和受保护的恢复流程。
-- OIDC/OAuth 2.1 + PKCE 支持提供商配置、账号绑定、回调状态校验、单点登录和单点登出；浏览器继续签发服务端 Cookie Session。
-- LDAP 支持只读目录同步、稳定外部 ID 映射、用户/部门/组增量同步、禁用与离职处理、冲突报告和 dry-run。
-- Web 用户端补齐验证码与锁定反馈、用户改密、首次登录强制改密、会话列表/吊销和 OIDC 登录回调；管理后台补齐账号解锁、密码重置、OIDC 提供商、LDAP 目录源、连接测试和同步运行记录。
-- 完成身份提供商故障、重放、账号冲突、会话撤销、CSRF、开放重定向和权限边界安全测试。
+- `BE-040` 已完成：保留既有 Redis IP/账号限流，新增用户行锁、失败时间窗口、阶梯延迟、可插拔验证码、持久临时锁定、`423 ACCOUNT_LOCKED`/`Retry-After`、管理员乐观解锁和成功/失败/锁定/解锁审计。
+- `BE-041` 已完成：统一密码策略查询与校验，支持用户改密、管理员重置、首次登录强制改密、浏览器会话列表/本人吊销，以及浏览器和桌面设备全部会话吊销；改密成功后必须重新认证。
+- `BE-042` 已完成：OIDC provider 管理/连接测试、Authorization Code + PKCE、一次性 state/nonce、issuer/JWKS/签名/claims 校验、账号绑定/解除、登录回调、opaque Cookie Session 和 RP-Initiated Logout；redirect path 使用配置 allowlist。
+- `BE-043` 已完成：LDAP 目录源管理/连接测试、dry-run/full/incremental run、稳定 external ID 绑定、用户/部门/组和成员 claim、冲突记录、禁用/离职处理、最后超级管理员保护，以及离职后的浏览器/桌面会话吊销；`identity.sync_ldap` 进入 maintenance 队列。
+- `FE-010` 已完成：登录页展示验证码与锁定时间，提供 OIDC provider 登录与回调；账号页支持密码策略/改密、强制改密、浏览器会话吊销和 OIDC 绑定管理。
+- `FE-011` 已完成：管理后台提供账号解锁/密码重置、OIDC provider 创建/启停/连接测试、LDAP Source 创建/启停/连接测试、dry-run/full/incremental 同步、run 统计和冲突列表；secret 只显示是否已配置。
+- migration head 已更新为 `20260804_0024`；运行时 OpenAPI 为 105 paths / 134 operations / 162 schemas。
+- Sprint 11 本地门禁已通过：账号安全 4 项与受影响回归 12 项、OIDC/LDAP 10 项、route matrix 134 条路由及 6 项集合校验、前端三浏览器 12 场景均通过；Ruff/format、Mypy（223 个源码文件）、uv lock、frontend lint/typecheck/build/api:check、PostgreSQL `0024` 往返、Compose config、Cargo metadata 和 `git diff --check` 均通过。集成提交和 CI run 由根任务完成后填入 `{{SPRINT11_COMMIT}}`、`{{SPRINT11_CI_RUN_ID}}` 和 `{{SPRINT11_CI_JOB_SUMMARY}}`；不得用已有 Sprint 10 的 `8da1abe`/`30893658311` 代替。
 
 ### Sprint 12：规模化治理与内容能力（目标版本 `0.9.0`）
 
@@ -191,6 +193,8 @@
 - `BILL-001`：多租户计费。
 
 ## 5. 当前下一步
+
+2026-08-04 Sprint 11 的 `BE-040` 至 `BE-043`、`FE-010` 至 `FE-011` 已完成代码侧交付：项目版本统一为 `0.8.0`，新增账号锁定/解锁、密码策略与全会话治理、OIDC/OAuth 2.1 + PKCE、LDAP 只读目录同步和对应 Web 身份页面；migration head 为 `20260804_0024`。运行时 OpenAPI 归档、生成 client 与 route matrix 已精确对账为 105 个路径、134 个操作、162 个 schemas，本地相关门禁均已通过。下一步仅提交 `{{SPRINT11_COMMIT}}`、推送并确认 `backend-ci` run `{{SPRINT11_CI_RUN_ID}}` 全绿；随后进入 Sprint 12，不重复执行未受影响的 Sprint 10、MinIO、备份恢复、性能和桌面历史集合。
 
 2026-08-04 Sprint 10 的 `FE-001` 至 `FE-009` 已完成：新增 `frontend/` React/Vite/TypeScript 工程、锁定依赖与生成式 API client，统一 Cookie Session、CSRF、request_id、401 会话事件和错误恢复；用户端覆盖文件/批量/上传下载、搜索预览回收站、分享通知和公开分享，管理后台覆盖用户、组织、空间、配额、审计、统计、维护与导出。项目版本已统一为 `0.7.0`，OpenAPI 归档为 83 个路径、110 个操作、132 个 schemas；Compose 增加内部 `web:8080`，16 个无 profile 默认服务仍只由 gateway 发布宿主 `18080/19000`。提交 `8da1abe` 已推送到 `dev`，对应 `backend-ci` run `30893658311` 的 9 个 job 全部成功，Sprint 10 远端门禁完成；当前下一步进入 Sprint 11。
 

@@ -10,7 +10,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import StaticPool
 
-from app.api.deps import get_rate_limiter, get_search_index_adapter, get_storage_adapter
+from app.api.deps import (
+    get_captcha_verifier,
+    get_rate_limiter,
+    get_search_index_adapter,
+    get_storage_adapter,
+)
 from app.core.config import Settings, get_settings
 from app.core.security import hash_password
 from app.db.base import Base
@@ -37,6 +42,9 @@ def settings() -> Settings:
         admin_password="admin-password",
         session_days=30,
         rate_limit_enabled=False,
+        login_delay_base_seconds=0,
+        login_delay_max_seconds=0,
+        password_require_uppercase=False,
     )
 
 
@@ -89,6 +97,9 @@ async def client(
     app.dependency_overrides[get_storage_adapter] = lambda: storage_adapter
     app.dependency_overrides[get_search_index_adapter] = lambda: search_adapter
     app.dependency_overrides[get_rate_limiter] = lambda: rate_limiter
+    if "captcha_verifier" in request.fixturenames:
+        captcha_verifier = request.getfixturevalue("captcha_verifier")
+        app.dependency_overrides[get_captcha_verifier] = lambda: captcha_verifier
     app.state.storage_adapter = storage_adapter
     app.state.search_index_adapter = search_adapter
     app.state.rate_limiter = rate_limiter
@@ -103,7 +114,18 @@ async def seed_admin(
     settings: Settings,
 ) -> None:
     async with session_factory() as session:
-        await AuthService(repository=AuthRepository(session), settings=settings).seed_admin()
+        repository = AuthRepository(session)
+        await AuthService(repository=repository, settings=settings).seed_admin()
+        tenant = await repository.get_tenant_by_slug(settings.admin_tenant_slug)
+        assert tenant is not None
+        admin = await repository.get_user_by_login(
+            tenant_id=tenant.id,
+            login=settings.admin_username,
+            for_update=True,
+        )
+        assert admin is not None
+        admin.must_change_password = False
+        await repository.commit()
 
 
 async def login(

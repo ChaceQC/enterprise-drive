@@ -1,8 +1,8 @@
 # 后端工程
 
-> 适用项目版本：`v0.7.0`
+> 适用项目版本：`v0.8.0`
 
-本目录承载企业网盘后端，使用 Python 3.12+、uv、FastAPI、SQLAlchemy、PostgreSQL、Redis、S3 兼容对象存储、OpenSearch 和 Celery。
+本目录承载企业网盘后端，使用 Python 3.12+、uv、FastAPI、SQLAlchemy、PostgreSQL、Redis、S3 兼容对象存储、OpenSearch 和 Celery。Sprint 11 已加入 Authlib/httpx OIDC 适配、ldap3 目录读取、账号安全、身份源管理和异步 LDAP 同步。
 
 ## 本地准备
 
@@ -51,7 +51,7 @@ Copy-Item .env.windows.example .env.windows
 
 ### 可观测性
 
-- API `/metrics` 只暴露 API 进程内的 `http_requests_total`、`http_request_duration_seconds`、上传/下载、权限判断、Outbox 和搜索延迟指标。HTTP 标签使用完整路由模板，不使用原始 URL、路径参数、用户/租户 ID 或 token；抓取 `/metrics` 自身不进入 HTTP 请求指标。
+- API `/metrics` 只暴露 API 进程内的 `http_requests_total`、`http_request_duration_seconds`、上传/下载、权限判断、Outbox、搜索延迟和身份安全指标。`auth_security_events_total` 使用受控的事件/结果标签，`identity_provider_operations_total` 与 `ldap_sync_runs_total` 记录 OIDC/LDAP 连接、登录和同步结果；HTTP 标签使用完整路由模板，不使用原始 URL、路径参数、用户/租户 ID 或 token，抓取 `/metrics` 自身不进入 HTTP 请求指标。
 - 正式 Compose 的 API 默认运行 2 个 Uvicorn worker，使用 `PROMETHEUS_MULTIPROC_DIR=/tmp/enterprise-drive/prometheus` 聚合。Docker runtime entrypoint 只在容器启动前清理旧 `.db` metric 文件；运行中的 worker 不清理共享目录。
 - API 与 Celery Worker 是不同容器。`worker-audit`、`worker-permission`、`worker-search`、`worker-maintenance` 和 `worker-preview` 各自在 Compose 内部 `9100` 暴露 `worker_tasks_total`、`worker_task_duration_seconds` 及本进程业务指标，不发布宿主端口。监控系统应按服务分别抓取，不能只抓 API `/metrics`。
 - 根 Compose 的可选 `monitoring` profile 内置 Prometheus、Alertmanager 和 Grafana；Grafana 只通过 gateway `/grafana/` 访问，三项监控服务都不发布宿主端口。启用命令、secret 和看板说明见 `../docs/maintenance-monitoring.md`。
@@ -140,7 +140,7 @@ uv run pytest tests/test_route_security_matrix.py `
   tests/test_security_adversarial.py -q
 ```
 
-当前 OpenAPI 归档为 83 个路径、110 个操作、132 个 schemas；路由安全矩阵覆盖匿名、CSRF、管理员、设备会话、增量同步、组织目录、真实跨租户资源和活跃会话撤权。对抗输入覆盖损坏/超大图片、OCR 页数/像素/体量边界、文档路径与扩展名注入、Range 权限、预签名 URL、用户/组织/空间/统计/维护/导出/配额/安全策略管理、不同 token 外链穷举、Trusted Host 和 CORS。
+当前运行时 OpenAPI 为 105 个路径、134 个操作、162 个 schemas；路由安全矩阵覆盖匿名、CSRF、管理员、设备会话、增量同步、组织目录、账号安全、OIDC/LDAP、真实跨租户资源和活跃会话撤权。对抗输入覆盖损坏/超大图片、OCR 页数/像素/体量边界、文档路径与扩展名注入、Range 权限、预签名 URL、用户/组织/空间/统计/维护/导出/配额/安全策略管理、不同 token 外链穷举、OIDC 重放/开放重定向、LDAP 冲突/离职、Trusted Host 和 CORS。
 
 真实 Nginx 原始 HTTP 安全 smoke：
 
@@ -214,6 +214,8 @@ CI 先按变更路径决定是否进入后端 job；后端源码、桌面 OpenAP
 - OpenTelemetry FastAPI/Celery tracing，支持采样、Console 和 OTLP/HTTP exporter。
 - `/api/v1/ping` 基础 API 连通性检查。
 - `tenants`、`users`、`auth_sessions` 基础表和 Alembic 初始迁移。
+- `users` 已包含本地密码开关、失败次数、失败时间窗口、临时锁定、锁定原因和密码变更时间；`auth_sessions` 已记录认证方式、OIDC provider、IP、User-Agent 和最近活动时间。
+- `oidc_providers`、`oidc_flows`、`oidc_identity_links`、`ldap_sources`、`ldap_sync_runs`、`ldap_object_bindings`、`ldap_sync_conflicts`、`ldap_membership_relations`、`ldap_membership_claims` 由 `20260804_0024` migration 建立。
 - `departments`、`department_members`、`user_groups`、`user_group_members` 组织基础表和迁移。
 - `/api/v1/admin/users` 用户管理：cursor 分页、筛选、详情、创建、更新和停用；临时密码使用 Argon2id 哈希，停用会吊销有效会话，并保护最后一个有效系统管理员。
 - `/api/v1/admin/departments` 部门管理：cursor 分页、筛选、详情、创建、重命名、移动、停用和成员增删；路径变更原子更新完整子树并拒绝环路或停用父部门。
@@ -224,6 +226,10 @@ CI 先按变更路径决定是否进入后端 job；后端源码、桌面 OpenAP
 - `/api/v1/admin/maintenance` 管理维护任务：查询九个任务的连续失败/stale 状态，创建租户范围异步运行并持久化任务状态。
 - `/api/v1/admin/exports` 异步 CSV 导出：支持审计、空间和用户筛选，输出到私有 `exports/{tenant_id}/{job_id}/`，提供短期预签名下载、CSV formula 防护、最大行数显式失败和保留期清理。
 - 本地账号登录、BFF + HttpOnly Cookie Session、CSRF 校验和会话轮换。
+- 登录失败按 Redis IP/账号窗口和 PostgreSQL 用户状态双层治理，支持阶梯延迟、可插拔验证码、持久临时锁定、`423 ACCOUNT_LOCKED`、`Retry-After` 和管理员解锁。
+- 用户改密、管理员重置、首次登录强制改密、密码策略查询、浏览器会话列表/本人吊销，以及浏览器与桌面设备全会话吊销。
+- OIDC/OAuth 2.1 Authorization Code + PKCE：provider 管理/连接测试、state/nonce 一次性校验、issuer/JWKS/签名/claims 校验、账号绑定/解除、单点登录和 RP-Initiated Logout；浏览器仍只获得本项目 opaque Cookie Session。
+- LDAP 只读目录源管理/连接测试、dry-run/full/incremental 同步、稳定 external ID 映射、用户/部门/组及成员关系、冲突记录、离职/禁用和浏览器/桌面会话吊销；异步任务 `identity.sync_ldap` 运行在 maintenance 队列。
 - 旧 session 复用检测与 session family 吊销。
 - `audit_logs`、`outbox_events` 基础表和迁移。
 - 登录、会话轮换、登出和 session 复用检测的认证审计事件。
@@ -275,13 +281,24 @@ CI 先按变更路径决定是否进入后端 job；后端源码、桌面 OpenAP
 ## 认证接口
 
 - `POST /api/v1/auth/login`
+- `GET /api/v1/auth/password/policy`
+- `POST /api/v1/auth/password/change`
+- `GET /api/v1/auth/sessions`
+- `DELETE /api/v1/auth/sessions/{session_id}`
 - `POST /api/v1/auth/session/rotate`
 - `POST /api/v1/auth/logout`
 - `GET /api/v1/auth/me`
+- `GET /api/v1/auth/oidc/providers`
+- `GET /api/v1/auth/oidc/{provider_slug}/start`
+- `POST /api/v1/auth/oidc/{provider_slug}/bind/start`
+- `GET /api/v1/auth/oidc/{provider_slug}/callback`
+- `POST /api/v1/auth/oidc/{provider_slug}/logout`
+- `GET /api/v1/auth/identity-links`
+- `DELETE /api/v1/auth/identity-links/{link_id}`
 
-登录成功后，后端写入 `drive_session` HttpOnly Cookie 和可由前端读取的 `drive_csrf` Cookie；所有 `POST`、`PUT`、`PATCH`、`DELETE` 请求都需要把 `drive_csrf` 的值通过 `X-CSRF-Token` 请求头回传。接口不返回 JWT，也不支持 `Authorization: Bearer` 或旧 `/auth/refresh` 兼容路径。
+登录成功后，后端写入 `drive_session` HttpOnly Cookie 和可由前端读取的 `drive_csrf` Cookie；所有 `POST`、`PUT`、`PATCH`、`DELETE` 请求都需要把 `drive_csrf` 的值通过 `X-CSRF-Token` 请求头回传。接口不返回 JWT，也不支持 `Authorization: Bearer` 或旧 `/auth/refresh` 兼容路径。首次登录待改密账号只允许读取 `/auth/me` 和提交 `/auth/password/change`；改密成功后全部浏览器/桌面会话失效并要求重新登录。
 
-默认管理员由 `.env` 中的 `DRIVE_ADMIN_*` 配置控制。首次本地启动后运行 `uv run python -m scripts.seed_admin` 创建管理员，并在首次登录后尽快修改默认密码。
+默认管理员由 `.env` 中的 `DRIVE_ADMIN_*` 配置控制。首次本地启动后运行 `uv run python -m scripts.seed_admin` 创建管理员；seed 用户默认标记为必须改密，不能在完成密码策略要求前进入其他业务入口。
 
 ## 管理员接口
 
@@ -310,6 +327,19 @@ CI 先按变更路径决定是否进入后端 job；后端源码、桌面 OpenAP
 - `GET /api/v1/admin/exports`
 - `GET /api/v1/admin/exports/{export_id}`
 - `GET /api/v1/admin/exports/{export_id}/download`
+- `POST /api/v1/admin/users/{user_id}/password-reset`
+- `POST /api/v1/admin/users/{user_id}/unlock`
+- `GET /api/v1/admin/identity/oidc/providers`
+- `POST /api/v1/admin/identity/oidc/providers`
+- `PATCH /api/v1/admin/identity/oidc/providers/{provider_id}`
+- `POST /api/v1/admin/identity/oidc/providers/{provider_id}/test`
+- `GET /api/v1/admin/identity/ldap/sources`
+- `POST /api/v1/admin/identity/ldap/sources`
+- `PATCH /api/v1/admin/identity/ldap/sources/{source_id}`
+- `POST /api/v1/admin/identity/ldap/sources/{source_id}/test`
+- `POST /api/v1/admin/identity/ldap/sources/{source_id}/sync`
+- `GET /api/v1/admin/identity/ldap/runs`
+- `GET /api/v1/admin/identity/ldap/runs/{run_id}/conflicts`
 
 审计查询仅允许当前租户的系统管理员访问。可使用 `actor_id`、`actor_type`、`action`、`resource_type`、`resource_id`、`result`、`risk_level`、`request_id`、`created_from`、`created_to`、`cursor` 和 `page_size` 组合筛选；结果按 `created_at DESC, id DESC` 返回。普通用户访问、非法时间范围和成功查询都会写入 `admin.audit_logs.queried` 审计事件。
 
@@ -318,6 +348,8 @@ CI 先按变更路径决定是否进入后端 job；后端源码、桌面 OpenAP
 文件安全策略管理只允许系统管理员访问并按当前租户隔离。策略至少需要扩展名或 MIME 前缀选择器，支持 `internal/confidential/restricted`、`presigned/proxy/watermark/blocked`、关键字 DLP audit/block、fail-closed 和水印文本模板；更新和停用必须提供 `expected_version`。
 
 空间、统计、维护和导出管理同样只允许当前租户的系统管理员访问。空间写操作使用独立 `spaces.version`，避免与权限缓存的 `permission_version` 混用；维护运行和导出使用 `admin_jobs` 持久化 pending/running/succeeded/failed/expired 状态。异步导出不会静默截断：超过 `DRIVE_ADMIN_EXPORT_MAX_ROWS` 时任务以 `ADMIN_EXPORT_ROW_LIMIT_EXCEEDED` 失败；成功文件由 `admin.cleanup_expired_exports` 按保留期删除。
+
+账号安全与身份源管理同样只允许当前租户的系统管理员访问。密码重置和解锁使用用户 `version` 前置条件；重置会强制下次改密并吊销浏览器/桌面全部会话。OIDC client secret 与 LDAP bind password 只保存 `env:VARIABLE_NAME` 引用，响应只返回 `*_configured`，空值或缺失值按凭据不可用处理。LDAP 同步请求先持久化 run，再由 maintenance Worker 执行；dry-run 不写用户/组织/绑定和 cursor，full 缺失只处理当前 Source 的 LDAP 绑定，名称冲突进入冲突表而不猜测绑定。完整安全和运维边界见 `../docs/identity-security.md`。
 
 ## 空间和文件树接口
 

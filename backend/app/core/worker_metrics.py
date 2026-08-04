@@ -29,6 +29,20 @@ worker_task_duration_seconds = Histogram(
     registry=WORKER_METRICS_REGISTRY,
 )
 
+identity_provider_operations_total = Counter(
+    "identity_provider_operations_total",
+    "外部身份提供商操作数量",
+    ("provider_type", "operation", "outcome"),
+    registry=WORKER_METRICS_REGISTRY,
+)
+
+ldap_sync_runs_total = Counter(
+    "ldap_sync_runs_total",
+    "LDAP 同步运行数量",
+    ("mode", "outcome"),
+    registry=WORKER_METRICS_REGISTRY,
+)
+
 preview_failures_total = Counter(
     "preview_failures_total",
     "预览失败数",
@@ -139,6 +153,26 @@ def record_worker_task(
         task=normalized_task,
         queue=normalized_queue,
     ).observe(max(duration_seconds, 0.0))
+
+
+def record_identity_provider_operation(
+    *,
+    provider_type: str,
+    operation: str,
+    outcome: str,
+) -> None:
+    identity_provider_operations_total.labels(
+        provider_type=_bounded_label(provider_type),
+        operation=_bounded_label(operation),
+        outcome=_bounded_label(outcome),
+    ).inc()
+
+
+def record_ldap_sync_run(*, mode: str, outcome: str) -> None:
+    ldap_sync_runs_total.labels(
+        mode=_bounded_label(mode),
+        outcome=_bounded_label(outcome),
+    ).inc()
 
 
 def record_preview_failure(*, status: str, reason: str) -> None:

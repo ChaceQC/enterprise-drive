@@ -37,7 +37,7 @@ class AuditService:
         self,
         *,
         tenant_id: UUID,
-        actor_id: UUID,
+        actor_id: UUID | None,
         scope: str,
         resource_id: UUID,
         permission_version: int,
@@ -50,7 +50,7 @@ class AuditService:
             "resource_id": str(resource_id),
             "permission_version": permission_version,
             "reason": reason,
-            "actor_id": str(actor_id),
+            "actor_id": str(actor_id) if actor_id is not None else None,
             **(metadata or {}),
         }
         if affected_user_id is not None:

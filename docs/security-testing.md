@@ -2,11 +2,14 @@
 
 ## 范围
 
-本阶段以当前默认部署、已实现 API 和攻击者可达路径为准，不把尚未实现的 OIDC、LDAP、Web 页面或 Rust 桌面端当作现有攻击面。检查范围包括：
+本文保留 `BE-030` 的历史安全门禁，并同步 Sprint 11 / `0.8.0` 当前攻击面。OIDC、LDAP、Web 身份页面和 Rust 设备会话均已实现，必须与本地账号、Cookie Session、CSRF 和租户权限一起进入安全矩阵。检查范围包括：
 
 - 未认证入口：登录、外链访问、外链下载、健康检查和 gateway。
 - 已认证入口：文件、上传、下载、搜索、分享、权限和管理员审计。
 - Cookie Session、CSRF、会话轮换与复用检测。
+- 登录失败窗口、阶梯延迟、验证码、账号锁定/解锁、密码策略、强制改密和浏览器/桌面全会话吊销。
+- OIDC provider/discovery/JWKS、PKCE、state/nonce、账号绑定、回调、开放重定向和登出。
+- LDAP 目录源、secret 引用、连接测试、dry-run/full/incremental、稳定 external ID、成员 claim、冲突、禁用和离职。
 - 用户上传内容的预览、正文抽取和对象存储处理。
 - PostgreSQL、Redis、OpenSearch、MinIO、Worker 与 gateway 的网络边界。
 - Python 依赖、静态代码模式、镜像和既有供应链门禁。
@@ -132,6 +135,11 @@ DRIVE_LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
 - 浏览器认证使用服务端 opaque Cookie Session；session token 只以哈希保存。
 - session cookie 为 HttpOnly，CSRF cookie 可读并要求副作用请求通过请求头回传。
 - session 轮换替换旧 token；旧 token 复用会吊销整个 family。
+- 登录失败仍先受 IP/账号 Redis 窗口限制；已定位用户的失败状态在 PostgreSQL 行锁内维护，超过阈值后持久化锁定并返回 `423 ACCOUNT_LOCKED` 与 `Retry-After`。
+- 用户改密、管理员重置、用户停用和 LDAP 离职会同时吊销浏览器与桌面设备会话；强制改密账号不能访问其他业务入口或注册新设备。
+- OIDC 只接受 Authorization Code + PKCE，state/nonce 一次消费，provider metadata issuer 必须匹配，ID token 只允许 RS256/ES256 并校验 issuer/audience/exp/iat/azp；回调返回路径来自 allowlist。
+- OIDC/LDAP secret 只通过 `env:VARIABLE_NAME` 解析，数据库和管理响应不保存或回显明文；空值、缺失值和未知引用按凭据不可用处理。
+- LDAP dry-run 不写核心用户/组织/绑定/cursor；full 缺失只影响当前 Source 的 LDAP 绑定，名称冲突进入冲突记录，目录 claim 消失不会删除仍由管理员手工保留的成员边。
 - gateway 是唯一宿主端口入口；API、Worker、PostgreSQL、Redis、OpenSearch 和 MinIO 不发布宿主端口。
 - 文件、下载、上传完成、分享、预览和授权入口均重新读取 PostgreSQL 权限事实。
 - 用户可见 500 响应不返回内部异常、SQL、对象 key 或栈信息。
@@ -139,5 +147,35 @@ DRIVE_LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
 ## 后续审计
 
 - 完整后端代理 Range、增强审计、水印或 DLP 继续由 `BE-034` 交付。
-- Sprint 11 再实现阶梯延迟、临时锁定、管理员解锁、验证码和登录安全告警；当前固定窗口不替代完整账号安全治理。
+- Sprint 11 代码侧安全治理与本地 route matrix、OpenAPI/client、前端 E2E、migration 门禁已通过；最终远端证据为 `{{SPRINT11_COMMIT}}`、`{{SPRINT11_CI_RUN_ID}}`、`{{SPRINT11_CI_JOB_SUMMARY}}`。
+- 正式试点前使用真实企业 OIDC provider 和 LDAPS 目录执行 discovery/JWKS 轮换、错误回调、RP logout、目录分页/超时/证书链、冲突和离职演练；本地 fake adapter 测试不能替代该外部证据。
 - 正式上线前处理 MinIO Server/Client 既有 Critical 基线，并完成真实公网 DNS、受信 TLS、外部扫描和恢复演练。
+
+## 2026-08-04 Sprint 11 身份与账号安全
+
+### 本地账号与会话
+
+- `tests/test_sprint11_account_security.py` 覆盖验证码阈值、失败次数持久化、锁定、正确密码在锁定期仍返回 423、管理员版本前置解锁、强制首次改密、业务入口阻断、用户会话隔离、本人会话吊销、管理员重置和浏览器/桌面全会话吊销。
+- 账号安全专项 4 个用例已分别通过；受影响既有回归为 Auth 8 passed、登录限流 2 passed、管理员用户生命周期 1 passed、桌面设备会话 1 passed。
+- 密码策略由服务端统一返回和校验；弱密码、当前密码错误、密码复用、版本冲突和跨租户用户均返回受控错误，不在响应或审计中记录密码。
+- CAPTCHA 通过 `CaptchaVerifier` 协议注入；默认 verifier 关闭，生产接入真实 provider 时仍需保证 token 只进入验证适配层，不进入指标标签或结构化日志。
+
+### OIDC/OAuth 2.1 + PKCE
+
+- `tests/test_identity_oidc.py` 覆盖账号绑定后登录、opaque Cookie Session、一次性 state 重放拒绝、同一 issuer/subject 不可绑定两个本地用户和 redirect path allowlist。
+- provider 连接测试先读取 discovery 与 JWKS；HTTP 自动重定向关闭，非回环 provider endpoint 必须使用 HTTPS。
+- token endpoint 返回的 ID token 通过 Authlib 校验签名和 claims，允许算法固定为 RS256/ES256；nonce 与数据库哈希匹配后才完成绑定或登录。
+- 解绑会保护最后一种可用登录方式；OIDC logout 先构建受控 provider end-session URL，再吊销本地 session family 和 Cookie。
+
+### LDAP 只读同步
+
+- `tests/test_identity_ldap.py` 覆盖连接测试、绑定用户禁用只递增一次版本、dry-run 零核心写入、稳定映射增量更新、手工成员保留、全量缺失用户禁用与浏览器/桌面会话吊销，以及用户名/部门路径/组 slug 冲突记录。
+- 同步请求先持久化 run，再由 `identity.sync_ldap` 在 maintenance Worker 执行；run 状态为 queued/running/succeeded/failed，失败保留错误码和消息，旧 cursor 仅在成功 apply 后前移。
+- dry-run 强制按全量快照读取但不更新核心对象、绑定、Source cursor 或 `last_success_at`。full 才处理当前 Source 中未出现的绑定；incremental 只应用 adapter 明确返回的变化。
+- 成员 claim 与核心成员边分离：目录声明出现时确保成员边存在；声明消失时，只有该边由 LDAP 管理且不存在其他 claim 时才删除，手工成员关系继续保留。
+
+### 最终门禁插槽
+
+- 运行时 OpenAPI 最终统计：105 paths / 134 operations / 162 schemas。
+- Sprint 11 完整本地验证：账号安全 4 项与受影响回归 12 项、OIDC/LDAP 10 项、route matrix 134 条路由及 6 项集合校验、前端三浏览器 12 场景均通过；静态、锁文件、OpenAPI/client、PostgreSQL migration、Compose、Cargo metadata 和差异检查均通过。
+- 集成提交与远端 CI：`{{SPRINT11_COMMIT}}` / `{{SPRINT11_CI_RUN_ID}}` / `{{SPRINT11_CI_JOB_SUMMARY}}`。

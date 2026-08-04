@@ -44,9 +44,21 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(String(255), nullable=True)
     display_name: Mapped[str] = mapped_column(String(128), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    local_password_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_super_admin: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     must_change_password: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    failed_login_attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_failed_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lock_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    password_changed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -78,6 +90,13 @@ class AuthSession(Base):
     __tablename__ = "auth_sessions"
     __table_args__ = (
         Index("idx_auth_sessions_family", "tenant_id", "family_id"),
+        Index(
+            "idx_auth_sessions_user_active",
+            "tenant_id",
+            "user_id",
+            "revoked_at",
+            "expires_at",
+        ),
         Index("uq_auth_sessions_token_hash", "token_hash", unique=True),
     )
 
@@ -97,10 +116,19 @@ class AuthSession(Base):
     family_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
     token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     csrf_token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    ip: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    user_agent: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    auth_method: Mapped[str] = mapped_column(String(32), nullable=False, default="local")
+    oidc_provider_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     replaced_by_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     revoked_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
     used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        default=utc_now,
+    )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

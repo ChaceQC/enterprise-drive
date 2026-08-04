@@ -41,6 +41,49 @@ groups:
           summary: "企业网盘 API P95 延迟过高"
           description: "过去 10 分钟 API 请求 P95 延迟持续超过 1 秒。"
 
+      - alert: EnterpriseDriveAccountLocksDetected
+        expr: >-
+          sum(increase(auth_security_events_total{
+            event="account_lock",
+            outcome="created"
+          }[15m])) > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: enterprise-drive
+          component: auth
+        annotations:
+          summary: "企业网盘出现账号锁定"
+          description: "最近 15 分钟检测到账号因连续登录失败被锁定，请检查来源与验证码状态。"
+
+      - alert: EnterpriseDriveIdentityProviderFailures
+        expr: >-
+          sum by (provider_type, operation) (
+            increase(identity_provider_operations_total{outcome="failure"}[15m])
+          ) > 0
+        for: 5m
+        labels:
+          severity: warning
+          service: enterprise-drive
+          component: identity
+        annotations:
+          summary: "企业身份提供商操作失败"
+          description: "{{ $labels.provider_type }} 的 {{ $labels.operation }} 操作在最近 15 分钟持续失败。"
+
+      - alert: EnterpriseDriveLdapSyncFailures
+        expr: >-
+          sum by (mode) (
+            increase(ldap_sync_runs_total{outcome="failure"}[15m])
+          ) > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: enterprise-drive
+          component: identity
+        annotations:
+          summary: "LDAP 同步运行失败"
+          description: "LDAP {{ $labels.mode }} 同步在最近 15 分钟出现失败，请检查 Worker 日志和同步记录。"
+
       - alert: EnterpriseDriveOutboxDeadEvents
         expr: outbox_pending_total{status="dead"} > 0
         for: 5m

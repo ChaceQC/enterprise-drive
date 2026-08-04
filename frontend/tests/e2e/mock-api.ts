@@ -53,6 +53,96 @@ const folder = {
   node_type: 'folder',
 }
 
+const browserSession = {
+  auth_method: 'password',
+  created_at: '2026-08-03T00:00:00Z',
+  current: false,
+  expires_at: '2026-09-03T00:00:00Z',
+  family_id: 'family-e2e',
+  id: '89898989-8989-4989-8989-898989898989',
+  ip: '10.0.0.8',
+  last_seen_at: '2026-08-04T03:00:00Z',
+  oidc_provider_id: null,
+  user_agent: 'Playwright managed browser',
+}
+
+const oidcProvider = {
+  client_id: 'enterprise-drive-web',
+  client_secret_configured: true,
+  created_at: '2026-08-01T00:00:00Z',
+  enabled: true,
+  id: '91919191-9191-4191-8191-919191919191',
+  issuer_url: 'https://idp.example.com',
+  name: '企业 SSO',
+  scopes: ['openid', 'profile', 'email'],
+  slug: 'corp',
+  tenant_id: user.tenant_id,
+  updated_at: '2026-08-04T03:00:00Z',
+  version: 1,
+}
+
+const ldapSource = {
+  attribute_mapping: {
+    user_display_name: 'displayName',
+    user_external_id: 'entryUUID',
+    user_username: 'uid',
+  },
+  base_dn: 'dc=example,dc=com',
+  bind_dn: 'cn=reader,dc=example,dc=com',
+  bind_password_configured: true,
+  created_at: '2026-08-01T00:00:00Z',
+  department_base_dn: 'ou=departments,dc=example,dc=com',
+  department_filter: '(objectClass=organizationalUnit)',
+  enabled: true,
+  group_base_dn: 'ou=groups,dc=example,dc=com',
+  group_filter: '(objectClass=groupOfNames)',
+  id: '92929292-9292-4292-8292-929292929292',
+  last_success_at: '2026-08-04T02:00:00Z',
+  name: '企业目录',
+  server_url: 'ldaps://ldap.example.com',
+  slug: 'corp-directory',
+  sync_cursor: 'cursor-42',
+  tenant_id: user.tenant_id,
+  updated_at: '2026-08-04T03:00:00Z',
+  user_base_dn: 'ou=users,dc=example,dc=com',
+  user_filter: '(objectClass=person)',
+  version: 2,
+}
+
+const ldapRun = {
+  created_at: '2026-08-04T02:00:00Z',
+  cursor_after: 'cursor-42',
+  cursor_before: 'cursor-41',
+  error_code: null,
+  error_message: null,
+  finished_at: '2026-08-04T02:01:00Z',
+  id: '93939393-9393-4393-8393-939393939393',
+  mode: 'incremental',
+  requested_by: user.id,
+  source_id: ldapSource.id,
+  source_version: ldapSource.version,
+  started_at: '2026-08-04T02:00:02Z',
+  stats: {
+    conflicts: 1,
+    users_updated: 2,
+  },
+  status: 'succeeded',
+  tenant_id: user.tenant_id,
+}
+
+const ldapConflict = {
+  code: 'USERNAME_CONFLICT',
+  created_at: '2026-08-04T02:00:30Z',
+  details: {
+    username: 'existing-user',
+  },
+  external_id: 'ldap-user-42',
+  id: '94949494-9494-4494-8494-949494949494',
+  object_type: 'user',
+  run_id: ldapRun.id,
+  source_id: ldapSource.id,
+}
+
 function json(route: Route, body: unknown, status = 200) {
   return route.fulfill({
     body: JSON.stringify(body),
@@ -61,15 +151,86 @@ function json(route: Route, body: unknown, status = 200) {
   })
 }
 
+type LdapMockSource = Omit<
+  typeof ldapSource,
+  | 'attribute_mapping'
+  | 'bind_dn'
+  | 'department_base_dn'
+  | 'department_filter'
+  | 'group_base_dn'
+  | 'group_filter'
+  | 'last_success_at'
+  | 'sync_cursor'
+> & {
+  attribute_mapping: Record<string, string>
+  bind_dn: string | null
+  department_base_dn: string | null
+  department_filter: string | null
+  group_base_dn: string | null
+  group_filter: string | null
+  last_success_at: string | null
+  sync_cursor: string | null
+}
+
+type LdapMockRun = Omit<
+  typeof ldapRun,
+  | 'cursor_after'
+  | 'cursor_before'
+  | 'finished_at'
+  | 'mode'
+  | 'started_at'
+  | 'stats'
+  | 'status'
+> & {
+  cursor_after: string | null
+  cursor_before: string | null
+  finished_at: string | null
+  mode: 'dry_run' | 'full' | 'incremental'
+  started_at: string | null
+  stats: Record<string, number>
+  status: 'queued' | 'running' | 'succeeded' | 'failed'
+}
+
 export async function installMockApi(
   page: Page,
   {
     authenticated = true,
+    loginChallenge = false,
+    mustChangePassword = false,
   }: {
     authenticated?: boolean
+    loginChallenge?: boolean
+    mustChangePassword?: boolean
   } = {},
 ) {
   let signedIn = authenticated
+  let loginAttempts = 0
+  let currentUser = {
+    ...user,
+    must_change_password: mustChangePassword,
+  }
+  let managedUser = {
+    ...currentUser,
+    created_at: '2026-08-01T00:00:00Z',
+    failed_login_attempts: 6,
+    is_active: true,
+    locked: true,
+    locked_until: '2026-08-04T04:00:00Z' as string | null,
+    updated_at: '2026-08-04T03:00:00Z',
+    version: 3,
+  }
+  let browserSessions = [{ ...browserSession }]
+  let oidcProviders = [{ ...oidcProvider }]
+  let ldapSources: LdapMockSource[] = [{
+    ...ldapSource,
+    attribute_mapping: { ...ldapSource.attribute_mapping },
+  }]
+  let ldapRuns: LdapMockRun[] = [{
+    ...ldapRun,
+    mode: 'incremental',
+    stats: { ...ldapRun.stats },
+    status: 'succeeded',
+  }]
 
   await page.context().addCookies([{
     domain: '127.0.0.1',
@@ -97,7 +258,7 @@ export async function installMockApi(
 
     if (path === '/api/v1/auth/me') {
       return signedIn
-        ? json(route, user)
+        ? json(route, currentUser)
         : json(route, {
           code: 'AUTH_REQUIRED',
           message: '请先登录',
@@ -105,11 +266,119 @@ export async function installMockApi(
         }, 401)
     }
     if (path === '/api/v1/auth/login') {
+      if (loginChallenge) {
+        loginAttempts += 1
+        const payload = request.postDataJSON() as { captcha_token?: string }
+        if (!payload.captcha_token) {
+          return json(route, {
+            code: 'CAPTCHA_REQUIRED',
+            details: {
+              challenge: 'captcha-e2e',
+            },
+            message: '登录失败次数较多，请完成验证码',
+            request_id: `req_captcha_${loginAttempts}`,
+          }, 403)
+        }
+        return json(route, {
+          code: 'ACCOUNT_LOCKED',
+          details: {
+            locked_until: '2026-08-04T04:00:00Z',
+          },
+          message: '账号已临时锁定',
+          request_id: `req_locked_${loginAttempts}`,
+        }, 423)
+      }
       signedIn = true
       return json(route, {
         authenticated: true,
         expires_at: '2026-09-03T00:00:00Z',
-        user,
+        user: currentUser,
+      })
+    }
+    if (path === '/api/v1/auth/password/policy') {
+      return json(route, {
+        max_length: 128,
+        min_length: 12,
+        require_digit: true,
+        require_lowercase: true,
+        require_special: true,
+        require_uppercase: true,
+      })
+    }
+    if (path === '/api/v1/auth/password/change') {
+      currentUser = {
+        ...currentUser,
+        must_change_password: false,
+      }
+      managedUser = {
+        ...managedUser,
+        must_change_password: false,
+        version: managedUser.version + 1,
+      }
+      signedIn = false
+      return json(route, {
+        changed: true,
+        reauthentication_required: true,
+      })
+    }
+    if (path === '/api/v1/auth/sessions' && method === 'GET') {
+      return json(route, { items: browserSessions })
+    }
+    if (
+      path.startsWith('/api/v1/auth/sessions/')
+      && method === 'DELETE'
+    ) {
+      const sessionId = path.split('/').at(-1)!
+      const revoked = browserSessions.find((session) => session.id === sessionId)
+      browserSessions = browserSessions.filter((session) => session.id !== sessionId)
+      return json(route, {
+        current_session_revoked: Boolean(revoked?.current),
+        revoked_session_id: sessionId,
+      })
+    }
+    if (path === '/api/v1/auth/oidc/providers') {
+      return json(route, {
+        items: oidcProviders
+          .filter((provider) => provider.enabled)
+          .map((provider) => ({
+            name: provider.name,
+            slug: provider.slug,
+          })),
+      })
+    }
+    if (
+      path.startsWith('/api/v1/auth/oidc/')
+      && path.endsWith('/start')
+    ) {
+      if (!path.endsWith('/bind/start')) {
+        signedIn = true
+      }
+      return json(route, {
+        authorization_url: 'http://127.0.0.1:15173/auth/oidc/callback',
+      })
+    }
+    if (path === '/api/v1/auth/identity-links' && method === 'GET') {
+      return json(route, {
+        items: [{
+          created_at: '2026-08-02T00:00:00Z',
+          display_name: '系统管理员',
+          email: 'admin@example.com',
+          id: '95959595-9595-4595-8595-959595959595',
+          issuer: oidcProvider.issuer_url,
+          last_login_at: '2026-08-04T02:50:00Z',
+          provider_id: oidcProvider.id,
+          provider_name: oidcProvider.name,
+          provider_slug: oidcProvider.slug,
+          subject: 'admin-subject',
+        }],
+      })
+    }
+    if (
+      path.startsWith('/api/v1/auth/identity-links/')
+      && method === 'DELETE'
+    ) {
+      return json(route, {
+        removed_link_id: path.split('/').at(-1),
       })
     }
     if (path === '/api/v1/auth/logout') {
@@ -120,7 +389,7 @@ export async function installMockApi(
       return json(route, {
         authenticated: true,
         expires_at: '2026-09-03T00:00:00Z',
-        user,
+        user: currentUser,
       })
     }
     if (path === '/api/v1/spaces') {
@@ -403,8 +672,234 @@ export async function installMockApi(
         }],
       })
     }
+    if (path === '/api/v1/admin/identity/oidc/providers' && method === 'GET') {
+      return json(route, { items: oidcProviders })
+    }
+    if (path === '/api/v1/admin/identity/oidc/providers' && method === 'POST') {
+      const payload = request.postDataJSON() as {
+        client_id: string
+        client_secret_ref?: string | null
+        enabled?: boolean
+        issuer_url: string
+        name: string
+        scopes?: string[]
+        slug: string
+      }
+      const created = {
+        client_id: payload.client_id,
+        client_secret_configured: Boolean(payload.client_secret_ref),
+        created_at: '2026-08-04T03:10:00Z',
+        enabled: payload.enabled ?? true,
+        id: `oidc-${oidcProviders.length + 1}`,
+        issuer_url: payload.issuer_url,
+        name: payload.name,
+        scopes: payload.scopes ?? ['openid', 'profile', 'email'],
+        slug: payload.slug,
+        tenant_id: user.tenant_id,
+        updated_at: '2026-08-04T03:10:00Z',
+        version: 1,
+      }
+      oidcProviders = [...oidcProviders, created]
+      return json(route, created, 201)
+    }
+    if (
+      path.match(/^\/api\/v1\/admin\/identity\/oidc\/providers\/[^/]+$/)
+      && method === 'PATCH'
+    ) {
+      const providerId = path.split('/').at(-1)!
+      const payload = request.postDataJSON() as {
+        client_secret_ref?: string | null
+        clear_client_secret_ref?: boolean
+        enabled?: boolean | null
+        expected_version: number
+      }
+      oidcProviders = oidcProviders.map((provider) => provider.id === providerId
+        ? {
+          ...provider,
+          client_secret_configured: payload.clear_client_secret_ref
+            ? false
+            : payload.client_secret_ref
+              ? true
+              : provider.client_secret_configured,
+          enabled: payload.enabled ?? provider.enabled,
+          updated_at: '2026-08-04T03:11:00Z',
+          version: provider.version + 1,
+        }
+        : provider)
+      return json(route, oidcProviders.find((provider) => provider.id === providerId))
+    }
+    if (
+      path.match(/^\/api\/v1\/admin\/identity\/oidc\/providers\/[^/]+\/test$/)
+      && method === 'POST'
+    ) {
+      const providerId = path.split('/').at(-2)!
+      const provider = oidcProviders.find((item) => item.id === providerId)
+      return json(route, {
+        connected: true,
+        issuer: provider?.issuer_url ?? oidcProvider.issuer_url,
+        supports_logout: true,
+      })
+    }
+    if (path === '/api/v1/admin/identity/ldap/sources' && method === 'GET') {
+      return json(route, { items: ldapSources })
+    }
+    if (path === '/api/v1/admin/identity/ldap/sources' && method === 'POST') {
+      const payload = request.postDataJSON() as {
+        attribute_mapping: Record<string, string>
+        base_dn: string
+        bind_dn?: string | null
+        bind_password_ref?: string | null
+        department_base_dn?: string | null
+        department_filter?: string | null
+        enabled?: boolean
+        group_base_dn?: string | null
+        group_filter?: string | null
+        name: string
+        server_url: string
+        slug: string
+        user_base_dn: string
+        user_filter: string
+      }
+      const created = {
+        attribute_mapping: payload.attribute_mapping,
+        base_dn: payload.base_dn,
+        bind_dn: payload.bind_dn ?? null,
+        bind_password_configured: Boolean(payload.bind_password_ref),
+        created_at: '2026-08-04T03:12:00Z',
+        department_base_dn: payload.department_base_dn ?? null,
+        department_filter: payload.department_filter ?? null,
+        enabled: payload.enabled ?? true,
+        group_base_dn: payload.group_base_dn ?? null,
+        group_filter: payload.group_filter ?? null,
+        id: `ldap-${ldapSources.length + 1}`,
+        last_success_at: null,
+        name: payload.name,
+        server_url: payload.server_url,
+        slug: payload.slug,
+        sync_cursor: null,
+        tenant_id: user.tenant_id,
+        updated_at: '2026-08-04T03:12:00Z',
+        user_base_dn: payload.user_base_dn,
+        user_filter: payload.user_filter,
+        version: 1,
+      }
+      ldapSources = [...ldapSources, created]
+      return json(route, created, 201)
+    }
+    if (
+      path.match(/^\/api\/v1\/admin\/identity\/ldap\/sources\/[^/]+$/)
+      && method === 'PATCH'
+    ) {
+      const sourceId = path.split('/').at(-1)!
+      const payload = request.postDataJSON() as {
+        bind_password_ref?: string | null
+        clear_bind_password_ref?: boolean
+        enabled?: boolean | null
+        expected_version: number
+      }
+      ldapSources = ldapSources.map((source) => source.id === sourceId
+        ? {
+          ...source,
+          bind_password_configured: payload.clear_bind_password_ref
+            ? false
+            : payload.bind_password_ref
+              ? true
+              : source.bind_password_configured,
+          enabled: payload.enabled ?? source.enabled,
+          updated_at: '2026-08-04T03:13:00Z',
+          version: source.version + 1,
+        }
+        : source)
+      return json(route, ldapSources.find((source) => source.id === sourceId))
+    }
+    if (
+      path.match(/^\/api\/v1\/admin\/identity\/ldap\/sources\/[^/]+\/test$/)
+      && method === 'POST'
+    ) {
+      const sourceId = path.split('/').at(-2)!
+      const source = ldapSources.find((item) => item.id === sourceId)
+      return json(route, {
+        base_dn_found: true,
+        connected: true,
+        server: source?.server_url ?? ldapSource.server_url,
+      })
+    }
+    if (
+      path.match(/^\/api\/v1\/admin\/identity\/ldap\/sources\/[^/]+\/sync$/)
+      && method === 'POST'
+    ) {
+      const sourceId = path.split('/').at(-2)!
+      const payload = request.postDataJSON() as {
+        mode: 'dry_run' | 'full' | 'incremental'
+      }
+      const run: LdapMockRun = {
+        created_at: '2026-08-04T03:14:00Z',
+        cursor_after: null,
+        cursor_before: null,
+        error_code: null,
+        error_message: null,
+        finished_at: null,
+        id: `run-${ldapRuns.length + 1}`,
+        mode: payload.mode,
+        requested_by: user.id,
+        source_id: sourceId,
+        source_version: ldapSources.find((source) => source.id === sourceId)?.version ?? 1,
+        started_at: null,
+        stats: {},
+        status: 'queued',
+        tenant_id: user.tenant_id,
+      }
+      ldapRuns = [run, ...ldapRuns]
+      return json(route, run, 202)
+    }
+    if (path === '/api/v1/admin/identity/ldap/runs' && method === 'GET') {
+      const sourceId = url.searchParams.get('source_id')
+      return json(route, {
+        items: sourceId
+          ? ldapRuns.filter((run) => run.source_id === sourceId)
+          : ldapRuns,
+      })
+    }
+    if (
+      path.match(/^\/api\/v1\/admin\/identity\/ldap\/runs\/[^/]+\/conflicts$/)
+      && method === 'GET'
+    ) {
+      const runId = path.split('/').at(-2)!
+      return json(route, {
+        items: runId === ldapRun.id ? [ldapConflict] : [],
+      })
+    }
     if (path === '/api/v1/admin/users') {
-      return json(route, { items: [{ ...user, created_at: '2026-08-01T00:00:00Z', is_active: true, updated_at: '2026-08-04T03:00:00Z', version: 1 }], next_cursor: null })
+      return json(route, { items: [managedUser], next_cursor: null })
+    }
+    if (
+      path.match(/^\/api\/v1\/admin\/users\/[^/]+\/unlock$/)
+      && method === 'POST'
+    ) {
+      managedUser = {
+        ...managedUser,
+        failed_login_attempts: 0,
+        locked: false,
+        locked_until: null,
+        updated_at: '2026-08-04T03:15:00Z',
+        version: managedUser.version + 1,
+      }
+      return json(route, managedUser)
+    }
+    if (
+      path.match(/^\/api\/v1\/admin\/users\/[^/]+\/password-reset$/)
+      && method === 'POST'
+    ) {
+      managedUser = {
+        ...managedUser,
+        failed_login_attempts: 0,
+        locked: false,
+        locked_until: null,
+        must_change_password: true,
+        updated_at: '2026-08-04T03:16:00Z',
+        version: managedUser.version + 1,
+      }
+      return json(route, managedUser)
     }
     if (path === '/api/v1/admin/audit-logs') {
       return json(route, { items: [{ action: 'file.downloaded', actor_id: user.id, actor_type: 'user', created_at: '2026-08-04T02:00:00Z', id: 'audit-1', ip: '127.0.0.1', metadata: {}, request_id: 'req-audit', resource_id: file.id, resource_type: 'file', result: 'allowed', risk_level: 'low', tenant_id: user.tenant_id, user_agent: 'Playwright' }], next_cursor: null })

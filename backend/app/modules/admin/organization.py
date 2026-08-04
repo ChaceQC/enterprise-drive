@@ -8,8 +8,9 @@ from sqlalchemy.exc import IntegrityError
 
 from app.api.errors import ApiError
 from app.core.config import Settings
+from app.core.metrics import record_auth_security_event
 from app.core.pagination import decode_page_cursor, encode_page_cursor
-from app.core.security import hash_password, utc_now
+from app.core.security import ensure_utc, hash_password, utc_now
 from app.modules.admin.organization_repository import AdminOrganizationRepository
 from app.modules.admin.organization_schemas import (
     AdminDepartmentCreateRequest,
@@ -25,13 +26,16 @@ from app.modules.admin.organization_schemas import (
     AdminOrganizationMemberResponse,
     AdminUserCreateRequest,
     AdminUserListResponse,
+    AdminUserPasswordResetRequest,
     AdminUserResponse,
+    AdminUserUnlockRequest,
     AdminUserUpdateRequest,
     OrganizationStatus,
 )
 from app.modules.audit.schemas import AuditContext, AuditEvent
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
+from app.modules.auth.service import ensure_password_policy
 from app.modules.org.models import Department, DepartmentMember, UserGroup, UserGroupMember
 from app.modules.share.events import emit_share_recipients_rebuild_requested
 
@@ -161,6 +165,7 @@ class AdminOrganizationService:
         username = request.username.strip().casefold()
         email = _normalize_email(request.email)
         display_name = _normalize_display_name(request.display_name)
+        ensure_password_policy(settings=self.settings, password=request.password)
         try:
             user = await self.repository.create_user(
                 tenant_id=current_user.tenant_id,
@@ -393,6 +398,139 @@ class AdminOrganizationService:
             metadata=_user_audit_metadata(user),
         )
         await self.repository.commit()
+        return _user_response(user)
+
+    async def reset_user_password(
+        self,
+        *,
+        current_user: User,
+        user_id: UUID,
+        request: AdminUserPasswordResetRequest,
+        audit_context: AuditContext | None,
+    ) -> AdminUserResponse:
+        action = "admin.user.password_reset"
+        await self._require_admin(
+            current_user=current_user,
+            action=action,
+            resource_type="user",
+            resource_id=user_id,
+            audit_context=audit_context,
+        )
+        user = await self._get_user_for_update_or_deny(
+            current_user=current_user,
+            user_id=user_id,
+            action=action,
+            audit_context=audit_context,
+        )
+        await self._ensure_version(
+            current_user=current_user,
+            action=action,
+            resource_type="user",
+            resource_id=user.id,
+            expected_version=request.expected_version,
+            current_version=user.version,
+            changed_code="ADMIN_USER_CHANGED",
+            changed_message="用户已被其他请求修改",
+            audit_context=audit_context,
+        )
+        ensure_password_policy(settings=self.settings, password=request.new_password)
+
+        now = utc_now()
+        user.password_hash = hash_password(request.new_password)
+        user.local_password_enabled = True
+        user.must_change_password = True
+        user.password_changed_at = now
+        user.failed_login_attempts = 0
+        user.last_failed_login_at = None
+        user.locked_until = None
+        user.lock_reason = None
+        user.version += 1
+        user.updated_at = now
+        await self.repository.revoke_user_sessions(
+            tenant_id=current_user.tenant_id,
+            user_id=user.id,
+            reason="admin_password_reset",
+        )
+        await self._record(
+            current_user=current_user,
+            action=action,
+            resource_type="user",
+            resource_id=user.id,
+            result="allowed",
+            audit_context=audit_context,
+            metadata={
+                "must_change_password": True,
+                "all_sessions_revoked": True,
+                "version": user.version,
+            },
+        )
+        await self.repository.commit()
+        record_auth_security_event(event="password_reset", outcome="allowed")
+        return _user_response(user)
+
+    async def unlock_user(
+        self,
+        *,
+        current_user: User,
+        user_id: UUID,
+        request: AdminUserUnlockRequest,
+        audit_context: AuditContext | None,
+    ) -> AdminUserResponse:
+        action = "admin.user.unlocked"
+        await self._require_admin(
+            current_user=current_user,
+            action=action,
+            resource_type="user",
+            resource_id=user_id,
+            audit_context=audit_context,
+        )
+        user = await self._get_user_for_update_or_deny(
+            current_user=current_user,
+            user_id=user_id,
+            action=action,
+            audit_context=audit_context,
+        )
+        await self._ensure_version(
+            current_user=current_user,
+            action=action,
+            resource_type="user",
+            resource_id=user.id,
+            expected_version=request.expected_version,
+            current_version=user.version,
+            changed_code="ADMIN_USER_CHANGED",
+            changed_message="用户已被其他请求修改",
+            audit_context=audit_context,
+        )
+
+        changed = any(
+            (
+                user.failed_login_attempts != 0,
+                user.last_failed_login_at is not None,
+                user.locked_until is not None,
+                user.lock_reason is not None,
+            )
+        )
+        if changed:
+            user.failed_login_attempts = 0
+            user.last_failed_login_at = None
+            user.locked_until = None
+            user.lock_reason = None
+            user.version += 1
+            user.updated_at = utc_now()
+        await self._record(
+            current_user=current_user,
+            action=action,
+            resource_type="user",
+            resource_id=user.id,
+            result="allowed",
+            audit_context=audit_context,
+            metadata={"changed": changed, "version": user.version},
+        )
+        await self.repository.commit()
+        record_auth_security_event(
+            event="account_unlock",
+            outcome="changed" if changed else "noop",
+        )
         return _user_response(user)
 
     async def list_departments(
@@ -1984,10 +2122,23 @@ class AdminOrganizationService:
                 resource_type=resource_type,
                 resource_id=resource_id,
                 result=result,
-                risk_level="medium"
-                if result == "denied"
-                or action.endswith(("created", "updated", "deactivated", "added", "removed"))
-                else "low",
+                risk_level=(
+                    "high"
+                    if action.endswith("password_reset")
+                    else "medium"
+                    if result == "denied"
+                    or action.endswith(
+                        (
+                            "created",
+                            "updated",
+                            "deactivated",
+                            "added",
+                            "removed",
+                            "unlocked",
+                        )
+                    )
+                    else "low"
+                ),
                 metadata=metadata,
             ),
             context=audit_context or AuditContext(),
@@ -2088,6 +2239,7 @@ def _next_membership_cursor(
 
 
 def _user_response(user: User) -> AdminUserResponse:
+    locked = user.locked_until is not None and ensure_utc(user.locked_until) > utc_now()
     return AdminUserResponse(
         id=user.id,
         tenant_id=user.tenant_id,
@@ -2097,6 +2249,9 @@ def _user_response(user: User) -> AdminUserResponse:
         is_active=user.is_active,
         is_super_admin=user.is_super_admin,
         must_change_password=user.must_change_password,
+        failed_login_attempts=user.failed_login_attempts,
+        locked_until=user.locked_until,
+        locked=locked,
         version=user.version,
         created_at=user.created_at,
         updated_at=user.updated_at,
@@ -2153,6 +2308,9 @@ def _user_audit_metadata(user: User) -> dict[str, object]:
         "is_active": user.is_active,
         "is_super_admin": user.is_super_admin,
         "must_change_password": user.must_change_password,
+        "failed_login_attempts": user.failed_login_attempts,
+        "locked_until": user.locked_until.isoformat() if user.locked_until else None,
+        "locked": user.locked_until is not None and ensure_utc(user.locked_until) > utc_now(),
         "version": user.version,
     }
 

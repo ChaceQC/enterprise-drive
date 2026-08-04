@@ -1,6 +1,6 @@
 # 企业网盘 Rust 桌面端
 
-`desktop/` 是 Sprint 7 与 Sprint 8 交付的 Windows 11 Rust/Tauri 工程，当前随 Sprint 10 项目基线统一为 `0.7.0`。桌面端与 `frontend/` Web 客户端共同消费当前 83 paths / 110 operations / 132 schemas 的服务端 OpenAPI 基线；同步事实、传输状态、本地索引、凭据、更新校验和诊断均位于 Rust 层，Tauri 页面只展示状态并发送命令。
+`desktop/` 是 Sprint 7 与 Sprint 8 交付的 Windows 11 Rust/Tauri 工程，当前随 Sprint 11 项目基线统一为 `0.8.0`。桌面端与 `frontend/` Web 客户端共同消费当前 105 paths / 134 operations / 162 schemas 的服务端 OpenAPI 基线；同步事实、传输状态、本地索引、凭据、更新校验和诊断均位于 Rust 层，Tauri 页面只展示状态并发送命令。
 
 ## Workspace
 
@@ -21,6 +21,12 @@
 - 下载只在目标版本、内容 hash、持久化字节数和 `.drivepart` 实际长度一致时续传；不一致或 hash 失败会删除临时文件并从零重试，校验成功后原子替换。
 - 默认不跟随符号链接、junction 或 reparse point；同步路径拒绝 Windows 保留名、尾随点/空格和根目录逃逸，并统一 Unicode NFC。
 - 设备会话吊销、过期、重用或失效会清除内存 token、停止 watcher、禁用同步根，并终止待处理操作和传输。
+
+Sprint 11 账号安全继续复用这一停机边界：
+
+- 用户自行改密、管理员密码重置、用户停用、LDAP 离职/禁用会同时吊销浏览器与桌面设备会话；旧设备 token 后续认证返回 401，不能继续拉取增量或传输文件。
+- `must_change_password=true` 的账号不能注册新的设备会话；已登录账号的受保护业务入口也会返回 `PASSWORD_CHANGE_REQUIRED`，必须先在 Web 端完成改密并重新登录桌面端。
+- 桌面端不保存 OIDC provider token、LDAP bind password 或浏览器 Cookie；外部身份认证仍在 BFF/Web 回调层结束，再按现有设备注册流程签发独立 opaque device token。
 
 ## 签名更新
 

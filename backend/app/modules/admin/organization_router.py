@@ -26,7 +26,9 @@ from app.modules.admin.organization_schemas import (
     AdminOrganizationMemberResponse,
     AdminUserCreateRequest,
     AdminUserListResponse,
+    AdminUserPasswordResetRequest,
     AdminUserResponse,
+    AdminUserUnlockRequest,
     AdminUserUpdateRequest,
     OrganizationStatus,
 )
@@ -145,6 +147,44 @@ async def deactivate_admin_user(
         current_user=current_user,
         user_id=user_id,
         expected_version=expected_version,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.post("/users/{user_id}/password-reset", response_model=AdminUserResponse)
+async def reset_admin_user_password(
+    http_request: Request,
+    user_id: UUID,
+    request: AdminUserPasswordResetRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[
+        AdminOrganizationService,
+        Depends(get_admin_organization_service),
+    ],
+) -> AdminUserResponse:
+    return await service.reset_user_password(
+        current_user=current_user,
+        user_id=user_id,
+        request=request,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.post("/users/{user_id}/unlock", response_model=AdminUserResponse)
+async def unlock_admin_user(
+    http_request: Request,
+    user_id: UUID,
+    request: AdminUserUnlockRequest,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[
+        AdminOrganizationService,
+        Depends(get_admin_organization_service),
+    ],
+) -> AdminUserResponse:
+    return await service.unlock_user(
+        current_user=current_user,
+        user_id=user_id,
+        request=request,
         audit_context=build_audit_context(http_request),
     )
 

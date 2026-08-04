@@ -12,6 +12,8 @@ from app.modules.auth.router import router as auth_router
 from app.modules.device.router import router as device_router
 from app.modules.file.acl_router import router as file_acl_router
 from app.modules.file.router import router as file_router
+from app.modules.identity.router import admin_router as admin_identity_router
+from app.modules.identity.router import router as identity_router
 from app.modules.org.directory_router import router as directory_router
 from app.modules.search.router import router as search_router
 from app.modules.share.router import public_router as public_share_router
@@ -39,7 +41,13 @@ router.include_router(
     prefix="/admin/file-security",
     tags=["admin-file-security"],
 )
+router.include_router(
+    admin_identity_router,
+    prefix="/admin/identity",
+    tags=["admin-identity"],
+)
 router.include_router(auth_router, prefix="/auth", tags=["auth"])
+router.include_router(identity_router, prefix="/auth", tags=["identity"])
 router.include_router(device_router, prefix="/device-sessions", tags=["device-sessions"])
 router.include_router(directory_router, prefix="/directory", tags=["directory"])
 router.include_router(space_router, prefix="/spaces", tags=["spaces"])

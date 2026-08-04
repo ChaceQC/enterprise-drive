@@ -14,6 +14,7 @@ from app.core.transfer_protocol import (
     DRIVE_TRANSFER_PROTOCOL_V1,
 )
 from app.db.session import get_db_session
+from app.infrastructure.captcha.base import CaptchaVerifier, DisabledCaptchaVerifier
 from app.infrastructure.rate_limit.base import RateLimiter, RateLimitRule
 from app.infrastructure.rate_limit.redis import RedisFixedWindowRateLimiter
 from app.infrastructure.search.base import SearchIndexAdapter
@@ -31,6 +32,11 @@ from app.modules.device.service import DeviceSessionService
 @lru_cache
 def _get_redis_rate_limiter(redis_url: str) -> RedisFixedWindowRateLimiter:
     return RedisFixedWindowRateLimiter(redis_url=redis_url)
+
+
+@lru_cache
+def get_captcha_verifier() -> CaptchaVerifier:
+    return DisabledCaptchaVerifier()
 
 
 async def get_current_user(
@@ -57,6 +63,7 @@ async def get_current_user(
             tenant_id=str(current_user.tenant_id),
             user_id=str(current_user.id),
         )
+        _enforce_password_change_required(request=request, current_user=current_user)
         return current_user
 
     session_token = request.cookies.get(settings.session_cookie_name)
@@ -78,6 +85,7 @@ async def get_current_user(
         tenant_id=str(current_user.tenant_id),
         user_id=str(current_user.id),
     )
+    _enforce_password_change_required(request=request, current_user=current_user)
     return current_user
 
 
@@ -95,6 +103,22 @@ def _device_token_from_header(request: Request) -> str | None:
 def _csrf_token_from_header(*, request: Request, settings: Settings) -> str | None:
     token = request.headers.get(settings.csrf_header_name)
     return token.strip() if token else None
+
+
+def _enforce_password_change_required(*, request: Request, current_user: User) -> None:
+    if not current_user.must_change_password:
+        return
+    allowed_paths = {
+        f"{request.app.state.settings.api_v1_prefix}/auth/me",
+        f"{request.app.state.settings.api_v1_prefix}/auth/password/change",
+    }
+    if request.url.path in allowed_paths:
+        return
+    raise ApiError(
+        "PASSWORD_CHANGE_REQUIRED",
+        "请先修改初始密码",
+        status_code=403,
+    )
 
 
 def build_audit_context(request: Request) -> AuditContext:
