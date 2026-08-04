@@ -160,7 +160,7 @@
 - `FE-010` 已完成：登录页展示验证码与锁定时间，提供 OIDC provider 登录与回调；账号页支持密码策略/改密、强制改密、浏览器会话吊销和 OIDC 绑定管理。
 - `FE-011` 已完成：管理后台提供账号解锁/密码重置、OIDC provider 创建/启停/连接测试、LDAP Source 创建/启停/连接测试、dry-run/full/incremental 同步、run 统计和冲突列表；secret 只显示是否已配置。
 - migration head 已更新为 `20260804_0024`；运行时 OpenAPI 为 105 paths / 134 operations / 162 schemas。
-- Sprint 11 本地门禁已通过：账号安全 4 项与受影响回归 12 项、OIDC/LDAP 10 项、route matrix 134 条路由及 6 项集合校验、前端三浏览器 12 场景均通过；Ruff/format、Mypy（223 个源码文件）、uv lock、frontend lint/typecheck/build/api:check、PostgreSQL `0024` 往返、Compose config、Cargo metadata 和 `git diff --check` 均通过。集成提交和 CI run 由根任务完成后填入 `{{SPRINT11_COMMIT}}`、`{{SPRINT11_CI_RUN_ID}}` 和 `{{SPRINT11_CI_JOB_SUMMARY}}`；不得用已有 Sprint 10 的 `8da1abe`/`30893658311` 代替。
+- Sprint 11 本地门禁已通过：账号安全 4 项与受影响回归 12 项、OIDC/LDAP 10 项、route matrix 134 条路由及 6 项集合校验、前端三浏览器 12 场景均通过；Ruff/format、Mypy（223 个源码文件）、uv lock、frontend lint/typecheck/build/api:check、PostgreSQL `0024` 往返、Compose config、Cargo metadata 和 `git diff --check` 均通过。最终提交为 `e6b4f6d`，`backend-ci` run `30922718148` 成功：changes/backend 成功，7 个未受影响 job 按 scope 跳过；frontend 已在 run `30919983108` 成功，Rust/MinIO/Windows/安装包已在 run `30917345858` 成功。
 
 ### Sprint 12：规模化治理与内容能力（目标版本 `0.9.0`）
 
@@ -194,7 +194,7 @@
 
 ## 5. 当前下一步
 
-2026-08-04 Sprint 11 的 `BE-040` 至 `BE-043`、`FE-010` 至 `FE-011` 已完成代码侧交付：项目版本统一为 `0.8.0`，新增账号锁定/解锁、密码策略与全会话治理、OIDC/OAuth 2.1 + PKCE、LDAP 只读目录同步和对应 Web 身份页面；migration head 为 `20260804_0024`。运行时 OpenAPI 归档、生成 client 与 route matrix 已精确对账为 105 个路径、134 个操作、162 个 schemas，本地相关门禁均已通过。下一步仅提交 `{{SPRINT11_COMMIT}}`、推送并确认 `backend-ci` run `{{SPRINT11_CI_RUN_ID}}` 全绿；随后进入 Sprint 12，不重复执行未受影响的 Sprint 10、MinIO、备份恢复、性能和桌面历史集合。
+2026-08-04 Sprint 11 的 `BE-040` 至 `BE-043`、`FE-010` 至 `FE-011` 已完成代码侧交付：项目版本统一为 `0.8.0`，新增账号锁定/解锁、密码策略与全会话治理、OIDC/OAuth 2.1 + PKCE、LDAP 只读目录同步和对应 Web 身份页面；migration head 为 `20260804_0024`。运行时 OpenAPI 归档、生成 client 与 route matrix 已精确对账为 105 个路径、134 个操作、162 个 schemas，本地相关门禁均已通过。最终提交 `e6b4f6d` 已推送，`backend-ci` run `30922718148` 成功；Sprint 11 远端门禁完成，下一步进入 Sprint 12，不重复执行未受影响的 Sprint 10、MinIO、备份恢复、性能和桌面历史集合。
 
 2026-08-04 Sprint 10 的 `FE-001` 至 `FE-009` 已完成：新增 `frontend/` React/Vite/TypeScript 工程、锁定依赖与生成式 API client，统一 Cookie Session、CSRF、request_id、401 会话事件和错误恢复；用户端覆盖文件/批量/上传下载、搜索预览回收站、分享通知和公开分享，管理后台覆盖用户、组织、空间、配额、审计、统计、维护与导出。项目版本已统一为 `0.7.0`，OpenAPI 归档为 83 个路径、110 个操作、132 个 schemas；Compose 增加内部 `web:8080`，16 个无 profile 默认服务仍只由 gateway 发布宿主 `18080/19000`。提交 `8da1abe` 已推送到 `dev`，对应 `backend-ci` run `30893658311` 的 9 个 job 全部成功，Sprint 10 远端门禁完成；当前下一步进入 Sprint 11。
 

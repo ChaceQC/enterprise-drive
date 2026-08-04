@@ -4,7 +4,7 @@
 
 ## 1. 总体结论
 
-当前项目处于 **v0.8.0、Sprint 11 身份与账号安全代码侧交付及本地门禁完成，正在完成提交与远端 CI 收尾，下一产品阶段进入 Sprint 12**：
+当前项目处于 **v0.8.0、Sprint 11 身份与账号安全代码侧交付、本地门禁与远端 CI 均已完成，下一产品阶段进入 Sprint 12**：
 
 - 后端核心能力、权限、分享、预览、搜索、完整管理 API、Windows 11 Docker 部署、监控 profile 和备份治理入口已经形成试点基础，Sprint 2 至 Sprint 6 代码侧剩余项为空。
 - `BE-036` 至 `BE-045` 中已规划的 Sprint 9/11 项、`FE-001` 至 `FE-011` 均已实现；后端、Web、Rust workspace、Tauri 安装包、更新器和 OpenAPI 契约统一到 Sprint 11 目标版本 `0.8.0`。
@@ -12,7 +12,7 @@
 - `FE-010`/`FE-011` 已完成用户端锁定/验证码/改密/会话/OIDC 页面，以及管理端账号安全、OIDC provider、LDAP Source、连接测试、同步 run 和冲突页面。
 - Sprint 7 与 Sprint 8 的 `DC-001` 至 `DC-010` 已完成：Rust/Tauri Windows 11 骨架、设备会话、增量游标/tombstone、SQLite 离线队列、DTP/1 双向传输、文件监听、冲突副本、选择性同步、Windows 路径边界、诊断导出、签名更新和失败回退均已落地。
 - `frontend/` 已交付 React/Vite/TypeScript 工程、生成式 API client、Cookie Session/CSRF 壳、用户端与管理后台主要流程、公开分享入口、错误恢复和三浏览器 Playwright 配置；Compose 新增内部 `web` 服务，由 gateway 统一代理页面、静态资源和 `/api/v1`。
-- Sprint 10 的 `backend-ci` 历史证据继续保留：提交 `8da1abe` 对应 run `30893658311` 的 9 个 job 全部成功。Sprint 11 最终提交/远端门禁使用 `{{SPRINT11_COMMIT}}` / `{{SPRINT11_CI_RUN_ID}}` / `{{SPRINT11_CI_JOB_SUMMARY}}`，由根任务完成后回填。
+- Sprint 10 的 `backend-ci` 历史证据继续保留：提交 `8da1abe` 对应 run `30893658311` 的 9 个 job 全部成功。Sprint 11 最终提交为 `e6b4f6d`，`backend-ci` run `30922718148` 成功；changes/backend 成功，7 个未受影响 job 按 scope 跳过，frontend 已由 run `30919983108` 验证，Rust/MinIO/Windows/安装包已由 run `30917345858` 验证。
 - 真实生产 OIDC/LDAPS、DNS/受信证书证据和 MinIO 修复镜像不在当前本机环境内，正式 `v0.4.0` tag/Release 保持阻塞；规模化治理和 `v1.0.0` 尚未完成。
 
 ## 2. 当前仓库快照
@@ -34,7 +34,7 @@
 - Sprint 8 范围：`DC-007` 至 `DC-010` 已完成实现、本地验收和远端 CI
 - Sprint 9 收尾：`0.6.0` 版本清单、运行时版本、安装包版本和 OpenAPI 契约已对齐，远端 CI 已全绿
 - Sprint 10 代码侧：`FE-001` 至 `FE-009`、`frontend/`、Compose `web`、gateway 路由和 frontend CI 已落地；当前默认无 profile 服务为 16 个
-- Sprint 11 代码侧：`BE-040` 至 `BE-043`、`FE-010` 至 `FE-011`、身份安全 migration、OpenAPI/client 和 Windows 环境透传已落地，本地相关门禁已通过；提交/CI 插槽待根任务回填
+- Sprint 11：`BE-040` 至 `BE-043`、`FE-010` 至 `FE-011`、身份安全 migration、OpenAPI/client 和 Windows 环境透传已落地，本地相关门禁与远端 CI 均已通过
 - 桌面更新公开证书 DER SHA-256：`765e82aba7bd3276f18eeadddd7b33257a68b7a1ddcdac6d4fc7f7bc639a3ca5`
 - 正式本机入口：gateway `http://localhost:18080` 同时提供 Web/API，`http://localhost:19000` 提供 S3；`web` 仅暴露 Compose 内部 `8080`
 - 当前未完成：真实生产 OIDC/LDAPS 验收、大目录权限重算/治理页面、审计/Outbox/备份治理收尾和稳定版发布
@@ -53,7 +53,7 @@
 | Sprint 8：双向同步与桌面发布 | `DC-007` 至 `DC-010`：文件监听、远端增量、离线队列、重启恢复、冲突副本、选择性同步、限速并发、Windows 路径边界、逐文件诊断、签名安装包、更新验签和回退 | 无 |
 | Sprint 9：核心产品闭环 | `BE-036` 至 `BE-039`、`BE-044`、`BE-045` 已完成 | 无 |
 | Sprint 10：Web 用户端与管理后台 | `FE-001` 至 `FE-009` 已完成：React/Vite、生成 API Client、用户端、管理后台、公开分享、Compose Web、gateway 路由、frontend CI、Playwright E2E 与远端全 scope 门禁 | 无；真实生产浏览器/网络验收属于后续发布门禁 |
-| Sprint 11：身份与账号安全 | `BE-040` 至 `BE-043`、`FE-010` 至 `FE-011` 已完成代码侧交付：账号锁定/解锁、密码与全会话、OIDC/PKCE、LDAP 同步和用户/管理身份页面；本地相关门禁已通过 | 集成提交和远端 CI 插槽待根任务回填；真实生产 provider/目录验收属于发布门禁 |
+| Sprint 11：身份与账号安全 | `BE-040` 至 `BE-043`、`FE-010` 至 `FE-011` 已完成代码侧交付：账号锁定/解锁、密码与全会话、OIDC/PKCE、LDAP 同步和用户/管理身份页面；本地相关门禁与远端 CI 已通过 | 真实生产 provider/目录验收属于发布门禁 |
 | Sprint 12：规模化治理与内容能力 | 已有文件树大目录删除/恢复/彻底删除后台任务、过期分享与预览产物治理、图片/扫描 PDF OCR、旧 Office/ODF 抽取、指标和基础治理 | 大目录权限重算/治理页面、审计分区、Outbox DLQ、治理看板、故障注入和完整集成矩阵 |
 | Sprint 13：稳定版发布 | 尚未开始 | UAT、压测、安全验收、升级回滚、统一版本、`v1.0.0`、发布包和验收报告 |
 
@@ -61,7 +61,7 @@
 
 - Sprint 11 账号安全专项 `tests/test_sprint11_account_security.py` 4 个用例均已分别通过；受影响既有回归为 Auth 8 passed、登录限流 2 passed、管理员用户生命周期 1 passed、桌面设备会话 1 passed。
 - Sprint 11 账号安全相关 15 个文件 Ruff/format 通过，Auth/Admin/Device 相关 12 个源码文件 Mypy 通过；管理员创建测试 helper 已同步新密码策略。
-- Sprint 11 本地门禁已通过：账号安全 4 项与受影响回归 12 项、OIDC/LDAP 10 项、route matrix 134 条路由及 6 项集合校验、前端三浏览器 12 场景均通过；静态、锁文件、OpenAPI/client、migration、Compose、Cargo metadata 和差异检查均通过。最终提交 `{{SPRINT11_COMMIT}}`、run `{{SPRINT11_CI_RUN_ID}}`、job 结果 `{{SPRINT11_CI_JOB_SUMMARY}}`。
+- Sprint 11 本地门禁已通过：账号安全 4 项与受影响回归 12 项、OIDC/LDAP 10 项、route matrix 134 条路由及 6 项集合校验、前端三浏览器 12 场景均通过；静态、锁文件、OpenAPI/client、migration、Compose、Cargo metadata 和差异检查均通过。最终提交 `e6b4f6d`，`backend-ci` run `30922718148` 成功；changes/backend 成功，7 个未受影响 job 按 scope 跳过，frontend 已在 `30919983108` 成功，Rust/MinIO/Windows/安装包已在 `30917345858` 成功。
 - 当前运行时 OpenAPI 归档、生成 client 与 route matrix 已精确对账为 105 个路径、134 个操作、162 个 schemas，不能用 Sprint 10 的 83/110/132 替代。
 - Sprint 6 管理 API 基线：`backend/tests/test_admin_sprint6_management.py` 首轮 `3 passed`；后续只重跑受 CSV/事务边界修改影响的导出生命周期和两个新增 owner transfer/CSV 防护用例，结果 `3 passed`。
 - Sprint 6 静态门禁：管理模块、admin Worker、migration、网关 smoke 和测试共 28 个文件 Ruff/format 通过；管理模块与 admin Worker 共 25 个源码文件 Mypy 通过。
@@ -112,9 +112,8 @@
 
 ## 5. 下一步顺序
 
-1. 提交并推送 Sprint 11，确认 `backend-ci` 全绿；只修复实际失败项，不重复运行已通过或无关的历史集合。
-2. Sprint 11 远端门禁完成后进入 Sprint 12，优先推进大目录权限重算/治理页面、审计分区、Outbox dead-letter 和治理看板。
-3. 在真实生产网络执行 OIDC/LDAPS、`tls-validate-public` 和双域名证书验收；采用受支持修复镜像或可审计补丁镜像解决 MinIO Critical，重新生成 SBOM/Grype 并运行真实 MinIO/备份恢复兼容门禁。
+1. 进入 Sprint 12，优先推进大目录权限重算/治理页面、审计分区、Outbox dead-letter 和治理看板。
+2. 在真实生产网络执行 OIDC/LDAPS、`tls-validate-public` 和双域名证书验收；采用受支持修复镜像或可审计补丁镜像解决 MinIO Critical，重新生成 SBOM/Grype 并运行真实 MinIO/备份恢复兼容门禁。
 
 ## 6. 状态判断
 

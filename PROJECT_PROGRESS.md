@@ -1,13 +1,13 @@
 # PROJECT_PROGRESS.md
 
-## 2026-08-04 Sprint 11 身份与账号安全代码侧交付
+## 2026-08-04 Sprint 11 身份与账号安全交付完成
 
 ### 当前状态
 
-- 分支：`dev`；本轮基于 `257f9a5` 开始集成，项目版本已统一为 `0.8.0`。当前工作树尚未由本记录提交或推送，最终提交使用插槽 `{{SPRINT11_COMMIT}}`，远端 `backend-ci` 使用 `{{SPRINT11_CI_RUN_ID}}`。
+- 分支：`dev`；本轮基于 `257f9a5` 开始集成，项目版本已统一为 `0.8.0`。功能提交 `6fe1a22`、CI 定向修复 `d7420c8` 与最终指标隔离修复 `e6b4f6d` 均已推送。
 - Sprint 11 范围 `BE-040` 至 `BE-043`、`FE-010` 至 `FE-011` 已完成代码侧实现；migration head 为 `20260804_0024`。
 - 当前运行时 OpenAPI 归档、生成 client 与 route matrix 已对账为 105 个路径、134 个操作、162 个 schemas。
-- 本轮继续遵循“不重复测试、不运行无关测试”：账号安全只运行 Sprint 11 新增专项与受影响登录/限流/管理员/设备回归；OIDC、LDAP、前端、迁移和契约均按新增或直接受影响范围完成验证，CI 结果待回填 `{{SPRINT11_CI_JOB_SUMMARY}}`。
+- 本轮继续遵循“不重复测试、不运行无关测试”：账号安全只运行 Sprint 11 新增专项与受影响登录/限流/管理员/设备回归；OIDC、LDAP、前端、迁移和契约均按新增或直接受影响范围完成验证。远端失败项仅定向修复 Ruff format、旧登录 E2E 选择器和 API/Worker 指标注册边界。
 
 ### 已完成
 
@@ -27,7 +27,7 @@
 - 账号安全相关 15 个文件 Ruff check/format 通过；Auth/Admin/Device 相关 12 个源码文件 Mypy 通过；`git diff --check` 当时无空白错误。
 - 管理用户测试 helper 已改为符合新密码策略的强密码，修正后对应生命周期用例通过。
 - OIDC/LDAP 10 项、route matrix 134 条路由及 6 项集合校验、前端三浏览器 12 场景均通过；Ruff/format、Mypy（223 个源码文件）、uv lock、frontend lint/typecheck/build/api:check、PostgreSQL `0024` 往返、Compose config、Cargo metadata 和 `git diff --check` 均通过。
-- 最终远端证据：提交 `{{SPRINT11_COMMIT}}`，`backend-ci` run `{{SPRINT11_CI_RUN_ID}}`，job 结果 `{{SPRINT11_CI_JOB_SUMMARY}}`。
+- 最终远端证据：提交 `e6b4f6d`，`backend-ci` run `30922718148` 成功；changes/backend 成功，7 个未受影响 job 按 scope 跳过。frontend 已在 run `30919983108` 成功，Rust/MinIO/Windows/安装包已在 run `30917345858` 成功。
 
 ### 阻塞与风险
 
@@ -37,9 +37,8 @@
 
 ### 下一步
 
-1. 提交并推送已通过本地相关门禁的 Sprint 11 改动，只处理远端 CI 实际失败项。
-2. 将最终提交和 CI 结果写入 `{{SPRINT11_COMMIT}}`、`{{SPRINT11_CI_RUN_ID}}`、`{{SPRINT11_CI_JOB_SUMMARY}}`。
-3. Sprint 11 远端门禁全绿后进入 Sprint 12 规模化治理；真实生产网络继续补齐 OIDC/LDAP、DNS/受信证书和 MinIO 修复镜像外部证据。
+1. 进入 Sprint 12 规模化治理，优先推进大目录权限重算/治理页面、审计分区、Outbox dead-letter 和治理看板。
+2. 真实生产网络继续补齐 OIDC/LDAP、DNS/受信证书和 MinIO 修复镜像外部证据。
 
 ### 涉及文件
 

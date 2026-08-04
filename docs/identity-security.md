@@ -422,8 +422,8 @@ uv run alembic upgrade 20260804_0024
 
 - OpenAPI：105 paths / 134 operations / 162 schemas。
 - 本地验证：账号安全 4 项与受影响回归 12 项、OIDC/LDAP 10 项、route matrix 134 条路由及 6 项集合校验、前端三浏览器 12 场景均通过；Ruff/format、Mypy、锁文件、OpenAPI/client、PostgreSQL migration、Compose config、Cargo metadata 和差异检查均通过。
-- 提交：`{{SPRINT11_COMMIT}}`。
-- CI：`{{SPRINT11_CI_RUN_ID}}` / `{{SPRINT11_CI_JOB_SUMMARY}}`。
+- 提交：`e6b4f6d`。
+- CI：run `30922718148` 成功；changes/backend 成功，7 个未受影响 job 按 scope 跳过。frontend 已在 run `30919983108` 成功，Rust/MinIO/Windows/安装包已在 run `30917345858` 成功。
 
 ## 10. 生产验收
 

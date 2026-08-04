@@ -147,7 +147,7 @@ DRIVE_LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
 ## 后续审计
 
 - 完整后端代理 Range、增强审计、水印或 DLP 继续由 `BE-034` 交付。
-- Sprint 11 代码侧安全治理与本地 route matrix、OpenAPI/client、前端 E2E、migration 门禁已通过；最终远端证据为 `{{SPRINT11_COMMIT}}`、`{{SPRINT11_CI_RUN_ID}}`、`{{SPRINT11_CI_JOB_SUMMARY}}`。
+- Sprint 11 代码侧安全治理与本地 route matrix、OpenAPI/client、前端 E2E、migration 门禁已通过；最终提交为 `e6b4f6d`，`backend-ci` run `30922718148` 成功。frontend 已在 run `30919983108` 成功，Rust/MinIO/Windows/安装包已在 run `30917345858` 成功。
 - 正式试点前使用真实企业 OIDC provider 和 LDAPS 目录执行 discovery/JWKS 轮换、错误回调、RP logout、目录分页/超时/证书链、冲突和离职演练；本地 fake adapter 测试不能替代该外部证据。
 - 正式上线前处理 MinIO Server/Client 既有 Critical 基线，并完成真实公网 DNS、受信 TLS、外部扫描和恢复演练。
 
@@ -178,4 +178,4 @@ DRIVE_LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
 
 - 运行时 OpenAPI 最终统计：105 paths / 134 operations / 162 schemas。
 - Sprint 11 完整本地验证：账号安全 4 项与受影响回归 12 项、OIDC/LDAP 10 项、route matrix 134 条路由及 6 项集合校验、前端三浏览器 12 场景均通过；静态、锁文件、OpenAPI/client、PostgreSQL migration、Compose、Cargo metadata 和差异检查均通过。
-- 集成提交与远端 CI：`{{SPRINT11_COMMIT}}` / `{{SPRINT11_CI_RUN_ID}}` / `{{SPRINT11_CI_JOB_SUMMARY}}`。
+- 集成提交与远端 CI：`e6b4f6d` / run `30922718148`；changes/backend 成功，7 个未受影响 job 按 scope 跳过。frontend 已在 run `30919983108` 成功，Rust/MinIO/Windows/安装包已在 run `30917345858` 成功。
