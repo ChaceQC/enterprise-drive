@@ -95,7 +95,7 @@ async def test_authenticated_mutations_require_csrf(
     await login(client)
     csrf_cases = [case for case in ROUTE_SECURITY_MATRIX if case.csrf_mode == "required"]
 
-    assert len(csrf_cases) == 71
+    assert len(csrf_cases) == 76
     for case in csrf_cases:
         response = await client.request(
             case.method,
@@ -144,7 +144,7 @@ async def test_authenticated_read_routes_pass_the_identity_gate(
         if case.access_mode in {"session", "admin"} and case.csrf_mode == "none"
     ]
 
-    assert len(read_cases) == 52
+    assert len(read_cases) == 61
     for case in read_cases:
         response = await client.request(
             case.method,

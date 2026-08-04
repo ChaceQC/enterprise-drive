@@ -913,7 +913,10 @@ def _maintenance_parameters(
         parameters.update({"repair": request.repair, "scan_all": request.scan_all})
     elif request.task_name == "file.cleanup_expired_trash":
         parameters["retention_days"] = request.retention_days
-    elif request.task_name == "file.process_tree_operations":
+    elif request.task_name in {
+        "file.process_tree_operations",
+        "governance.process_permission_rebuilds",
+    }:
         parameters.pop("request_id")
     return {key: value for key, value in parameters.items() if value is not None}
 

@@ -15,6 +15,7 @@ AdminMaintenanceOperation = Literal[
     "share.expire_shares",
     "preview.cleanup_artifacts",
     "file.process_tree_operations",
+    "governance.process_permission_rebuilds",
     "file.cleanup_unreferenced_blobs",
     "file.cleanup_orphaned_objects",
     "quota.reconcile_space_usage",

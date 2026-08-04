@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 from types import SimpleNamespace
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import AsyncClient
@@ -17,6 +17,7 @@ from app.modules.admin.governance_repository import AdminGovernanceRepository
 from app.modules.admin.governance_schemas import AdminMaintenanceRunRequest
 from app.modules.admin.governance_service import (
     AdminGovernanceService,
+    _maintenance_parameters,
     _validate_export_filters,
 )
 from app.modules.admin.job_repository import AdminJobRepository
@@ -290,6 +291,24 @@ async def test_admin_maintenance_run_is_persisted_and_tenant_scoped(
         assert job is not None
         assert job.parameters_json["tenant_id"] == str(admin.tenant_id)
         assert job.celery_task_id == "fake-task-id"
+
+
+def test_permission_rebuild_maintenance_parameters_match_task_signature() -> None:
+    tenant_id = uuid4()
+    request = AdminMaintenanceRunRequest(
+        task_name="governance.process_permission_rebuilds",
+        dry_run=False,
+        limit=25,
+    )
+
+    assert _maintenance_parameters(
+        request=request,
+        tenant_id=tenant_id,
+        request_id="req-sprint12",
+    ) == {
+        "tenant_id": str(tenant_id),
+        "limit": 25,
+    }
 
 
 @pytest.mark.asyncio

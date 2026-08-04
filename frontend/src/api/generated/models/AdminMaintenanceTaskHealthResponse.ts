@@ -11,5 +11,5 @@ export type AdminMaintenanceTaskHealthResponse = {
     last_status: string;
     last_success_at: (string | null);
     stale: boolean;
-    task_name: 'audit.ensure_partitions' | 'audit.archive_retention' | 'upload.expire_sessions' | 'file.cleanup_expired_trash' | 'share.expire_shares' | 'preview.cleanup_artifacts' | 'file.process_tree_operations' | 'file.cleanup_unreferenced_blobs' | 'file.cleanup_orphaned_objects' | 'quota.reconcile_space_usage' | 'admin.cleanup_expired_exports';
+    task_name: 'audit.ensure_partitions' | 'audit.archive_retention' | 'upload.expire_sessions' | 'file.cleanup_expired_trash' | 'share.expire_shares' | 'preview.cleanup_artifacts' | 'file.process_tree_operations' | 'governance.process_permission_rebuilds' | 'file.cleanup_unreferenced_blobs' | 'file.cleanup_orphaned_objects' | 'quota.reconcile_space_usage' | 'admin.cleanup_expired_exports';
 };
