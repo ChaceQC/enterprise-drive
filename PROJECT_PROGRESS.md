@@ -12,10 +12,10 @@
 - 新增 `.github/scripts/ci_scope.py` 与 10 个标准库回归用例，按 backend、desktop、installer、rust_policy、windows、minio 六类 scope 路由变更；桌面契约进入后端测试，普通桌面 README 不启动耗时 job。
 - `push` 与 `pull_request` 使用同一仓库/分支并发组并开启 `cancel-in-progress`，新提交会取消同分支旧运行。
 - 后端 job 先执行 Ruff、Bandit、pip-audit 和 Mypy，通过后才启动 PostgreSQL/MinIO、执行 Alembic、pytest、Compose/Nginx、Docker smoke 与镜像构建。
-- Rust job 保留 format、Clippy 和 workspace tests，移除与 Tauri/NSIS 重复的 workspace release build；普通 Rust PR 只跑 Rust 校验，push 或安装包相关变更才构建安装包。
+- Rust job 保留 format、workspace tests 和 Clippy，但改为先跑 tests、再以 `--no-deps` 检查 workspace crate，减少第三方依赖在 Clippy 阶段重复检查和编译；同时移除与 Tauri/NSIS 重复的 workspace release build。普通 Rust PR 只跑 Rust 校验，push 或安装包相关变更才构建安装包。
 - Tauri CLI 从每次约 9 分钟的 `cargo install` 改为固定 `@tauri-apps/cli@2.11.4` npm 二进制，并使用固定 SHA 的 `actions/cache v6.1.0` 缓存。
 - 首次真实全 scope run `30877250861` 已全绿：总 runner-minutes `29.13`，相对基线 `46.78` 下降约 `37.7%`；backend `4.70` 分钟、Rust `7.87` 分钟、安装包 `13.65` 分钟、MinIO 合并扫描 `1.23` 分钟。
-- 该 run 日志确认安装包 job 内的 `tauri build` 之后，两个 debug `cargo run` 又重新编译整套 update 依赖；本轮追加 Cargo registry/git cache、一次锁定 workspace `cargo fetch` 和 offline 构建，并先一次 release 构建 `sign-update`/`verify-update`，签名步骤改为直接复用二进制。
+- 该 run 日志确认安装包 job 内的 `tauri build` 之后，两个 debug `cargo run` 又重新编译整套 update 依赖；本轮追加 Cargo registry/git cache、一次锁定 workspace `cargo fetch` 和 offline 构建，并把 `sign-update`/`verify-update` 的 release 构建移到 Tauri release 构建之后，让工具复用已生成的 release 依赖和 `drive-update` 库，签名步骤继续直接复用二进制。
 - MinIO Server/Client 由两个 matrix job 合并为一个 supply-chain job，只安装一次 Grype、统一上传一组 SBOM/报告；镜像配置变化和每周一 UTC 03:17 定时任务继续执行该门禁，Rust dependency policy 同时保留每周检查。
 - `workflow_dispatch` 会运行完整 scope；工作流或路由脚本自身变化也会强制运行全部门禁。
 
@@ -26,12 +26,14 @@
 - `ruamel.yaml`：workflow 顶层结构、8 个 job、schedule 和依赖关系解析通过。
 - `actionlint 1.7.12`：`.github/workflows/backend-ci.yml` 通过。
 - 合并后的 MinIO shell block 通过 `bash -n`；固定 npm Tauri CLI 在本机临时目录安装耗时约 6 秒，`tauri-cli 2.11.4` 可执行。
+- 本轮再次执行 `actionlint 1.7.12`、10 个 scope 回归、`py_compile`、workflow 步骤顺序断言、`cargo clippy --help`、`cargo metadata --locked --no-deps`（9 个 workspace package）和 `git diff --check`，均通过。
 - 首轮远端 run `30877250861` 的 8 个 job 全部成功，桌面安装包签名/更新工件上传成功。
 - `git diff --check`：通过。
 
-### 待完成
+### 待远端验证
 
-- 推送本轮 Cargo cache 与 release 工具复用改动，确认安装包 job 不再出现签名阶段的重复 debug 编译，并记录 cache hit、下载行数和新的 runner-minutes。
+- 已修改 `.github/workflows/backend-ci.yml`：调整 Rust tests/Clippy 顺序并增加 `--no-deps`，将更新签名工具构建移到 Tauri release 构建之后。
+- 本地 workflow、YAML、脚本和差异校验已通过；下一步提交并推送，检查安装包日志中的 `Compiling` 行数、工具步骤耗时、Cargo cache 命中和新的 runner-minutes。
 
 ## 2026-08-04 Sprint 9 版本与契约收尾
 

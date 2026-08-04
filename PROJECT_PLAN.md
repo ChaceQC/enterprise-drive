@@ -192,7 +192,7 @@
 
 ## 5. 当前下一步
 
-2026-08-04 已开始收敛 `backend-ci` 的重复执行：新增可测试的变更范围路由和同分支并发取消，backend、Rust、Windows 部署、安装包、MinIO 与依赖策略按受影响文件运行；后端静态门禁前置，桌面 Rust job 移除与 Tauri 安装包重复的 release build，Rust registry/git cache 在 Rust 校验与安装包 job 间复用，安装包先一次锁定 workspace `cargo fetch` 再 offline 构建，签名工具只做一次 release 构建并由后续步骤直接调用，Tauri CLI 改为固定版本的 npm 二进制并缓存，MinIO Server/Client 合并到一个供应链 runner。每周定时任务继续覆盖 MinIO 与 Rust 依赖数据库漂移，手工触发保留完整门禁；完成本地 workflow/actionlint 验证后，以真实全 scope 运行确认最终节省和兼容性。
+2026-08-04 已开始收敛 `backend-ci` 的重复执行：新增可测试的变更范围路由和同分支并发取消，backend、Rust、Windows 部署、安装包、MinIO 与依赖策略按受影响文件运行；后端静态门禁前置，桌面 Rust job 先执行 workspace tests，再以 `cargo clippy --workspace --all-targets --no-deps` 检查本地 crate，移除与 Tauri 安装包重复的 workspace release build。Rust registry/git cache 在 Rust 校验与安装包 job 间复用，安装包先一次锁定 workspace `cargo fetch` 再 offline 构建；Tauri release 构建完成后才构建 `sign-update`/`verify-update`，复用已经生成的 release 依赖和 `drive-update` 库，签名步骤直接调用二进制。Tauri CLI 改为固定版本的 npm 二进制并缓存，MinIO Server/Client 合并到一个供应链 runner。每周定时任务继续覆盖 MinIO 与 Rust 依赖数据库漂移，手工触发保留完整门禁；完成本地 workflow/actionlint 验证后，以真实全 scope 运行确认最终节省和兼容性。
 
 2026-08-04 Sprint 9 的功能范围此前已经由 `BE-036` 至 `BE-039`、`BE-044`、`BE-045` 实现，本轮补齐最后的版本与契约收尾：后端包、FastAPI/健康检查、Rust workspace、Tauri 安装包、更新器 User-Agent 和桌面 OpenAPI 契约统一到目标版本 `0.6.0`，并新增跨后端/桌面清单的一致性测试。提交 `d31eaaa` 已推送到 `dev`，对应 `backend-ci` run `30872900207` 的 8 个 job 全部成功，Sprint 9 远端门禁完成。下一产品阶段进入 Sprint 10 Web 用户端与管理后台；真实 DNS、MinIO 修复镜像和正式 `v0.4.0` 发布门禁继续保持。
 

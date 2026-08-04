@@ -702,7 +702,7 @@ $backupPath = [string](
 
 公网 TLS 发布把上述三个命令分别加上 `-Tls`；首次签发先执行 `tls-init -Tls`，后续发布只需要 `up -Tls`。
 
-CI 使用变更范围路由，不再让所有提交重复执行全部部署门禁：`compose.windows.yml` 或 `.env.windows.example` 会同时进入 backend、Windows 和 MinIO 门禁；`deploy/windows/**/*.ps1` 只进入 Windows smoke；Nginx/监控配置进入 backend 的 Compose/template/smoke 路径。MinIO Server/Client SBOM 与 Grype 在同一 runner 中依次生成和扫描，并与 Rust 依赖策略一起保留每周一 UTC 03:17 的定时门禁。工作流改动或手工完整运行仍覆盖全部 scope。
+CI 使用变更范围路由，不再让所有提交重复执行全部部署门禁：`compose.windows.yml` 或 `.env.windows.example` 会同时进入 backend、Windows 和 MinIO 门禁；`deploy/windows/**/*.ps1` 只进入 Windows smoke；Nginx/监控配置进入 backend 的 Compose/template/smoke 路径。桌面 Rust job 先测试再以 `--no-deps` 执行 Clippy；Windows 安装包先完成 Tauri release 构建，再构建更新签名工具以复用已生成的 release 依赖和本地库。MinIO Server/Client SBOM 与 Grype 在同一 runner 中依次生成和扫描，并与 Rust 依赖策略一起保留每周一 UTC 03:17 的定时门禁。工作流改动或手工完整运行仍覆盖全部 scope。
 
 发布检查：
 

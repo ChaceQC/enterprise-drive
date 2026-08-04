@@ -432,12 +432,12 @@ jobs:
         run: cargo fmt --all --check
         working-directory: desktop
 
-      - name: Rust Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
-        working-directory: desktop
-
       - name: Rust tests
         run: cargo test --workspace
+        working-directory: desktop
+
+      - name: Rust Clippy
+        run: cargo clippy --workspace --all-targets --no-deps -- -D warnings
         working-directory: desktop
 
   rust-dependency-policy:
@@ -595,7 +595,18 @@ jobs:
         shell: pwsh
         run: cargo fetch --locked --manifest-path desktop/Cargo.toml --target x86_64-pc-windows-msvc
 
-      - name: Build update signing tools once
+      - name: Build Windows installer
+        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_NET_OFFLINE: "true"
+        with:
+          projectPath: desktop/apps/drive-desktop
+          tauriScript: tauri
+          args: --target x86_64-pc-windows-msvc
+          uploadWorkflowArtifacts: false
+
+      - name: Build update signing tools after desktop release build
         if: github.event_name == 'push'
         env:
           CARGO_NET_OFFLINE: "true"
@@ -610,17 +621,6 @@ jobs:
             -p drive-update `
             --bin sign-update `
             --bin verify-update
-
-      - name: Build Windows installer
-        uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CARGO_NET_OFFLINE: "true"
-        with:
-          projectPath: desktop/apps/drive-desktop
-          tauriScript: tauri
-          args: --target x86_64-pc-windows-msvc
-          uploadWorkflowArtifacts: false
 
       - name: Sign and verify Windows update artifacts
         if: github.event_name == 'push'
