@@ -4,7 +4,7 @@
 
 ## 1. 总体结论
 
-当前项目处于 **v0.6.0、Sprint 9 核心产品能力、版本与契约均已完成本地收尾，等待本次远端 CI 最终门禁的阶段**：
+当前项目处于 **v0.6.0、Sprint 9 核心产品能力、版本、契约和远端 CI 均已完成，下一产品阶段进入 Sprint 10 的阶段**：
 
 - 后端核心能力、权限、分享、预览、搜索、完整管理 API、Windows 11 Docker 部署、监控 profile 和备份治理入口已经形成试点基础，Sprint 2 至 Sprint 6 代码侧剩余项为空。
 - `BE-036` 至 `BE-039`、`BE-044` 和 `BE-045` 已完成；后端、Rust workspace、Tauri 安装包、更新器和桌面 OpenAPI 契约已统一到 Sprint 9 目标版本 `0.6.0`。
@@ -20,11 +20,13 @@
 - Sprint 7 最终 CI：`backend-ci` run `30838990372`（8 个 job 全部成功）
 - Sprint 8 最终修复提交：`d3725a3`
 - Sprint 8 最终 CI：`backend-ci` run `30854694265`（8 个 job 全部成功）
+- Sprint 9 收尾提交：`d31eaaa`
+- Sprint 9 最终 CI：`backend-ci` run `30872900207`（8 个 job 全部成功）
 - Git tag：当前尚未建立 `v0.4.0` tag
 - 运行时 OpenAPI：80 个路径、107 个操作
 - 最新数据库迁移：`20260803_0023`
 - Sprint 8 范围：`DC-007` 至 `DC-010` 已完成实现、本地验收和远端 CI
-- Sprint 9 收尾：`0.6.0` 版本清单、运行时版本、安装包版本和 OpenAPI 契约已对齐，本次 `dev` 推送需通过全部远端 CI job
+- Sprint 9 收尾：`0.6.0` 版本清单、运行时版本、安装包版本和 OpenAPI 契约已对齐，远端 CI 已全绿
 - 桌面更新公开证书 DER SHA-256：`765e82aba7bd3276f18eeadddd7b33257a68b7a1ddcdac6d4fc7f7bc639a3ca5`
 - 当前缺少目录：`frontend/`
 - 当前未实现：Web 用户端与管理后台、身份治理、大目录权限重算/治理页面、审计/Outbox/备份治理收尾和稳定版发布
@@ -66,6 +68,7 @@
 - 最终 `backend-ci` run `30838990372`（提交 `a57d3fb`）的 `rust-desktop`、`rust-dependency-policy`、`backend`、`windows-deployment`、`minio-image-policy`、两组 MinIO supply-chain 和 `windows-desktop-installer` 共 8 个 job 全部成功。
 - `backend-ci` run `30854694265`（提交 `d3725a3`）的 8 个 job 全部成功，完成 Sprint 8 Authenticode 指纹校验修复的远端门禁。
 - Sprint 9 版本收尾定向验证：`uv lock --check`、Ruff、Python format、Cargo metadata、Cargo fmt、JSON 解析和 `git diff --check` 通过；版本一致性、健康检查与桌面 OpenAPI 契约共 `12 passed`。本机定向 Cargo check 仍受缺少 MSVC `link.exe` 限制，完整 Rust 编译由本次 Windows CI 执行。
+- Sprint 9 最终 `backend-ci` run `30872900207`（提交 `d31eaaa`）的 8 个 job 全部成功；远端 Windows runner 已完成 Rust Clippy/tests/release、Tauri/NSIS、Authenticode 和签名更新工件验证。
 - Rust CI 失败项均按实际日志收敛：先修正 Clippy `too_many_arguments`、reqwest `query` feature，再将 Windows 不支持的 cargo-deny 容器 action 移到 Ubuntu；依赖策略最终 advisories、bans、licenses、sources 均通过。
 - Sprint 7 的全绿 CI 验证提交为 `a57d3fb`；全绿后仅追加状态文档收尾，不改变该提交中已验证的代码与 CI 配置；未重复执行已通过的后端、MinIO、备份恢复或性能集合。
 - 本轮推送前已确认的 GitHub Actions `backend-ci` 基线：运行 `30782429638`、提交 `d8185a5`，5 个 job 全部成功。
@@ -93,11 +96,10 @@
 
 ## 5. 下一步顺序
 
-1. 推送 Sprint 9 `0.6.0` 版本与契约收尾到 `dev`，跟踪对应 `backend-ci` 到全部 job 成功；只处理真实失败项，不重复执行无关本地集合。
-2. Sprint 9 远端门禁全绿后进入 Sprint 10 Web 用户端与管理后台。
-3. 在真实生产网络执行 `tls-validate-public`，保存双域名 DNS、HTTP `308`、HTTPS readiness 和受信证书记录。
-4. 采用受支持修复镜像或可审计补丁镜像解决 MinIO Critical，重新生成 SBOM/Grype 并运行真实 MinIO/备份恢复兼容门禁。
-5. 上述发布阻塞解除后创建 `v0.4.0` tag/Release；Sprint 3 目标规模性能证据继续复用已通过工件。
+1. 进入 Sprint 10 Web 用户端与管理后台，建立 React/Vite 工程、生成 API Client，并补齐 Playwright E2E。
+2. 在真实生产网络执行 `tls-validate-public`，保存双域名 DNS、HTTP `308`、HTTPS readiness 和受信证书记录。
+3. 采用受支持修复镜像或可审计补丁镜像解决 MinIO Critical，重新生成 SBOM/Grype 并运行真实 MinIO/备份恢复兼容门禁。
+4. 上述发布阻塞解除后创建 `v0.4.0` tag/Release；Sprint 3 目标规模性能证据继续复用已通过工件。
 
 ## 6. 状态判断
 

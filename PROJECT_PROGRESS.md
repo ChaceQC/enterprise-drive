@@ -7,6 +7,7 @@
 - 分支：`dev`；Sprint 9 功能范围 `BE-036` 至 `BE-039`、`BE-044`、`BE-045` 此前已经完成，本轮处理阶段表与实际仓库之间最后的版本收尾缺口。
 - Sprint 8 最终修复提交 `d3725a3` 已推送，GitHub Actions `backend-ci` run `30854694265` 的 8 个 job 全部成功。
 - 项目目标版本从 Sprint 7/8 的 `0.5.0` 提升到 Sprint 9 的 `0.6.0`；不新增业务范围，不重跑已通过的 Sprint 9、MinIO、备份恢复、性能或完整桌面测试集合。
+- Sprint 9 收尾提交 `d31eaaa` 已推送到 `origin/dev`，对应 `backend-ci` run `30872900207` 的 8 个 job 全部成功。
 
 ### 已完成
 
@@ -24,7 +25,8 @@
 - `cargo metadata --locked --no-deps` 通过，9 个本地 `drive-*` package 均解析为 `0.6.0`；`cargo fmt --all --check` 通过。
 - 定向 `cargo check --locked -p drive-api-client -p drive-update` 在编译第三方 build script 时复现本机既有环境边界：当前只安装 MSVC target，但 shell 缺少 `link.exe`；没有进入本轮 Rust 源码诊断，完整编译继续由 Windows CI 验证。
 - 两个桌面 OpenAPI 契约和 Tauri 配置 JSON 解析通过，版本均为 `0.6.0`；`git diff --check` 通过。
-- 推送后只跟踪本次 `backend-ci`；若失败，只修复实际失败 job，不重复运行无关本地集合。
+- GitHub Actions `backend-ci` run `30872900207` 全绿：`backend`、`rust-desktop`、`rust-dependency-policy`、`windows-deployment`、`minio-image-policy`、两组 MinIO supply-chain 和 `windows-desktop-installer` 共 8 个 job 全部成功。
+- 远端 Windows runner 已补齐本机缺失的验证：Rust Clippy、Rust tests、release build、Tauri/NSIS 安装包、Authenticode 与更新工件签名/上传均通过。
 
 ### 阻塞与风险
 
@@ -33,8 +35,8 @@
 
 ### 下一步
 
-1. 提交并推送 `dev`，跟踪新的 `backend-ci` 到全部 job 成功。
-2. 远端门禁全绿后进入 Sprint 10 Web 用户端与管理后台。
+1. 进入 Sprint 10 Web 用户端与管理后台，建立 `frontend/`、生成 OpenAPI client 并补齐 Web CI/E2E。
+2. 在真实生产网络完成 DNS/受信证书记录，并采用修复镜像解除 MinIO 发布 blocker。
 
 ### 涉及文件
 
