@@ -32,10 +32,13 @@
 - 首轮远端 run `30877250861` 的 8 个 job 全部成功，桌面安装包签名/更新工件上传成功。
 - `git diff --check`：通过。
 
-### 待远端验证
+### 远端验证完成
 
 - 已修改 `.github/scripts/ci_scope.py`、回归测试和安装包 job 条件；当前变更只涉及 CI workflow/router 与文档，推送后预期只有 `changes` job 运行，其余重 job 全部显示 skipped。
-- 下一步提交并推送，确认远端 summary 为 `none`，并以一个 UI-only 与普通 crate-source 路由用例继续验证 installer/Rust job 的互斥跳过语义。
+- 已推送提交 `cd2d653`；GitHub Actions run `30882474663` 成功，`changes` 的 step summary 为 `Selected CI scopes: none`。
+- 该 run 的 `backend`、`rust-desktop`、`windows-desktop-installer`、`rust-dependency-policy`、`windows-deployment`、`minio-image-policy` 和 `minio-supply-chain` 均为 `skipped`，日志没有 `Compiling`。
+- 本地路由矩阵已确认：UI-only 输出 `installer`；普通 crate source 输出 `desktop`；Tauri `src-tauri` Rust 和 `drive-update` 签名代码输出 `desktop,installer`；手工 `workflow_dispatch` 仍输出完整 scope。
+- 这轮目标已完成；后续若需要完整安装包门禁，使用 `workflow_dispatch`，不要通过无关文档或 CI 配置改动触发重 job。
 
 ## 2026-08-04 Sprint 9 版本与契约收尾
 
