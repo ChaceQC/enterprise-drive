@@ -1,6 +1,6 @@
 # 企业网盘 Rust 桌面端
 
-`desktop/` 是 Sprint 7 与 Sprint 8 交付的 Windows 11 Rust/Tauri 工程，当前随 Sprint 11 项目基线统一为 `0.8.0`。桌面端与 `frontend/` Web 客户端共同消费当前 105 paths / 134 operations / 162 schemas 的服务端 OpenAPI 基线；同步事实、传输状态、本地索引、凭据、更新校验和诊断均位于 Rust 层，Tauri 页面只展示状态并发送命令。
+`desktop/` 是 Sprint 7 与 Sprint 8 交付的 Windows 11 Rust/Tauri 工程，当前随 Sprint 12 项目基线统一为 `0.9.0`。桌面端与 `frontend/` Web 客户端共同消费当前 116 paths / 148 operations / 178 schemas 的服务端 OpenAPI 基线；同步事实、传输状态、本地索引、凭据、更新校验和诊断均位于 Rust 层，Tauri 页面只展示状态并发送命令。Sprint 12 新增治理 API 主要由 Web 管理后台消费，不改变现有桌面同步状态机。
 
 ## Workspace
 

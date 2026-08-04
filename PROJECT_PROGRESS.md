@@ -1,5 +1,84 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-04 Sprint 12 规模化治理代码侧收口
+
+### 当前状态
+
+- 分支：`dev`；本轮基于 Sprint 11 最终提交 `c371526` 开始集成，工作树由多个 Sprint 12 子系统共同修改，尚未提交或推送。
+- Sprint 12 范围 `BE-046` 至 `BE-050`、`FE-012`、`OPS-001` 至 `OPS-003`、`QA-001` 至 `QA-002` 已完成代码侧实现，项目版本统一为 `0.9.0`，migration head 为 `20260804_0026`。
+- 当前 OpenAPI 归档为 116 个路径、148 个操作、178 个 schemas；前端治理页使用生成式 API client，桌面端仍消费同一 `0.9.0` 契约版本。
+- 本轮继续遵循“不重复测试、不运行无关测试”：只执行 Sprint 12 新增和直接受影响门禁，既有 Sprint 10 三浏览器全集、MinIO 历史全集、`BE-029` 性能 target、完整备份恢复和桌面历史集合不在本地重复运行。
+
+### 已完成
+
+- `BE-046`：新增 `governance` 模块与 `permission_rebuild_operations`。权限重算按租户/space/node 范围持久化，使用固定批次和稳定 cursor；Worker 中断后从 PostgreSQL 进度恢复，运行期间收到更高 `permission_version` 会记录 `restart_requested` 并从新快照重算，OpenSearch upsert 保持幂等。`search.acl_rebuild_requested` 不再一次性加载整棵子树。
+- `BE-047`：新增每租户唯一的 `lifecycle_policies`，统一回收站/预览保留期和上传、分享、无引用 blob、孤儿对象开关；更新使用 `expected_version`，dry-run 与正式执行都持久化为治理 `admin_jobs`。legal hold、高级内容分类和复杂 DLP 明确保留到远期 `GOV-001`。
+- `BE-048`：沿用已完成的图片/扫描 PDF OCR、旧 Office/ODF 抽取和资源边界，本轮没有重复实现或重复运行无关内容处理全集。
+- `BE-049`：migration `20260804_0025` 把 `audit_logs` 转为 PostgreSQL 月分区表并建立未来分区维护；新增保留归档、可选删除源记录、签名元数据、外部 HTTP HMAC 投递和管理员审计治理摘要。
+- `BE-050`：Outbox 增加 transient/permanent 错误分类、指数退避 jitter、处理超时恢复、失败元数据、dead 状态和重放计数；管理 API 支持 dead-letter 列表/详情/幂等重放，响应只返回 payload key 列表；`outbox_oldest_pending_age_seconds` 纳入平台告警。
+- 新增 `/api/v1/admin/governance`：治理摘要、生命周期策略/运行、权限重算创建/列表/详情/重试和大目录任务列表；既有 `/api/v1/admin/audit/governance` 与 `/api/v1/admin/outbox/dead-letters` 提供审计/Outbox 治理入口。
+- `FE-012`：新增 `/admin/governance`，覆盖大目录进度、权限重算失败重试、生命周期策略与 dry-run/正式运行、审计归档/投递、dead-letter 查询/重放和治理告警，并补齐移动端样式及 mock E2E。
+- `OPS-001`：备份格式升级为 manifest v2，可生成 detached CMS `manifest.p7s` 来源签名；可选完整包使用 AES-256-CBC 加密、HMAC-SHA256 完整性和 RSA-OAEP-SHA256 密钥封装，同时保持 v1 读取兼容。
+- `OPS-002`：新增离线副本原子复制、逐文件 size/SHA-256 对账、canonical inventory digest、保留轮换和 restricted ACL JSON 治理记录。
+- `OPS-003`：新增 Redis RDB 与 OpenSearch settings/mappings/scroll bulk 可移植导出，导入前创建 rollback export，拒绝向更低 major 版本迁移，失败自动回退并写成功/失败 JSON 报告。
+- `QA-001`：后端 CI 增加 Redis/OpenSearch，`test_sprint12_dependency_matrix.py` 在同一次 pytest 中逐项停止 PostgreSQL、Redis、MinIO、OpenSearch，确认故障可探测、服务可恢复和最终全健康，并上传 UTF-8 JSON 报告。
+- `QA-002`：OpenAPI 归档和 TypeScript client 已更新，route matrix 纳入新增治理写入口；版本一致性覆盖后端、Web、Tauri、Cargo 和桌面契约。
+- 监控新增 `enterprise-drive-governance` Grafana 看板，以及权限重算失败、生命周期失败和 Outbox 最老积压告警。
+- 新增 `docs/ops-sprint12-backup-portability.md`，并同步计划、阶段表、README、后端/桌面说明、部署/监控、安全测试、协作规则和完整技术计划书。
+
+### 验证
+
+- `backend/tests/test_sprint12_governance.py`：`4 passed`。
+- 审计/Outbox 新增与直接受影响用例均通过；route matrix 与运行时 OpenAPI 精确对账为 148 条操作。
+- 真实 PostgreSQL 空库已从零升级到 `20260804_0026`，并完成 `0026 -> 0024 -> 0026` 往返；审计表月分区、未来分区维护和写入目标分区专项 `1 passed`。
+- 四依赖矩阵已在本机真实 Docker 中通过：PostgreSQL、Redis、MinIO、OpenSearch 均完成初始健康、逐项停止后的故障探测、启动恢复和最终全健康；本轮容器、卷与 `15432/16379/19000/19200` 端口已清理。
+- 前端：`npm.cmd run lint`、`npm.cmd run typecheck` 通过；Chromium 聚焦治理 E2E：`1 passed`；测试端口 `15173` 已清理。
+- 版本与契约：`uv lock --check`、版本一致性测试 `1 passed`、`cargo metadata --locked --no-deps`、最终 `api:generate`/`api:check` 和前端 typecheck 通过；OpenAPI 统计为 116/148/178。
+- OPS：12 个 PowerShell 脚本 parser 通过；来源签名/完整包加密、离线副本/迁移治理专项 smoke 通过；既有直接受影响 `backup-restore.smoke` 为 `27 passed`，governance smoke 通过；真实双 project Redis/OpenSearch 导出、应用和自动回退集成通过；`manage.ps1 config -EnvFile .env.windows.example -Quiet` 通过。
+- 监控与 CI 配置：Grafana JSON 解析为 5 个 panel，Prometheus `promtool` 检查 maintenance 7 条和 platform 12 条规则通过；`actionlint`、Compose config 和 CI scope 20 个用例通过。
+
+### 阻塞与风险
+
+- 审计分区、归档删除和跨版本迁移会改变数据保管边界；生产启用 `DRIVE_AUDIT_ARCHIVE_DELETE_SOURCE`、外部投递或完整包加密前，必须完成密钥双人保管、恢复演练和保留策略审批。
+- 四依赖故障注入会主动 stop/start CI 临时容器；测试使用 `finally` 恢复依赖并在 workflow cleanup 再次清理，不能在共享生产环境运行。
+- 真实生产 OIDC/LDAPS、DNS/受信证书证据和 MinIO 修复镜像仍不在当前本机环境内，正式 `v0.4.0` tag/Release 继续保持阻塞。
+
+### 下一步
+
+1. 按后端治理、前端/契约、OPS/监控、版本/文档拆分中文提交，推送 `dev` 并确认本次 `backend-ci` required jobs 全绿。
+2. 只处理本次远端 CI 的失败 scope，不重复运行已经通过且未受影响的历史集合。
+3. CI 成功后回填 Sprint 12 最终 commit、run ID 和远端四依赖/Windows 证据，再进入 Sprint 13 完整 UAT、升级回滚和 `v1.0.0` 发布门禁。
+
+### 涉及文件
+
+- `backend/app/modules/governance/`
+- `backend/app/modules/audit/`
+- `backend/app/modules/admin/governance_*`
+- `backend/app/workers/governance_tasks.py`
+- `backend/app/workers/audit_tasks.py`
+- `backend/migrations/versions/20260804_0025_sprint12_audit_outbox.py`
+- `backend/migrations/versions/20260804_0026_sprint12_governance.py`
+- `backend/tests/test_sprint12_*.py`
+- `frontend/src/modules/admin/AdminGovernancePage.tsx`
+- `frontend/tests/e2e/governance.spec.ts`
+- `deploy/windows/backup-security.ps1`
+- `deploy/windows/offline-backup.ps1`
+- `deploy/windows/data-migration.ps1`
+- `deploy/windows/tests/ops-sprint12.*.ps1`
+- `deploy/monitoring/grafana/dashboards/enterprise-drive-governance.json`
+- `deploy/monitoring/maintenance-alerts.yml`
+- `deploy/monitoring/platform-alerts.yml`
+- `.github/workflows/backend-ci.yml`
+- `docs/ops-sprint12-backup-portability.md`
+- `README.md`
+- `backend/README.md`
+- `desktop/README.md`
+- `AGENT.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `PROJECT_STAGE_STATUS.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-08-04 Sprint 11 身份与账号安全交付完成
 
 ### 当前状态

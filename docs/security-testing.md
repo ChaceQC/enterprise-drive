@@ -2,7 +2,7 @@
 
 ## 范围
 
-本文保留 `BE-030` 的历史安全门禁，并同步 Sprint 11 / `0.8.0` 当前攻击面。OIDC、LDAP、Web 身份页面和 Rust 设备会话均已实现，必须与本地账号、Cookie Session、CSRF 和租户权限一起进入安全矩阵。检查范围包括：
+本文保留 `BE-030` 的历史安全门禁，并同步 Sprint 12 / `0.9.0` 当前攻击面。OIDC、LDAP、Web 身份页面、Rust 设备会话、大目录权限重算、生命周期、审计治理和 Outbox dead-letter 均已实现，必须与本地账号、Cookie Session、CSRF 和租户权限一起进入安全矩阵。检查范围包括：
 
 - 未认证入口：登录、外链访问、外链下载、健康检查和 gateway。
 - 已认证入口：文件、上传、下载、搜索、分享、权限和管理员审计。
@@ -10,6 +10,9 @@
 - 登录失败窗口、阶梯延迟、验证码、账号锁定/解锁、密码策略、强制改密和浏览器/桌面全会话吊销。
 - OIDC provider/discovery/JWKS、PKCE、state/nonce、账号绑定、回调、开放重定向和登出。
 - LDAP 目录源、secret 引用、连接测试、dry-run/full/incremental、稳定 external ID、成员 claim、冲突、禁用和离职。
+- 生命周期策略乐观版本、dry-run/正式运行、大目录权限重算、失败重试和管理员治理页面。
+- 审计分区/归档/外部 HMAC 投递、Outbox 错误分类、dead-letter 查询和幂等重放。
+- 备份 detached CMS 来源签名、完整包加密、离线副本和 Redis/OpenSearch 可移植迁移。
 - 用户上传内容的预览、正文抽取和对象存储处理。
 - PostgreSQL、Redis、OpenSearch、MinIO、Worker 与 gateway 的网络边界。
 - Python 依赖、静态代码模式、镜像和既有供应链门禁。
@@ -146,10 +149,37 @@ DRIVE_LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
 
 ## 后续审计
 
-- 完整后端代理 Range、增强审计、水印或 DLP 继续由 `BE-034` 交付。
+- 内部 Range 代理、水印和关键字 DLP 已完成；外链代理、legal hold、高级内容分类和复杂 DLP 继续归远期 `GOV-001`。
 - Sprint 11 代码侧安全治理与本地 route matrix、OpenAPI/client、前端 E2E、migration 门禁已通过；最终提交为 `e6b4f6d`，`backend-ci` run `30922718148` 成功。frontend 已在 run `30919983108` 成功，Rust/MinIO/Windows/安装包已在 run `30917345858` 成功。
 - 正式试点前使用真实企业 OIDC provider 和 LDAPS 目录执行 discovery/JWKS 轮换、错误回调、RP logout、目录分页/超时/证书链、冲突和离职演练；本地 fake adapter 测试不能替代该外部证据。
 - 正式上线前处理 MinIO Server/Client 既有 Critical 基线，并完成真实公网 DNS、受信 TLS、外部扫描和恢复演练。
+
+## 2026-08-04 Sprint 12 治理与保管链
+
+### 治理路由
+
+- `/api/v1/admin/governance/*`、`/api/v1/admin/audit/governance` 和 `/api/v1/admin/outbox/dead-letters*` 只允许当前租户系统管理员访问；所有写入口继续要求 Cookie Session、CSRF 和审计。
+- 生命周期策略更新必须携带 `expected_version`；旧版本更新返回冲突，浏览器本地状态不能覆盖服务端策略事实。
+- 权限重算按租户、space/node 范围隔离；稳定 cursor 和 `permission_version` 保存在 PostgreSQL。任务中断可恢复，运行期间出现更高权限版本时从新快照重启。
+- dead-letter 列表/详情只返回 payload key 列表、错误分类和受控元数据，不返回完整 payload；重复重放同一已恢复事件不会再次递增重放计数。
+
+### 审计与 Outbox
+
+- `audit_logs` 使用 PostgreSQL 月分区；`audit.ensure_partitions` 幂等创建未来分区。归档先生成内容 SHA-256 和签名，再按显式配置删除源记录；签名或存储失败不得删除源数据。
+- 外部审计 HTTP 请求使用 HMAC-SHA256 正文签名和 key ID；4xx 归 permanent，网络/5xx 归 transient。secret 不进入数据库、管理响应、日志或 Prometheus label。
+- Outbox transient 失败使用带 jitter 的有界退避，permanent 或超过最大重试进入 dead；processing 超时会重新领取。`outbox_oldest_pending_age_seconds` 和 dead 数量只使用低基数标签。
+
+### 备份与迁移
+
+- manifest v2 可带 detached CMS `manifest.p7s`；验证必须同时检查签名、预期证书 thumbprint、manifest 元数据和现有 SHA-256/路径/image/lineage 门禁。
+- 完整包使用 Encrypt-then-MAC 风格的 AES-256-CBC + HMAC-SHA256，并以 RSA-OAEP-SHA256 封装独立内容/认证密钥；解密后仍执行工件 hash、dump 和 tar 安全扫描。
+- 离线副本使用 staging 原子发布和 canonical inventory digest；Redis/OpenSearch 可移植迁移在修改目标前创建 rollback export，拒绝 major 降级，失败自动回退并保存报告。
+
+### 当前 Sprint 12 门禁
+
+- 治理后端专项 `4 passed`；前端 lint/typecheck 与 Chromium 治理 E2E `1 passed`；版本一致性 `1 passed`。
+- OPS parser、签名/完整包加密、离线副本/迁移专项 smoke 和直接受影响 backup/governance smoke 已通过。
+- 审计/Outbox 定向用例、PostgreSQL 空库升级与 `0026 -> 0024 -> 0026` 往返、route matrix/OpenAPI、四依赖故障恢复和 Windows Redis/OpenSearch 双 project 迁移/回退均已通过本地直接门禁；远端 CI 只复验受影响 scope，不重复执行未受影响历史全集。
 
 ## 2026-08-04 Sprint 11 身份与账号安全
 

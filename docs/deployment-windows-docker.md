@@ -1,8 +1,8 @@
 # Windows 11 Docker 正式部署说明
 
-> 适用项目版本：`v0.8.0`
+> 适用项目版本：`v0.9.0`
 >
-> 当前代码基线：Windows 本机 HTTP `18080/19000`、公网 ACME/TLS `80/443`、可选 monitoring profile、备份轮换、隔离恢复、账号安全、OIDC/PKCE 和 LDAP 同步均已落地；真实受信证书、企业 OIDC provider 和 LDAPS 目录验收仍需要生产 DNS/网络环境。
+> 当前代码基线：Windows 本机 HTTP `18080/19000`、公网 ACME/TLS `80/443`、可选 monitoring profile、备份签名/完整包保护/离线轮换、Redis/OpenSearch 可移植迁移、隔离恢复、账号安全、OIDC/PKCE、LDAP 同步和 Sprint 12 治理均已落地；真实受信证书、企业 OIDC provider、LDAPS 目录和生产密钥保管验收仍需要生产 DNS/网络环境。
 
 ## 1. 部署目标
 
@@ -14,6 +14,9 @@
 - `.env.windows.example`：正式环境变量模板。
 - `.env.windows`：实际环境配置，不提交 Git。
 - `deploy/windows/manage.ps1`：Windows PowerShell 管理入口。
+- `deploy/windows/backup-security.ps1`：manifest v2 来源签名和完整包加密/解密。
+- `deploy/windows/offline-backup.ps1`：离线副本复制、盘点和保留轮换。
+- `deploy/windows/data-migration.ps1`：Redis/OpenSearch 可移植导出、应用和回退。
 - `deploy/windows/nginx/default.conf.template`：本机 HTTP gateway。
 - `deploy/windows/nginx/acme-bootstrap.conf.template`：首次证书签发期间只开放健康检查和 HTTP-01 challenge。
 - `deploy/windows/nginx/tls.conf.template`：公网 TLS、HTTP 跳转和双域名 Host 分流。
@@ -187,6 +190,20 @@ DRIVE_IDENTITY_HTTP_TIMEOUT_SECONDS=10.0
 DRIVE_LDAP_SYNC_PAGE_SIZE=500
 OIDC_CLIENT_SECRET=
 LDAP_BIND_PASSWORD=
+DRIVE_OUTBOX_RETRY_MAX_DELAY_SECONDS=300
+DRIVE_OUTBOX_RETRY_JITTER_RATIO=0.2
+DRIVE_OUTBOX_PROCESSING_TIMEOUT_SECONDS=300
+DRIVE_AUDIT_PARTITION_MONTHS_AHEAD=6
+DRIVE_AUDIT_PARTITION_MAINTENANCE_INTERVAL_SECONDS=86400
+DRIVE_AUDIT_RETENTION_DAYS=365
+DRIVE_AUDIT_ARCHIVE_INTERVAL_SECONDS=86400
+DRIVE_AUDIT_ARCHIVE_MAX_ROWS=250000
+DRIVE_AUDIT_ARCHIVE_DELETE_SOURCE=false
+DRIVE_AUDIT_SIGNING_KEY=
+DRIVE_AUDIT_SIGNING_KEY_ID=default
+DRIVE_AUDIT_EXTERNAL_DELIVERY_URL=
+DRIVE_AUDIT_EXTERNAL_HMAC_KEY=
+DRIVE_AUDIT_EXTERNAL_KEY_ID=default
 DRIVE_OPENSEARCH_URL=http://opensearch:9200
 DRIVE_S3_ENDPOINT_URL=http://minio:9000
 DRIVE_S3_PUBLIC_ENDPOINT_URL=http://localhost:19000
@@ -240,6 +257,8 @@ GRAFANA_ROOT_URL=https://drive.example.com/grafana/
 - JSON 日志自动带 `service`、`env`、`request_id`、`task_id`、`trace_id`、`span_id`；HTTP 请求结束日志包含 route/method/status/latency，Celery task 结束日志包含 task/queue/status/latency。
 - OpenTelemetry exporter 默认 `none`，不会向外部发送 span。生产接入 collector 时使用 `DRIVE_TRACING_EXPORTER=otlp_http`，把 `DRIVE_TRACING_OTLP_ENDPOINT` 设为完整 traces endpoint，例如 `http://otel-collector:4318/v1/traces`。`DRIVE_TRACING_OTLP_HEADERS` 必须是 JSON 对象，认证信息只放在未提交的 `.env.windows` 或受控 secret 管理中。
 - `outbox_pending_total` 和 `search_index_lag_seconds` 在 API scrape 时以短超时刷新。PostgreSQL 不可用时 `/metrics` 仍返回已有进程指标，但数据库 gauge 可能短暂保留上次成功值。
+- `outbox_oldest_pending_age_seconds` 记录最老未完成 Outbox 事件年龄；平台规则在超过 15 分钟时告警。`outbox_pending_total{status="dead"}` 只记录数量，不把事件类型、租户或错误原文作为标签。
+- Sprint 12 的 `audit.ensure_partitions`、`audit.archive_retention` 和 `governance.process_permission_rebuilds` 运行在 maintenance 队列；生命周期显式运行由 `governance.run_lifecycle_policy` 执行并把状态持久化到 `admin_jobs`。
 - `DRIVE_RATE_LIMIT_ENABLED` 默认必须保持 `true`；根 Compose 会把该值传入 API 和 Worker。只有隔离容量基准可以临时设为 `false`，并应通过 `PERF_RATE_LIMIT_MODE` 写入性能报告，不能把关闭限流的测试配置直接用于生产。
 - 登录同时按来源 IP 和规范化账号标识限流；账号 key 只保存哈希，不保存原始用户名。默认分别为每分钟 `30` 和 `10` 次，正式环境可收紧但不能关闭，并与 PostgreSQL 失败窗口、阶梯延迟和临时锁定共同生效。
 - Sprint 11 已实现阶梯延迟、失败时间窗口、临时锁定、管理员解锁和验证码阈值。默认连续 5 次失败后锁定 900 秒，失败窗口为 900 秒，延迟从 0.25 秒指数增长并在 4 秒封顶；正式环境调整阈值时必须同时评估 Redis 限流、Argon2id CPU、客服解锁流程和告警噪声。
@@ -293,12 +312,17 @@ Prometheus、Alertmanager、Grafana 只加入 `backend` 内网并使用独立 na
 | `status` | 查看全部容器与健康状态 |
 | `logs [-Service NAME] [-Tail N]` | 查看全部或指定服务日志 |
 | `backup -BackupDirectory PATH -ConfigEncryptionCertificateThumbprint THUMBPRINT` | 静默 source 写入面并创建 PostgreSQL、MinIO、Redis、OpenSearch、TLS 和 CMS 环境文件备份 |
-| `backup-verify -BackupPath PATH` | 校验 manifest、工件、PostgreSQL dump、隔离 tar 预扫描、精确代码/configuration lineage 及 16 个默认服务 image reference/actual image ID |
+| `backup ... [-BackupSigningCertificateThumbprint THUMBPRINT] [-PackageEncryptionCertificateThumbprint THUMBPRINT]` | 可选生成 detached CMS `manifest.p7s`，并把全部数据 payload 加密认证后发布 |
+| `backup-verify -BackupPath PATH` | 校验 manifest/签名/加密 envelope、工件、PostgreSQL dump、隔离 tar 预扫描、精确代码/configuration lineage 及 16 个默认服务 image reference/actual image ID |
 | `restore -BackupPath PATH` | 把已校验备份恢复到不同且已停止的 Compose project，支持受限 ACL ForceRestore rollback |
 | `backup-retention -BackupDirectory PATH [-ApplyRetention]` | 校验托管备份后按保留天数与最少份数预览或执行轮换，并写 JSON 记录 |
+| `backup-offline-rotate -OfflineBackupDirectory PATH` | 从指定或最新托管备份创建原子离线副本、核对 inventory digest，并按时间/数量轮换 |
 | `backup-retention-register/unregister` | 注册或幂等删除每日备份轮换 Windows 计划任务 |
 | `restore-drill -BackupDirectory PATH` | 选择最新托管备份，恢复到随机隔离 Compose project，验证清理并写 JSON 记录；也可用 `-BackupPath` 指定 |
 | `restore-drill-register/unregister` | 注册或幂等删除每周隔离恢复演练 Windows 计划任务 |
+| `data-migration-export -MigrationDirectory PATH` | 导出 Redis RDB、OpenSearch settings/mappings/bulk NDJSON 和可校验 manifest |
+| `data-migration-apply -MigrationPath PATH` | 创建目标 rollback export 后应用迁移；拒绝降级 major，失败自动回退并写 JSON 报告 |
+| `data-migration-rollback -MigrationPath PATH` | 使用同一门禁显式回退，并在覆盖目标前再次保存当前状态 |
 | `tls-init -Tls [-TlsEmail EMAIL] [-TlsStaging]` | 用 ACME webroot bootstrap 首次签发双域名证书并切换到 TLS gateway |
 | `tls-renew -Tls [-ForceRenewal]` | 执行 Certbot 续期，随后校验并热重载 Nginx |
 | `tls-certificates -Tls` | 查看 Certbot 管理的证书和到期时间 |
@@ -437,11 +461,14 @@ Preview Worker 不能和 audit/permission 队列混跑。
 - `file.cleanup_unreferenced_blobs`
 - `file.cleanup_orphaned_objects`
 - `quota.reconcile_space_usage`
-- 后续接入的其他生命周期治理任务
+- `audit.ensure_partitions`
+- `audit.archive_retention`
+- `governance.process_permission_rebuilds`
+- `admin.cleanup_expired_exports`
 
 Beat 使用 UTC。当前 schedule 文件位于容器临时目录，可由静态配置重建；任务事实和执行结果仍以数据库、审计和任务自身状态为准。每个维护任务必须幂等，不能仅依赖 beat 单实例保证。
 
-Celery signal 统一记录上述八个周期维护任务的连续失败状态，Redis key 为 `maintenance_health:{task_name}`。达到配置阈值时 Worker 写结构化错误日志并设置 Prometheus alert Gauge；主进程定时刷新 stale 和时间戳指标。规则文件位于 `deploy/monitoring/maintenance-alerts.yml`，详细指标、配置和排障流程见 `docs/maintenance-monitoring.md`。Redis 只保存监控状态，不替代 PostgreSQL 与审计事实。
+Celery signal 统一记录十二个周期维护任务的连续失败状态，Redis key 为 `maintenance_health:{task_name}`。达到配置阈值时 Worker 写结构化错误日志并设置 Prometheus alert Gauge；主进程定时刷新 stale 和时间戳指标。规则文件位于 `deploy/monitoring/maintenance-alerts.yml`，详细指标、配置和排障流程见 `docs/maintenance-monitoring.md`。Redis 只保存监控状态，不替代 PostgreSQL 与审计事实。
 
 ## 8. Preview Worker
 
@@ -707,13 +734,15 @@ Copy-Item .env.windows .env.restore.windows
 
 ### 11.6 安全与兼容边界
 
-- Windows CMS 只加密 `.env.windows`。PostgreSQL dump、MinIO/Redis/OpenSearch 原始卷 tar 和包含 TLS 私钥的证书卷 tar 不具备完整包级应用层加密，必须依赖备份宿主 BitLocker、脚本自动应用的 restricted NTFS ACL 和加密外部介质。
-- `manifest.sha256` 和工件 SHA-256 只校验完整性，不认证备份制作者身份。需要认证来源时，应另外使用受保护签名、受控传输和可审计保管链。
-- Redis/OpenSearch 使用停止状态原始卷归档，只支持相同 image reference、相同 image ID、单节点同拓扑。跨版本或拓扑变化应使用 Redis/OpenSearch 支持的迁移、导出或快照机制。
+- manifest v1 继续兼容读取；新建备份使用 v2。传入 `-BackupSigningCertificateThumbprint` 后会生成 detached CMS `manifest.p7s`，`backup-verify`、离线盘点和恢复都会校验签名、预期 thumbprint 与 manifest 元数据。证书信任链、吊销、轮换和双人保管仍由组织 PKI 流程负责。
+- 未传入 `-PackageEncryptionCertificateThumbprint` 时，Windows CMS 仍只加密 `.env.windows`，其余 payload 依赖 BitLocker、restricted NTFS ACL 和加密介质。传入证书后，payload 使用 AES-256-CBC、HMAC-SHA256 和 RSA-OAEP-SHA256 envelope；解密后仍逐工件校验 size/SHA-256，并执行 PostgreSQL dump 与 tar 安全检查。
+- `backup-offline-rotate` 只接受经过完整校验的托管备份，使用 staging 原子发布，复制前后逐文件对账并记录 canonical inventory digest。脚本不能证明介质已物理下线；成功后仍需卸载、断开或移交加密介质。
+- Redis/OpenSearch 同版本恢复仍可使用停止状态原始卷，并要求相同 image reference、image ID 和单节点拓扑。跨版本升级必须使用 `data-migration-export/apply/rollback`：Redis 导出 RDB，OpenSearch 导出 settings/mappings/bulk NDJSON；应用前创建 rollback export，拒绝导入到更低 major 版本，失败时自动回退。
 - `-ForceRestore` rollback archive 是失败时的尽力恢复机制；底层卷驱动、磁盘或 Docker 故障仍可能需要人工处理，因此发现回滚异常后不得删除脚本报告的受限 ACL 归档。
 - PostgreSQL 是核心事实来源；Redis 主要保存缓存、限流和队列状态，OpenSearch 索引可由 PostgreSQL 与对象存储重建，但仍应记录重建步骤和耗时。
 - 当前固定 MinIO Server/Client 镜像仍有 16/9 个 Critical 唯一 ID 基线。供应链门禁只阻断允许集之外的新 Critical；正式 `v0.4.0` tag/Release 在受支持修复镜像或可审计补丁镜像完成替换与重扫前保持阻塞，详见 `docs/minio-security-risk.md`。
-- 备份轮换和恢复演练已经自动化，但离线副本、容量告警、备份来源签名和完整包加密仍需后续治理。
+
+完整的 Sprint 12 证书创建、签名备份、完整包保护、离线轮换和跨版本迁移示例见 `docs/ops-sprint12-backup-portability.md`。
 
 ## 12. 发布与更新
 

@@ -1,8 +1,8 @@
 # 后端工程
 
-> 适用项目版本：`v0.8.0`
+> 适用项目版本：`v0.9.0`
 
-本目录承载企业网盘后端，使用 Python 3.12+、uv、FastAPI、SQLAlchemy、PostgreSQL、Redis、S3 兼容对象存储、OpenSearch 和 Celery。Sprint 11 已加入 Authlib/httpx OIDC 适配、ldap3 目录读取、账号安全、身份源管理和异步 LDAP 同步。
+本目录承载企业网盘后端，使用 Python 3.12+、uv、FastAPI、SQLAlchemy、PostgreSQL、Redis、S3 兼容对象存储、OpenSearch 和 Celery。Sprint 11 已加入 Authlib/httpx OIDC 适配、ldap3 目录读取、账号安全、身份源管理和异步 LDAP 同步；Sprint 12 已加入大目录权限重算、统一生命周期、审计分区/归档/外部投递、Outbox dead-letter 和治理 API。
 
 ## 本地准备
 
@@ -51,17 +51,17 @@ Copy-Item .env.windows.example .env.windows
 
 ### 可观测性
 
-- API `/metrics` 只暴露 API 进程内的 `http_requests_total`、`http_request_duration_seconds`、上传/下载、权限判断、Outbox、搜索延迟和身份安全指标。`auth_security_events_total` 使用受控的事件/结果标签，`identity_provider_operations_total` 与 `ldap_sync_runs_total` 记录 OIDC/LDAP 连接、登录和同步结果；HTTP 标签使用完整路由模板，不使用原始 URL、路径参数、用户/租户 ID 或 token，抓取 `/metrics` 自身不进入 HTTP 请求指标。
+- API `/metrics` 只暴露 API 进程内的 `http_requests_total`、`http_request_duration_seconds`、上传/下载、权限判断、Outbox、搜索延迟和身份安全指标。`outbox_oldest_pending_age_seconds` 记录最老未完成事件年龄；`auth_security_events_total` 使用受控的事件/结果标签，`identity_provider_operations_total` 与 `ldap_sync_runs_total` 记录 OIDC/LDAP 连接、登录和同步结果；HTTP 标签使用完整路由模板，不使用原始 URL、路径参数、用户/租户 ID 或 token，抓取 `/metrics` 自身不进入 HTTP 请求指标。
 - 正式 Compose 的 API 默认运行 2 个 Uvicorn worker，使用 `PROMETHEUS_MULTIPROC_DIR=/tmp/enterprise-drive/prometheus` 聚合。Docker runtime entrypoint 只在容器启动前清理旧 `.db` metric 文件；运行中的 worker 不清理共享目录。
 - API 与 Celery Worker 是不同容器。`worker-audit`、`worker-permission`、`worker-search`、`worker-maintenance` 和 `worker-preview` 各自在 Compose 内部 `9100` 暴露 `worker_tasks_total`、`worker_task_duration_seconds` 及本进程业务指标，不发布宿主端口。监控系统应按服务分别抓取，不能只抓 API `/metrics`。
-- 根 Compose 的可选 `monitoring` profile 内置 Prometheus、Alertmanager 和 Grafana；Grafana 只通过 gateway `/grafana/` 访问，三项监控服务都不发布宿主端口。启用命令、secret 和看板说明见 `../docs/maintenance-monitoring.md`。
+- 根 Compose 的可选 `monitoring` profile 内置 Prometheus、Alertmanager 和 Grafana；Grafana 只通过 gateway `/grafana/` 访问，预置运行概览、维护治理和 Sprint 12 治理三张看板，三项监控服务都不发布宿主端口。启用命令、secret 和看板说明见 `../docs/maintenance-monitoring.md`。
 - JSON 日志自动包含 `service`、`env`、`request_id`、`task_id`、`trace_id`、`span_id`、tenant/user/resource 上下文；HTTP 请求结束日志包含 route、method、status、`latency_ms`，Worker 结束日志包含 task、queue、status 和耗时。
 - FastAPI 与 Celery 使用 OpenTelemetry。`DRIVE_TRACING_EXPORTER=none` 是默认值，只生成关联上下文；可改为 `console` 或 `otlp_http`。OTLP/HTTP 使用完整 traces endpoint，例如 `http://otel-collector:4318/v1/traces`；认证 header 通过 JSON 格式的 `DRIVE_TRACING_OTLP_HEADERS` 注入，不写入仓库。
 - 常用配置包括 `DRIVE_SERVICE_NAME`、`DRIVE_TRACING_ENABLED`、`DRIVE_TRACING_SAMPLE_RATIO`、`DRIVE_TRACING_EXPORTER`、`DRIVE_TRACING_OTLP_ENDPOINT`、`DRIVE_TRACING_OTLP_HEADERS`、`DRIVE_TRACING_EXPORT_TIMEOUT_SECONDS`、`DRIVE_METRICS_DATABASE_REFRESH_ENABLED` 和 `DRIVE_METRICS_DATABASE_REFRESH_TIMEOUT_SECONDS`。
 
 ### 备份、校验与隔离恢复
 
-`v0.5.0` 已通过根目录 `deploy/windows/manage.ps1` 提供 `backup`、`backup-verify`、`restore`、`backup-retention` 和 `restore-drill`。备份目录必须是仓库外的绝对专用目录，不得是卷根、仓库目录或仓库祖先；若既有目录非空，则必须已经使用本项目 restricted ACL，脚本不会直接重写任意宽范围目录 ACL。正式备份默认使用当前 Windows 用户证书存储中的 CMS 文档加密证书保护 `.env.windows`。轮换会先验证目录命名、manifest 和 checksum，再按保留天数与最少份数删除；恢复演练使用随机隔离 Compose project，完成后删除 target 容器/卷并写 restricted ACL JSON 记录。两类任务都支持 Windows 周期任务注册/删除。建议创建可导出私钥的专用证书，并把 PFX 单独保存在加密离线介质中：
+`v0.9.0` 通过根目录 `deploy/windows/manage.ps1` 提供 `backup`、`backup-verify`、`restore`、`backup-retention`、`backup-offline-rotate`、`restore-drill` 和 `data-migration-*`。备份目录必须是仓库外的绝对专用目录，不得是卷根、仓库目录或仓库祖先；若既有目录非空，则必须已经使用本项目 restricted ACL，脚本不会直接重写任意宽范围目录 ACL。正式备份默认使用当前 Windows 用户证书存储中的 CMS 文档加密证书保护 `.env.windows`；manifest v2 可另外生成 detached CMS 来源签名，也可把全部数据 payload 加密认证后发布。托管/离线轮换会先验证目录名、manifest、签名和 checksum，再按保留天数与最少份数处理；恢复演练使用随机隔离 Compose project，完成后删除 target 容器/卷并写 restricted ACL JSON 记录。建议为配置加密、manifest 签名和完整包加密使用职责分离的可导出私钥证书，并把 PFX 单独保存在加密离线介质中：
 
 备份、校验和恢复的临时容器统一使用 `--pull never`，默认限制为 `0.50 CPU`、`512m` 内存、无额外 swap 和 `128` 个 PID；卷归档与 `pg_dump` 默认使用压缩等级 `1`，避免 gzip 高压缩长时间占满 CPU。对应变量为 `DRIVE_BACKUP_HELPER_CPU_LIMIT`、`DRIVE_BACKUP_HELPER_MEMORY_LIMIT`、`DRIVE_BACKUP_HELPER_PIDS_LIMIT`、`DRIVE_BACKUP_GZIP_LEVEL` 和 `DRIVE_BACKUP_PG_DUMP_COMPRESSION_LEVEL`。
 
@@ -119,7 +119,7 @@ Copy-Item .env.windows .env.restore.windows
 
 `-RestoreEnvironmentOutput` 只把备份中的 CMS 环境文件解密到仓库和备份目录外的绝对、尚不存在文件路径，不会替换当前 target 的 `-EnvFile`；父目录必须预先存在且不得经过 reparse point。CMS 明文先保存在内存中，只在本次恢复模式的数据、Alembic revision 和镜像门禁全部成功后的最后一步，通过同目录 restricted ACL 临时文件原子发布；未使用 `-NoStartAfterRestore` 时还会先完成全栈健康和实际容器 image ID 对账。若原子发布时目标路径已被其他进程创建，失败清理会保留该 foreign file。备份根目录、staging/正式备份、rollback archive 和最终 CMS 输出会自动关闭 ACL 继承，并只允许当前用户、SYSTEM、Administrators 完全控制。
 
-Windows CMS 只加密 `.env.windows`。PostgreSQL dump、MinIO/Redis/OpenSearch 原始卷 tar 和包含私钥的 TLS 证书卷 tar 仍依赖 BitLocker、restricted NTFS ACL 与加密外部介质。`manifest.sha256` 和工件 SHA-256 只提供完整性校验，不认证备份制作者身份。Redis/OpenSearch 原始卷恢复只支持相同 image reference、相同 image ID、单节点同拓扑；`-ForceRestore` rollback 属于尽力恢复。当前 MinIO Server/Client 仍有 16/9 个 Critical 唯一 ID 基线，正式 `v0.4.0` tag/Release 在受支持修复镜像或可审计补丁镜像完成替换与重扫前保持阻塞。完整操作见 `../docs/deployment-windows-docker.md`，风险登记见 `../docs/minio-security-risk.md`。
+未传入完整包加密证书时，Windows CMS 仍只加密 `.env.windows`，其余 payload 依赖 BitLocker、restricted NTFS ACL 与加密外部介质；传入证书时使用 AES-256-CBC、HMAC-SHA256 和 RSA-OAEP-SHA256 保护完整 payload。`manifest.p7s` 提供来源签名，但证书信任链、吊销和双人保管仍由组织 PKI 流程负责。Redis/OpenSearch 同版本原始卷恢复只支持相同 image reference、相同 image ID、单节点同拓扑；跨版本升级使用 Redis RDB 与 OpenSearch settings/mappings/bulk 可移植导出，导入前保存 rollback export，失败自动回退。当前 MinIO Server/Client 仍有 16/9 个 Critical 唯一 ID 基线，正式 `v0.4.0` tag/Release 在受支持修复镜像或可审计补丁镜像完成替换与重扫前保持阻塞。完整操作见 `../docs/ops-sprint12-backup-portability.md` 和 `../docs/deployment-windows-docker.md`，风险登记见 `../docs/minio-security-risk.md`。
 
 ## 常用验证
 
@@ -140,7 +140,7 @@ uv run pytest tests/test_route_security_matrix.py `
   tests/test_security_adversarial.py -q
 ```
 
-当前运行时 OpenAPI 为 105 个路径、134 个操作、162 个 schemas；路由安全矩阵覆盖匿名、CSRF、管理员、设备会话、增量同步、组织目录、账号安全、OIDC/LDAP、真实跨租户资源和活跃会话撤权。对抗输入覆盖损坏/超大图片、OCR 页数/像素/体量边界、文档路径与扩展名注入、Range 权限、预签名 URL、用户/组织/空间/统计/维护/导出/配额/安全策略管理、不同 token 外链穷举、OIDC 重放/开放重定向、LDAP 冲突/离职、Trusted Host 和 CORS。
+当前运行时 OpenAPI 为 116 个路径、148 个操作、178 个 schemas；路由安全矩阵覆盖匿名、CSRF、管理员、设备会话、增量同步、组织目录、账号安全、OIDC/LDAP、治理策略/权限重算、审计治理、Outbox dead-letter、真实跨租户资源和活跃会话撤权。对抗输入覆盖损坏/超大图片、OCR 页数/像素/体量边界、文档路径与扩展名注入、Range 权限、预签名 URL、用户/组织/空间/统计/维护/导出/配额/安全策略管理、不同 token 外链穷举、OIDC 重放/开放重定向、LDAP 冲突/离职、治理重放、Trusted Host 和 CORS。
 
 真实 Nginx 原始 HTTP 安全 smoke：
 
@@ -216,6 +216,7 @@ CI 先按变更路径决定是否进入后端 job；后端源码、桌面 OpenAP
 - `tenants`、`users`、`auth_sessions` 基础表和 Alembic 初始迁移。
 - `users` 已包含本地密码开关、失败次数、失败时间窗口、临时锁定、锁定原因和密码变更时间；`auth_sessions` 已记录认证方式、OIDC provider、IP、User-Agent 和最近活动时间。
 - `oidc_providers`、`oidc_flows`、`oidc_identity_links`、`ldap_sources`、`ldap_sync_runs`、`ldap_object_bindings`、`ldap_sync_conflicts`、`ldap_membership_relations`、`ldap_membership_claims` 由 `20260804_0024` migration 建立。
+- `audit_archives`、Outbox dead-letter/错误分类字段和 PostgreSQL 月分区 `audit_logs` 由 `20260804_0025` migration 建立；`lifecycle_policies` 与 `permission_rebuild_operations` 由 `20260804_0026` migration 建立。
 - `departments`、`department_members`、`user_groups`、`user_group_members` 组织基础表和迁移。
 - `/api/v1/admin/users` 用户管理：cursor 分页、筛选、详情、创建、更新和停用；临时密码使用 Argon2id 哈希，停用会吊销有效会话，并保护最后一个有效系统管理员。
 - `/api/v1/admin/departments` 部门管理：cursor 分页、筛选、详情、创建、重命名、移动、停用和成员增删；路径变更原子更新完整子树并拒绝环路或停用父部门。
@@ -223,7 +224,9 @@ CI 先按变更路径决定是否进入后端 job；后端源码、桌面 OpenAP
 - 用户、部门和用户组写操作使用实体 `version` 前置条件，全部按租户隔离并写入管理审计；成员或组织状态变化递增租户权限版本并触发租户级权限缓存失效。
 - `/api/v1/admin/spaces` 空间管理：按状态、类型、owner 和关键字筛选，支持 cursor 分页、详情、原子创建 owner/root/member/quota、乐观更新和停用；主 owner 变更同步更新根节点 owner 和权限版本事件。
 - `/api/v1/admin/stats/overview` 管理概览：按租户返回用户、空间、节点、版本、空间配额、分享、上传和 Outbox 统计口径。
-- `/api/v1/admin/maintenance` 管理维护任务：查询九个任务的连续失败/stale 状态，创建租户范围异步运行并持久化任务状态。
+- `/api/v1/admin/maintenance` 管理维护任务：查询十二个周期任务的连续失败/stale 状态，创建租户范围异步运行并持久化任务状态。
+- `/api/v1/admin/governance` Sprint 12 治理：治理摘要、生命周期策略/运行、大目录任务和权限重算创建/列表/详情/重试。
+- `/api/v1/admin/audit/governance` 与 `/api/v1/admin/outbox/dead-letters`：审计分区/归档/投递摘要、dead-letter 列表/详情和幂等重放；payload 只返回 key 列表。
 - `/api/v1/admin/exports` 异步 CSV 导出：支持审计、空间和用户筛选，输出到私有 `exports/{tenant_id}/{job_id}/`，提供短期预签名下载、CSV formula 防护、最大行数显式失败和保留期清理。
 - 本地账号登录、BFF + HttpOnly Cookie Session、CSRF 校验和会话轮换。
 - 登录失败按 Redis IP/账号窗口和 PostgreSQL 用户状态双层治理，支持阶梯延迟、可插拔验证码、持久临时锁定、`423 ACCOUNT_LOCKED`、`Retry-After` 和管理员解锁。
@@ -383,7 +386,21 @@ CI 先按变更路径决定是否进入后端 job；后端源码、桌面 OpenAP
 - `GET /api/v1/files/{node_id}/preview`
 - `GET /api/v1/search?q=...&limit=...&cursor=...`
 
-当前空间和文件树接口已使用 `PermissionService` 的空间级成员角色和节点 ACL 检查：空间列表按 `space_members` 成员关系返回；成员管理需要 `manage`/`grant`，文件列表需要 `list`，创建文件夹和上传需要 `upload`，重命名和移动需要 `update`，删除和彻底删除需要 `delete`，恢复需要 `restore`。节点 ACL 创建请求使用 `subject_type` 和 `subject_id`，`subject_type` 支持 `user`、`department`、`group`；权限判断会通过 org 模块展开当前用户所属活跃部门和用户组，ACL 显式 deny 仍优先于 allow 和空间角色。文件列表会复用已校验的父路径，为当前页子节点批量评估 `list`、`read_meta`、`preview`、`download`、`upload`、`update`、`delete`、`restore`、`share`、`grant`、`manage` 常用动作，并在每个节点的 `permissions` 字段返回结果；高危操作仍在对应接口二次调用权限引擎确认。成员变更会递增 `spaces.permission_version` 并写入 `permission.space_member.*` 审计事件；节点 ACL 变更会递增 `nodes.permission_version` 并写入 `permission.node_acl.*` 审计事件；两类权限变更都会写入 `permission.changed` outbox event，payload 包含 scope、resource_id、permission_version、reason、主体信息和必要时的 affected_user_id。`permission.invalidate_cache` 会消费该事件并删除匹配的 Redis 权限缓存 key；部门/用户组 ACL 变更当前保守失效租户内节点权限缓存。缓存只用于加速，不作为权限事实来源。权限变更还会写入独立的 `search.acl_rebuild_requested` outbox event，由 `search.dispatch_outbox` 按 space 或 node 子树保守重建 OpenSearch 索引 token；文件重命名、移动、删除、恢复和彻底删除会写入 `search.index_requested`，由搜索 worker 重新加载 PostgreSQL 事实后更新或删除文件索引。上传完成会写入 `search.extract_requested`，搜索 worker 对 MIME 或扩展名判定为文本类、PDF、DOCX、PPTX 或 XLSX 的小文件读取对象内容，UTF-8 文本直接解码，PDF 使用 `pypdf` 抽取可复制正文，DOCX 使用 `python-docx` 抽取段落和表格文本，PPTX 使用 `python-pptx` 抽取文本框和表格文本，XLSX 使用 `openpyxl` 抽取单元格文本，更新 `file_versions.search_status/search_error/search_text`，并刷新索引 `content` 字段；不支持的格式、OOXML zip 归档超限或抽取后正文超限标记为 `skipped`，解码或解析失败标记为 `failed` 但不重试，存储读取失败标记为 `failed` 并由 outbox 退避重试。搜索查询接口会先根据当前用户的空间成员角色、用户主体、部门主体和用户组主体构建查询 token，并在 OpenSearch 查询层同时加入租户、未删除、`acl_tokens` allow 和 `deny_acl_tokens` 排除过滤；分页使用绑定查询词和排序值的签名 cursor，响应返回 `next_cursor`；命中文件返回 HTML 编码的 `<mark>` 高亮片段。返回前再按 PostgreSQL 节点路径调用 `PermissionService.can_access_node(..., action=read_meta)` 二次校验，避免 ACL 变更后索引尚未刷新时泄露文件名和元数据。搜索查询已接入 `search.query` 基础限流，按 `tenant + user + search + IP` 维度计数；触发限流时返回 HTTP 429 和 `RATE_LIMITED`。
+当前空间和文件树接口已使用 `PermissionService` 的空间级成员角色和节点 ACL 检查：空间列表按 `space_members` 成员关系返回；成员管理需要 `manage`/`grant`，文件列表需要 `list`，创建文件夹和上传需要 `upload`，重命名和移动需要 `update`，删除和彻底删除需要 `delete`，恢复需要 `restore`。节点 ACL 创建请求使用 `subject_type` 和 `subject_id`，`subject_type` 支持 `user`、`department`、`group`；权限判断会通过 org 模块展开当前用户所属活跃部门和用户组，ACL 显式 deny 仍优先于 allow 和空间角色。文件列表会复用已校验的父路径，为当前页子节点批量评估 `list`、`read_meta`、`preview`、`download`、`upload`、`update`、`delete`、`restore`、`share`、`grant`、`manage` 常用动作，并在每个节点的 `permissions` 字段返回结果；高危操作仍在对应接口二次调用权限引擎确认。成员变更会递增 `spaces.permission_version` 并写入 `permission.space_member.*` 审计事件；节点 ACL 变更会递增 `nodes.permission_version` 并写入 `permission.node_acl.*` 审计事件；两类权限变更都会写入 `permission.changed` outbox event，payload 包含 scope、resource_id、permission_version、reason、主体信息和必要时的 affected_user_id。`permission.invalidate_cache` 会消费该事件并删除匹配的 Redis 权限缓存 key；部门/用户组 ACL 变更当前保守失效租户内节点权限缓存。缓存只用于加速，不作为权限事实来源。权限变更还会写入独立的 `search.acl_rebuild_requested` outbox event，由搜索 Outbox 消费者创建 space 或 node 范围的持久权限重算任务；文件重命名、移动、删除、恢复和彻底删除会写入 `search.index_requested`，由搜索 worker 重新加载 PostgreSQL 事实后更新或删除文件索引。上传完成会写入 `search.extract_requested`，搜索 worker 对 MIME 或扩展名判定为文本类、PDF、DOCX、PPTX 或 XLSX 的小文件读取对象内容，UTF-8 文本直接解码，PDF 使用 `pypdf` 抽取可复制正文，DOCX 使用 `python-docx` 抽取段落和表格文本，PPTX 使用 `python-pptx` 抽取文本框和表格文本，XLSX 使用 `openpyxl` 抽取单元格文本，更新 `file_versions.search_status/search_error/search_text`，并刷新索引 `content` 字段；不支持的格式、OOXML zip 归档超限或抽取后正文超限标记为 `skipped`，解码或解析失败标记为 `failed` 但不重试，存储读取失败标记为 `failed` 并由 outbox 退避重试。搜索查询接口会先根据当前用户的空间成员角色、用户主体、部门主体和用户组主体构建查询 token，并在 OpenSearch 查询层同时加入租户、未删除、`acl_tokens` allow 和 `deny_acl_tokens` 排除过滤；分页使用绑定查询词和排序值的签名 cursor，响应返回 `next_cursor`；命中文件返回 HTML 编码的 `<mark>` 高亮片段。返回前再按 PostgreSQL 节点路径调用 `PermissionService.can_access_node(..., action=read_meta)` 二次校验，避免 ACL 变更后索引尚未刷新时泄露文件名和元数据。搜索查询已接入 `search.query` 基础限流，按 `tenant + user + search + IP` 维度计数；触发限流时返回 HTTP 429 和 `RATE_LIMITED`。
+
+Sprint 12 将 `search.acl_rebuild_requested` 改为创建持久化 `permission_rebuild_operations`，不再在 Outbox 消费事务中一次性加载整个子树。`governance.process_permission_rebuilds` 从 PostgreSQL 领取任务，使用 `snapshot_at + created_at + node_id` 稳定 cursor 分批 upsert OpenSearch；运行时收到更高 `permission_version` 会设置 `restart_requested` 并从新快照重算。管理员入口包括：
+
+- `GET /api/v1/admin/governance/overview`
+- `GET/PATCH /api/v1/admin/governance/lifecycle-policy`
+- `POST/GET /api/v1/admin/governance/lifecycle-runs`
+- `POST/GET /api/v1/admin/governance/permission-rebuilds`
+- `GET /api/v1/admin/governance/permission-rebuilds/{operation_id}`
+- `POST /api/v1/admin/governance/permission-rebuilds/{operation_id}/retry`
+- `GET /api/v1/admin/governance/tree-operations`
+- `GET /api/v1/admin/audit/governance`
+- `GET /api/v1/admin/outbox/dead-letters`
+- `GET /api/v1/admin/outbox/dead-letters/{event_id}`
+- `POST /api/v1/admin/outbox/dead-letters/{event_id}/replay`
 
 文件夹名称会进行 Unicode NFC 归一化并去除首尾空白，禁止 `/`、`\`、NUL、控制字符和路径穿越片段。同一目录下未删除节点的名称由数据库唯一索引兜底，根目录由 `tenant_id + space_id` 唯一索引兜底。
 
@@ -490,18 +507,22 @@ CI 先按变更路径决定是否进入后端 job；后端源码、桌面 OpenAP
 
 维护任务可通过 Celery 任务调用：
 
+- `audit.ensure_partitions(months_ahead=None)`
+- `audit.archive_retention(tenant_id=None, retention_days=None, max_rows=None, delete_source=None)`
 - `quota.reconcile_space_usage(tenant_id=None, limit=100, repair=False, request_id=None, scan_all=True, max_items=1000)`
 - `upload.expire_sessions(tenant_id=None, limit=100, request_id=None)`
 - `file.cleanup_expired_trash(tenant_id=None, limit=100, retention_days=None, request_id=None)`
 - `file.cleanup_unreferenced_blobs(tenant_id=None, limit=100, request_id=None)`
 - `file.cleanup_orphaned_objects(tenant_id=None, limit=100, after_storage_key=None, dry_run=True, request_id=None, scan_all=True)`
 - `file.process_tree_operations(limit=100, tenant_id=None)`
+- `governance.process_permission_rebuilds(limit=100, tenant_id=None)`
+- `governance.run_lifecycle_policy(job_id)`
 - `share.expire_shares(tenant_id=None, limit=100, request_id=None)`
 - `preview.cleanup_artifacts(tenant_id=None, limit=100, retention_days=None, dry_run=False, request_id=None, scan_all=True)`
 - `admin.cleanup_expired_exports(limit=100, tenant_id=None)`
 - `permission.invalidate_cache(batch_size=None)`
 
-当前九个周期维护任务接入统一健康状态。Celery signal 在任务结束后把连续失败次数和最近成功/失败时间原子写入 Redis，达到阈值时输出结构化告警日志；maintenance Worker 的 `9100/metrics` 暴露连续失败、告警状态、stale、最近完成时间和任务返回计数。Redis 状态写入失败不会改变任务原结果。配置项包括：
+当前十二个周期维护任务接入统一健康状态；显式生命周期运行由 `admin_jobs` 记录状态。Celery signal 在任务结束后把连续失败次数和最近成功/失败时间原子写入 Redis，达到阈值时输出结构化告警日志；maintenance Worker 的 `9100/metrics` 暴露连续失败、告警状态、stale、最近完成时间和任务返回计数。Redis 状态写入失败不会改变任务原结果。配置项包括：
 
 - `DRIVE_MAINTENANCE_ALERT_CONSECUTIVE_FAILURES`
 - `DRIVE_MAINTENANCE_ALERT_STALE_INTERVALS`

@@ -176,11 +176,11 @@
 
 已知限制：
 
-- 当前没有 jitter、分级错误分类、dead-letter 队列管理界面或指标告警。
+- 2026-07-01 审计时没有 jitter、分级错误分类、dead-letter 管理界面或指标告警；该限制已在 Sprint 12 / `0.9.0` 关闭：Outbox 现支持 transient/permanent 分类、带 jitter 的有界退避、processing 超时恢复、dead-letter 查询/详情/幂等重放和最老积压告警。
 
 替换触发条件：
 
-- 如果后续 outbox 需要多目标投递、按错误类型退避、统一重试策略复用、dead-letter 重放或延迟任务治理，应评估 `tenacity` 或更完整的任务/事件投递组件。
+- 当前集中实现继续适用于单 PostgreSQL Outbox 与少量受控 publisher；如果未来扩展为高吞吐多目标投递、跨服务顺序保证或复杂延迟调度，再评估 `tenacity`、专用消息系统或更完整的事件投递组件。
 
 ### 5. 文件树遍历辅助函数
 

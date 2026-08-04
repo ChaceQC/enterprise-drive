@@ -1,6 +1,6 @@
 # PROJECT_PLAN.md
 
-本文件是《企业网盘开发者技术计划书.md》的执行版摘要。完整架构、数据模型、接口契约、安全策略和里程碑以技术计划书为准。当前代码基线为 Sprint 11 / `0.8.0`，已完成后端主链路、Rust 桌面端、Web 用户端与管理后台、账号安全、OIDC 和 LDAP；下一产品阶段进入 Sprint 12 规模化治理。
+本文件是《企业网盘开发者技术计划书.md》的执行版摘要。完整架构、数据模型、接口契约、安全策略和里程碑以技术计划书为准。当前代码基线为 Sprint 12 / `0.9.0`：后端主链路、Rust 桌面端、Web 用户端与管理后台、身份安全，以及规模化治理能力均已完成代码侧收口；当前只完成本轮新增和直接受影响门禁，待统一提交、推送并确认远端 CI 后进入 Sprint 13 稳定版发布。
 
 ## 1. 项目目标
 
@@ -108,7 +108,7 @@
 - Windows 11 Docker Desktop 正式部署：多阶段 Dockerfile、根 `compose.windows.yml`、Compose 内 Nginx gateway、根 `.env.windows.example` 和 `deploy/windows/manage.ps1`。（已完成本机 HTTP、公网 ACME/TLS、续期、`tls-validate-public` 验收入口、可选 monitoring profile、`backup`/`backup-verify`/`restore`、备份轮换和周期恢复演练自动化；真实 DNS/受信证书记录待生产环境执行）
 - API、migration、seed、MinIO 初始化、按队列隔离的 Worker、Celery beat、PostgreSQL、Redis、MinIO、OpenSearch 的完整编排；只有 gateway 发布宿主端口，默认 HTTP `18080/19000`，公网模式由 gateway 发布 `80/443` 并按 API/存储域名 Host 分流。（已完成）
 - S3 容器内端点和浏览器外部端点分离；默认本机 API 为 `http://localhost:18080`、S3 外部端点为 `http://localhost:19000`，均由 gateway 发布；生产支持 API/存储独立域名的 Host 分流并保留原始 Host。（已完成）
-- named volumes、真实 `/readyz` PostgreSQL 探针、Preview Worker 资源限制、定时维护任务和数据库连接池边界。（已完成）`v0.4.0` 阶段的代码侧已交付 PostgreSQL custom dump、MinIO/Redis/OpenSearch/TLS 停止状态卷归档、CMS 环境文件保护、当时 15 个默认服务实际容器 image ID 与精确 Compose/Git/版本/configuration lineage 门禁、project/逐物理卷 mutex、restricted ACL、隔离 tar 预扫描、`-ForceRestore` rollback archive、失败恢复、备份保留轮换、Windows 周期任务和随机隔离恢复演练；Sprint 10 加入 `web` 后当前门禁已同步为 16 个默认服务，离线介质、来源签名和完整包加密继续后续治理。
+- named volumes、真实 `/readyz` PostgreSQL 探针、Preview Worker 资源限制、定时维护任务和数据库连接池边界。（已完成）`v0.4.0` 阶段的代码侧已交付 PostgreSQL custom dump、MinIO/Redis/OpenSearch/TLS 停止状态卷归档、CMS 环境文件保护、当时 15 个默认服务实际容器 image ID 与精确 Compose/Git/版本/configuration lineage 门禁、project/逐物理卷 mutex、restricted ACL、隔离 tar 预扫描、`-ForceRestore` rollback archive、失败恢复、备份保留轮换、Windows 周期任务和随机隔离恢复演练；Sprint 10 加入 `web` 后门禁同步为 16 个默认服务，Sprint 12 又补齐离线副本、detached CMS 来源签名、完整包保护和 Redis/OpenSearch 可移植迁移。
 - Kubernetes、systemd 降为未来可选迁移方案，不作为当前交付目标。
 
 ### Sprint 7：Rust 桌面客户端基础（目标版本 `0.5.0`）
@@ -164,13 +164,15 @@
 
 ### Sprint 12：规模化治理与内容能力（目标版本 `0.9.0`）
 
-- 大目录删除、恢复和彻底删除已迁移到可恢复后台批处理并引入 `deleted_root_id`；大目录权限重算、管理页面和 closure table 规模触发条件继续后续治理。
-- 生命周期覆盖过期分享、预览产物、回收站保留期、临时上传、无引用 blob 和孤儿对象，具备 dry-run、审计、指标、告警和失败重试。
-- 搜索增加图片 OCR、扫描 PDF 和复杂格式抽取适配，限制页数、像素、CPU、内存、临时磁盘和正文体量。
-- 审计增加月分区自动创建、保留与归档、外部日志投递、导出签名；Outbox 增加错误分类、jitter、dead-letter 查询与重放。
-- 备份增加来源签名、可选完整包加密、离线副本轮换、周期隔离恢复记录，以及 Redis/OpenSearch 跨版本快照或迁移流程。
-- 管理后台补齐大目录任务进度、生命周期策略/运行记录、审计归档与外部投递状态、Outbox dead-letter 查询/重放和治理告警页面。
-- 完成真实 PostgreSQL、Redis、MinIO、OpenSearch 的集成矩阵、性能基准、故障注入和治理看板验收。
+- `BE-046` 已完成：删除、恢复和彻底删除继续复用既有可恢复后台批处理；新增持久化权限重算任务，使用固定批次、稳定游标、租户隔离和幂等 OpenSearch upsert。运行期间出现更高 `permission_version` 时记录重启请求并从新快照继续，失败任务可查询和重试；本阶段不引入 closure table。
+- `BE-047` 已完成：租户生命周期策略统一回收站和预览保留期，并控制临时上传、过期分享、无引用 blob 和孤儿对象治理；策略更新使用乐观版本，dry-run 与正式执行都持久化到治理运行记录。legal hold、高级内容分类和复杂 DLP 继续归远期 `GOV-001`。
+- `BE-048` 已在 Sprint 5 提前完成：图片 OCR、扫描 PDF、旧 Office/ODF 抽取及页数、像素、CPU、内存、临时磁盘和正文体量边界保持现有门禁，本轮不重复实现或重跑无关历史集合。
+- `BE-049` 已完成：`audit_logs` 月分区、未来分区维护、保留期归档、可选源数据删除、HMAC 签名归档和带 HMAC 的外部 HTTP 投递；归档状态、签名 key ID 和外部投递失败可由管理员治理接口查看。
+- `BE-050` 已完成：Outbox 增加 transient/permanent 错误分类、指数退避 jitter、处理超时恢复、最老积压指标、dead-letter 列表/详情和幂等重放；管理响应只返回 payload key 列表，不回显完整敏感 payload。
+- `FE-012` 已完成：`/admin/governance` 覆盖大目录任务、权限重算、生命周期策略与运行、审计归档/投递、dead-letter 查询/重放和治理告警，并通过生成式 OpenAPI client 调用服务端。
+- `OPS-001` 至 `OPS-003` 已完成：备份 manifest v2 支持 detached CMS 来源签名、AES-256-CBC + HMAC-SHA256 + RSA-OAEP-SHA256 完整包保护、离线副本原子复制/盘点/轮换，以及 Redis RDB 与 OpenSearch settings/mappings/bulk 的可移植导出、跨 major 门禁、自动回退和 JSON 记录。
+- `QA-001`/`QA-002` 已接入：后端 CI 在同一次 pytest 中运行 PostgreSQL、Redis、MinIO、OpenSearch 四依赖健康、逐项故障探测与恢复矩阵并上传报告；OpenAPI 归档、TypeScript client、route matrix 和 breaking-change 门禁继续保持。既有 `BE-029` 目标规模性能证据复用，不重复执行无关性能 target。
+- Grafana 新增 `enterprise-drive-governance` 看板，Prometheus 新增权限重算、生命周期失败和 Outbox 最老积压告警。当前本地已完成治理后端 4 项、前端 lint/typecheck 与 Chromium 聚焦 E2E、版本一致性、PowerShell parser/专项 smoke 等直接门禁；统一迁移、契约和远端 CI 由本轮集成收口。
 
 ### Sprint 13：稳定版发布（目标版本 `1.0.0`）
 
@@ -193,6 +195,8 @@
 - `BILL-001`：多租户计费。
 
 ## 5. 当前下一步
+
+2026-08-04 Sprint 12 的代码与文档已进入提交收口：`BE-046` 至 `BE-050`、`FE-012`、`OPS-001` 至 `OPS-003`、`QA-001` 至 `QA-002` 已落地，项目版本统一为 `0.9.0`，migration head 更新为 `20260804_0026`，当前 OpenAPI 归档为 116 个路径、148 个操作、178 个 schemas。已确认治理后端 `4 passed`、审计/Outbox 定向用例、前端 lint/typecheck 与 Chromium 治理 E2E `1 passed`、版本一致性 `1 passed`、空库升级与 `0026 -> 0024 -> 0026` 往返、四依赖故障恢复、OPS 双 project Redis/OpenSearch 迁移/回退、监控规则/看板、OpenAPI/client、route matrix、Compose、actionlint 和 CI scope；没有重复运行 Sprint 10 浏览器全集、既有 MinIO 全集、性能 target 或桌面历史集合。当前下一步是统一提交并推送 `dev`，再以本次提交触发的远端 CI 全绿作为 Sprint 12 最终证据。
 
 2026-08-04 Sprint 11 的 `BE-040` 至 `BE-043`、`FE-010` 至 `FE-011` 已完成代码侧交付：项目版本统一为 `0.8.0`，新增账号锁定/解锁、密码策略与全会话治理、OIDC/OAuth 2.1 + PKCE、LDAP 只读目录同步和对应 Web 身份页面；migration head 为 `20260804_0024`。运行时 OpenAPI 归档、生成 client 与 route matrix 已精确对账为 105 个路径、134 个操作、162 个 schemas，本地相关门禁均已通过。最终提交 `e6b4f6d` 已推送，`backend-ci` run `30922718148` 成功；Sprint 11 远端门禁完成，下一步进入 Sprint 12，不重复执行未受影响的 Sprint 10、MinIO、备份恢复、性能和桌面历史集合。
 

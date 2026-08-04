@@ -156,11 +156,12 @@ router -> service -> domain/policy -> repository -> db/infrastructure
 - `space`：空间、空间成员、空间角色、空间配额。
 - `file`：node、file_blob、file_version、文件夹、移动、重命名、回收站、版本列表/下载/回滚、批量操作。
 - `upload`：upload_session、upload_part、秒传、分片上传、断点续传、幂等 complete、abort。
-- `permission`：ACL、空间角色、继承、拒绝优先、权限缓存、批量权限评估。
+- `permission`：ACL、空间角色、继承、拒绝优先、权限缓存、批量权限评估和权限版本事件。
 - `share`：内部分享、外链分享、分享给我的、接收人访问、通知、提取码、过期、次数限制、撤销。
 - `preview`：预览任务、转码适配、派生物写入、最后访问时间和产物生命周期。
 - `search`：索引构建、权限过滤、索引重建、删除同步、OCR 和复杂格式抽取。
-- `audit`：audit_log、outbox、dispatcher、失败重试。
+- `audit`：月分区 audit_log、保留归档、签名、外部投递、outbox、错误分类、jitter、dead-letter 和幂等重放。
+- `governance`：大目录任务视图、权限重算、生命周期策略/运行、稳定 cursor、失败恢复和治理摘要。
 - `quota`：quota_account、quota_ledger、并发扣减、回滚、校准任务。
 - `admin`：用户、组织、空间、配额、身份源、审计、统计、维护、分页、筛选、导出。
 - `frontend`：登录、文件、批量操作、上传、搜索、预览、回收站、版本、分享、通知、账号安全、身份源、生命周期治理和管理后台页面，OpenAPI client、E2E、构建与 gateway 发布。
@@ -257,6 +258,7 @@ uv run mypy app
 - 下载、删除、分享、授权、管理等高危动作必须单独调用权限引擎确认。
 - 权限缓存 key 必须包含租户、用户、节点、动作和权限版本，权限变更后必须失效。
 - Redis 权限缓存只是加速，不是事实来源。
+- 大目录 ACL token 重算必须持久化 operation、快照权限版本、稳定 cursor 和进度；任务中断可恢复，运行期间出现更高权限版本时必须从新快照重启，不得在 Outbox 消费事务中同步遍历整个子树。
 - 按 ID 查询文件的接口应统一返回“文件不存在或无权访问”，不要区分 404 和 403 泄露存在性。
 - 搜索结果必须二次权限校验，尤其是权限刚变更但索引未更新时。
 - 外链访问不能复用内部用户权限逻辑，必须使用 external subject。
@@ -268,11 +270,14 @@ uv run mypy app
 - 审计日志不得输出密码、Token、Cookie、数据库连接串、对象存储签名 URL、提取码明文和密钥。
 - 业务事务内必须插入 outbox event，再由 dispatcher 投递到 Celery、日志平台或搜索任务。
 - 不能出现“数据库写成功但消息没发出去”导致搜索、预览、审计永远缺失的情况。
+- `audit_logs` 使用 PostgreSQL 月分区；维护任务必须提前创建未来分区。保留期删除前必须先完成可校验归档，归档失败不得删除源记录。
+- 审计外部 HTTP 投递和归档签名密钥只能来自环境/受控 secret，不得写入数据库、日志或管理响应；管理 API 只返回签名 key ID、状态和受控摘要。
 - Celery 队列按职责拆分：`audit`、`permission`、`preview`、`search`、`maintenance`。
 - 任务参数只传 ID，不传大对象内容。
 - 任务执行前必须从数据库重新加载最新状态。
 - 任务必须幂等，重复执行不会产生重复副作用。
-- 失败使用指数退避，超过最大重试进入 dead-letter 状态。
+- 失败按 transient/permanent 分类；transient 使用带 jitter 的有界指数退避，permanent 或超过最大重试进入 dead-letter。processing 超时必须可恢复，重放必须幂等。
+- dead-letter 列表/详情不得回显完整 payload 或 secret，只允许返回 payload key 列表和受控错误分类；重放入口必须执行系统管理员、租户、CSRF 和审计门禁。
 - 任务日志必须包含 task_id、tenant_id、resource_id、request_id。
 - API 与 Worker 的 JSON 日志必须自动补齐 `service`、`env`、`request_id`、`task_id`、`trace_id` 和 `span_id`；业务日志按上下文继续补 `tenant_id`、`user_id`、`action`、`resource_type`、`resource_id`、`status` 和 `latency_ms`，不得记录 Cookie、Token、预签名 URL、连接串或密钥。
 - Prometheus HTTP 标签必须使用路由模板，不得使用原始 URL、文件名、对象 key、用户 ID、租户 ID、request_id、task_id、token 或其他无界值；业务 `reason`、`action`、`status` 标签只能来自固定枚举。
@@ -448,18 +453,19 @@ Windows Docker Compose 要求：
 - API 使用可配置的 SQLAlchemy QueuePool；Celery Worker 因同步任务入口会通过 `asyncio.run()` 建立独立事件循环，必须在 Compose 中使用 `DRIVE_DATABASE_POOL_MODE=null`，禁止跨任务事件循环复用 asyncpg 连接池。
 - S3 必须区分容器内访问端点和浏览器可访问的外部端点：内部端点用于 API/Worker 访问 `http://minio:9000`；默认外部端点为 gateway 提供的 `http://localhost:19000`，公网 TLS 模式使用 `https://storage.example.com` 等独立 Host。外部端点不得使用 `/s3` 等 base path，也不能把内部服务名返回给浏览器；公网模式的 `MINIO_CORS_ALLOWED_ORIGIN` 必须与 `DRIVE_CORS_ORIGINS` 精确一致且只包含 HTTPS origin，禁止通配符和遗留 origin。
 - PostgreSQL、Redis、MinIO 和 OpenSearch 使用 named volumes；备份输出使用明确的 Windows 宿主目录或专用备份卷。Celery beat 当前把可重建 schedule 文件放在容器临时目录，不能把它当作任务事实来源。
-- `deploy/windows/manage.ps1` 是宿主机管理入口，提供 `config`、`up`、`down`、`status`、`logs`、`backup`、`backup-verify`、`restore`、备份轮换/计划任务、隔离恢复演练/计划任务、`tls-init`、`tls-renew`、`tls-certificates`、TLS 续期计划任务和 `tls-validate-public`；生命周期命令可用 `-Monitoring` 启用监控 profile。构建使用 `up -Build`，公网操作使用 `-Tls`，删除卷必须显式使用 `down -Volumes`，并同步删除 TLS 续期、备份轮换和恢复演练计划任务。`tls-init` 必须保留已有 gateway 容器，用同一 service 的临时 one-off bootstrap 容器完成签发；签发失败时恢复原 gateway，不得把已有公网入口停在 bootstrap 或 stopped 状态。`tls-renew` 和计划任务注册必须确认 `DRIVE_TLS_CERT_NAME` 对应的 Certbot renewal lineage 存在，手工挂载或自签名证书不得伪装成可自动续期证书。`tls-validate-public` 必须拒绝非公网 DNS 结果，验证 HTTP `308`、HTTPS readiness、系统信任链和证书剩余天数，并保存记录。
-- `backup` 的输出根目录必须是仓库外的绝对专用目录，不得是卷根、仓库目录或仓库祖先；既有非空目录必须已经使用本项目 restricted ACL，脚本不得直接重写任意宽范围目录 ACL。正式备份默认要求 `Cert:\CurrentUser\My` 中的 Windows CMS 文档加密证书。脚本从 Compose JSON 读取真实 project、network、service image 和 physical volume name，记录 15 个无 profile 默认服务的实际容器 image ID，静默 gateway、API、beat、Worker 及相关依赖写入面，使用 PostgreSQL custom-format `pg_dump`，并归档停止状态的 MinIO、Redis、OpenSearch 和 TLS 证书卷；失败后必须恢复 source project 原运行、退出与健康状态，通过校验的 `.partial-*` staging 才能原子发布为正式备份目录。
+- `deploy/windows/manage.ps1` 是宿主机管理入口，提供 `config`、`up`、`down`、`status`、`logs`、`backup`、`backup-verify`、`restore`、备份轮换/离线副本、隔离恢复演练、Redis/OpenSearch 可移植迁移、对应计划任务、`tls-init`、`tls-renew`、`tls-certificates`、TLS 续期计划任务和 `tls-validate-public`；生命周期命令可用 `-Monitoring` 启用监控 profile。构建使用 `up -Build`，公网操作使用 `-Tls`，删除卷必须显式使用 `down -Volumes`，并同步删除 TLS 续期、备份轮换和恢复演练计划任务。`tls-init` 必须保留已有 gateway 容器，用同一 service 的临时 one-off bootstrap 容器完成签发；签发失败时恢复原 gateway，不得把已有公网入口停在 bootstrap 或 stopped 状态。`tls-renew` 和计划任务注册必须确认 `DRIVE_TLS_CERT_NAME` 对应的 Certbot renewal lineage 存在，手工挂载或自签名证书不得伪装成可自动续期证书。`tls-validate-public` 必须拒绝非公网 DNS 结果，验证 HTTP `308`、HTTPS readiness、系统信任链和证书剩余天数，并保存记录。
+- `backup` 的输出根目录必须是仓库外的绝对专用目录，不得是卷根、仓库目录或仓库祖先；既有非空目录必须已经使用本项目 restricted ACL，脚本不得直接重写任意宽范围目录 ACL。正式备份默认要求 `Cert:\CurrentUser\My` 中的 Windows CMS 文档加密证书。脚本从 Compose JSON 读取真实 project、network、service image 和 physical volume name，记录 16 个无 profile 默认服务的实际容器 image ID，静默 gateway、API、beat、Worker 及相关依赖写入面，使用 PostgreSQL custom-format `pg_dump`，并归档停止状态的 MinIO、Redis、OpenSearch 和 TLS 证书卷；失败后必须恢复 source project 原运行、退出与健康状态，通过校验的 `.partial-*` staging 才能原子发布为正式备份目录。
 - `backup` 和 `restore` 必须持有与 `up`、`down`、TLS 写操作相同的 project 级 Windows named mutex，并按每个 source/target physical volume name 获取独立 mutex，避免不同 Compose project 通过同一物理卷并发维护。备份根目录、staging/正式备份、`-ForceRestore` rollback archive 和恢复后的 CMS 明文文件必须自动应用受保护的 restricted ACL，只允许当前用户、SYSTEM 和 Administrators 完全控制，并关闭继承。
-- `backup-verify` 必须校验 `manifest.sha256`、全部工件大小和 SHA-256、PostgreSQL dump 列表、路径边界、15 个默认服务的 image reference/实际 image ID，以及当前 `compose.windows.yml` 的精确 SHA-256、Git commit、项目版本、S3 bucket、OpenSearch index 和 `DRIVE_TLS_CERT_NAME` lineage 名称。卷 tar 在用于恢复前必须先放入无网络、只读根文件系统、只读备份挂载、drop all capabilities 和 `no-new-privileges` 的临时容器/临时卷中预解包扫描，拒绝绝对路径、父目录穿越、硬链接、特殊文件、悬空链接和指向临时卷外的符号链接。
+- `backup-verify` 必须校验 `manifest.sha256`、全部工件大小和 SHA-256、PostgreSQL dump 列表、路径边界、16 个默认服务的 image reference/实际 image ID，以及当前 `compose.windows.yml` 的精确 SHA-256、Git commit、项目版本、S3 bucket、OpenSearch index 和 `DRIVE_TLS_CERT_NAME` lineage 名称。manifest v2 带 `manifest.p7s` 时还必须校验 detached CMS 签名、预期 thumbprint 和 manifest 签名元数据。卷 tar 在用于恢复前必须先放入无网络、只读根文件系统、只读备份挂载、drop all capabilities 和 `no-new-privileges` 的临时容器/临时卷中预解包扫描，拒绝绝对路径、父目录穿越、硬链接、特殊文件、悬空链接和指向临时卷外的符号链接。
 - `restore` 必须使用与 source 不同的 Compose project，并拒绝运行中的 target、source/target physical volume 重叠、错误卷标签和 foreign container attachment；默认还要拒绝已有容器和非空目标卷。`-ForceRestore` 只允许清理已停止的目标容器或非空卷，不得绕过同 project、运行状态、路径、校验和镜像门禁；清空任何原非空卷前必须先创建 restricted rollback archive，恢复失败时还原原非空卷、清空原空卷、删除本轮新卷并停止 target 服务，回滚异常时保留并报告 rollback archive 路径。恢复一旦提交，后续 rollback archive 清理失败只能报告维护错误并保留归档，不得反向清空或回滚已经恢复的数据。`-NoStartAfterRestore` 用于恢复后保持服务停止。
 - `-RestoreEnvironmentOutput` 必须是仓库和备份目录外的绝对、尚不存在文件路径，父目录必须预先存在且不得经过 reparse point；CMS 明文只能保存在内存中，并在本次恢复模式的数据、Alembic revision 和镜像门禁全部成功后，通过同目录受限 ACL 临时文件原子发布。未使用 `-NoStartAfterRestore` 时还必须先通过完整服务健康与实际容器 image ID 对账；发布竞态中若目标路径被其他进程创建，脚本必须保留该 foreign file，不得在失败清理中删除。
-- Windows CMS 只加密 `.env.windows`。PostgreSQL dump、MinIO/Redis/OpenSearch 原始卷归档和包含私钥的 TLS 证书卷归档依赖 BitLocker、自动 restricted NTFS ACL 和加密外部介质，不属于完整包级应用层加密；CMS 私钥必须单独导出并保存在受保护介质中。
-- `manifest.sha256` 和各工件 SHA-256 只用于完整性校验，不认证备份制作者身份；来源认证必须通过受保护签名、受控传输和保管链完成。
-- Redis/OpenSearch 使用停止后的原始卷归档，恢复只支持相同 image reference、相同 image ID、单节点同拓扑；跨版本或拓扑变化必须改用对应产品支持的迁移或快照机制。
+- 未启用完整包保护时，Windows CMS 只加密 `.env.windows`，其他归档继续依赖 BitLocker、restricted NTFS ACL 和加密介质；启用时必须使用经过验证的 AES-256-CBC + HMAC-SHA256 + RSA-OAEP-SHA256 envelope，解密后仍逐工件校验 size/SHA-256 和 tar/dump 安全边界。
+- `manifest.sha256` 和各工件 SHA-256 只用于完整性校验；来源认证使用 detached CMS `manifest.p7s`、预期 thumbprint、受控传输和保管链。签名/加密证书的信任、吊销、轮换、双人保管和离线私钥副本必须由组织 PKI 流程负责。
+- 离线副本必须原子发布，复制前后逐文件对账并记录 canonical inventory digest；操作系统不能证明介质已物理下线，完成后仍需卸载、断开或移交。
+- Redis/OpenSearch 同版本原始卷恢复只支持相同 image reference、相同 image ID、单节点同拓扑；跨版本必须使用 Redis RDB 与 OpenSearch settings/mappings/bulk 可移植导出。应用前创建 rollback export，拒绝导入到更低 major 版本，失败时自动回退并保存 JSON 证据。
 - `-ForceRestore` rollback archive 是失败时的尽力恢复机制；发生卷驱动、磁盘或 Docker 故障时仍可能需要人工处理，脚本必须保留受限 ACL 归档并报告绝对路径。
 - 当前固定 MinIO Server/Client 镜像仍有 16/9 个 Critical 唯一 ID 基线，其中两个 MinIO 自身 Critical 在固定社区镜像中没有 patched version；CI 阻断允许集之外的新 Critical 并不消除现有风险。正式发布前必须采用受支持修复镜像或完成可审计补丁镜像、SBOM/Grype 重扫、真实 MinIO 和备份恢复兼容验证，风险登记以 `docs/minio-security-risk.md` 为准。
-- 周期维护任务由独立 `beat` 容器运行 Celery beat，至少覆盖过期上传、无引用 blob、孤儿最终对象和容量校准；调度不得与 API 进程混跑。
+- 周期维护任务由独立 `beat` 容器运行 Celery beat，至少覆盖审计分区/归档、过期上传/分享/回收站、预览产物、大目录任务、权限重算、无引用 blob、孤儿最终对象、容量校准和导出清理；调度不得与 API 进程混跑。
 - Nginx gateway 必须处理 WebSocket、Range、上传大小限制、超时、真实客户端 IP、安全响应头，以及 API 与外部 S3 端点的分流；公网模板还必须保持证书只读挂载、TLS 1.2/1.3、HTTP 到 HTTPS 跳转、ACME challenge 路径、未知 Host 拒绝和 HSTS。正式发布前必须完成受信证书与双域名 HTTPS 实测。
 
 发布顺序：
@@ -505,6 +511,6 @@ Windows Docker Compose 要求：
 - API 契约、错误码和文档已同步。
 - 权限、审计、容量、幂等和安全边界已按功能影响范围处理。
 - 相关单元测试、集成测试或手工验证已完成。
-- Windows 11 Docker 部署相关改动已通过 Compose config、镜像构建、容器健康检查、真实 `/readyz` 数据库探针、Worker 工具检查和停止回收验证；备份恢复相关改动还必须通过 manifest/工件校验、CMS 正负例、source 状态恢复、target 失败隔离和不同 Compose project 的真实恢复演练。
+- Windows 11 Docker 部署相关改动已通过 Compose config、镜像构建、容器健康检查、真实 `/readyz` 数据库探针、Worker 工具检查和停止回收验证；备份恢复相关改动还必须通过 manifest/工件、detached CMS 签名、完整包加密、离线 inventory、source 状态恢复、target 失败隔离、不同 Compose project 恢复，以及 Redis/OpenSearch 导出/应用/回退门禁。
 - `PROJECT_PROGRESS.md` 已记录完成事项、风险、下一步和验证方式。
 - 可运行、可回滚、可排查；没有把临时方案伪装成最终方案。

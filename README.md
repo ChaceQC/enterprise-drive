@@ -1,6 +1,6 @@
 # 企业网盘
 
-企业网盘工程，当前代码基线为版本 `0.8.0`，已包含后端主链路、Web 用户端与管理后台、OIDC/OAuth 2.1 + PKCE、LDAP 目录同步，以及 Windows 11 Rust/Tauri 桌面端的双向同步、离线恢复和签名更新；目标是形成可试点上线的企业级文件管理服务。项目以《企业网盘开发者技术计划书.md》为技术基线，优先保障文件元数据、对象存储、权限、身份、审计、搜索和异步任务之间的一致性。
+企业网盘工程，当前代码基线为版本 `0.9.0`，已包含后端主链路、Web 用户端与管理后台、OIDC/OAuth 2.1 + PKCE、LDAP 目录同步、规模化治理，以及 Windows 11 Rust/Tauri 桌面端的双向同步、离线恢复和签名更新；目标是形成可试点上线的企业级文件管理服务。项目以《企业网盘开发者技术计划书.md》为技术基线，优先保障文件元数据、对象存储、权限、身份、审计、搜索和异步任务之间的一致性。
 
 ## 技术基线
 
@@ -31,9 +31,10 @@
 - 目录权限、空间角色、拒绝优先、权限缓存和高危动作二次校验。
 - 内部分享、外链分享、创建者/接收人列表、站内通知、提取码、过期、次数限制、撤销和授权重算。
 - 预览 Worker、预览产物生命周期、搜索索引/OCR Worker、审计 outbox dispatcher。
+- 大目录权限重算、统一生命周期策略/运行记录、审计分区/归档/外部投递、Outbox dead-letter 查询/重放和治理看板。
 - API/Worker 结构化日志、Prometheus 指标和 OpenTelemetry tracing。
 - 系统管理员空间、统计、维护任务和异步 CSV 导出 API。
-- Docker Compose 本地开发环境、Windows 11 Docker 正式部署、可选监控栈、自动化备份轮换/校验/隔离恢复、Alembic migration、CI 质量门禁。
+- Docker Compose 本地开发环境、Windows 11 Docker 正式部署、可选监控栈、自动化备份签名/完整包保护/离线轮换/隔离恢复、Redis/OpenSearch 可移植迁移、Alembic migration 和 CI 质量门禁。
 
 ## 二期 Rust 桌面客户端
 
@@ -54,15 +55,15 @@
 
 - Sprint 9 / `0.6.0`：文件版本、回收站/批量文件操作、内部分享接收端与通知，以及用户、部门、用户组、空间、配额、统计、维护和导出管理 API 已完成。
 - Sprint 10 / `0.7.0`：TypeScript + React + Vite Web 用户端与管理后台已完成代码侧交付，覆盖文件/批量/上传下载、搜索预览回收站、分享通知、公开分享、管理页面、生成式 OpenAPI client、Compose Web 发布和 Playwright E2E。
-- Sprint 11 / `0.8.0`：`BE-040` 至 `BE-043`、`FE-010` 至 `FE-011` 已完成代码侧交付；覆盖登录失败防护、账号锁定、密码与会话管理、OIDC/OAuth 2.1 + PKCE、LDAP 同步，以及用户端和管理端身份页面。最终远端 CI 统计待集成提交后填入。
-- Sprint 12 / `0.9.0`：继续完成大目录权限重算和治理页面、生命周期策略扩展、审计分区、Outbox dead-letter、备份签名与离线恢复治理；图片/扫描 PDF OCR、旧 Office/ODF 抽取和基础分享/预览生命周期已提前完成。
+- Sprint 11 / `0.8.0`：`BE-040` 至 `BE-043`、`FE-010` 至 `FE-011` 已完成并通过远端 CI；覆盖登录失败防护、账号锁定、密码与会话管理、OIDC/OAuth 2.1 + PKCE、LDAP 同步，以及用户端和管理端身份页面。
+- Sprint 12 / `0.9.0`：`BE-046` 至 `BE-050`、`FE-012`、`OPS-001` 至 `OPS-003`、`QA-001` 至 `QA-002` 已完成代码侧交付；覆盖大目录权限重算、生命周期策略/运行、审计分区/归档/投递、Outbox dead-letter、治理页面/看板、备份签名/完整包保护/离线副本、Redis/OpenSearch 可移植迁移和四依赖故障恢复矩阵。legal hold、高级内容分类和复杂 DLP 继续归远期 `GOV-001`。
 - Sprint 13 / `1.0.0`：后端、Web、桌面端统一 UAT、性能、安全、升级回滚和正式发布。
 
 虚拟盘、macOS/Linux 文件提供器、WebDAV、SMB、移动端、在线协同、复杂 DLP、跨地域双活和计费已进入带编号与入口条件的远期 Backlog。
 
 ## 当前状态
 
-当前仓库已完成 Sprint 1 至 Sprint 11 的代码侧交付，并把后端、Web、桌面安装包、更新器和 OpenAPI 契约统一到 Sprint 11 目标版本 `0.8.0`。其中 Sprint 7 和 Sprint 8 覆盖 `DC-001` 至 `DC-010`，Sprint 9 覆盖 `BE-036` 至 `BE-039`、`BE-044`、`BE-045`，Sprint 10 覆盖 `FE-001` 至 `FE-009`，Sprint 11 覆盖 `BE-040` 至 `BE-043`、`FE-010` 至 `FE-011`。当前运行时 OpenAPI 快照统计为 105 个路径、134 个操作、162 个 schemas；数据库 migration head 为 `20260804_0024`。`frontend/` 包含 React/Vite/TypeScript 用户端与管理后台、生成式 API client、Cookie Session/CSRF、账号安全与 OIDC/LDAP 页面、统一错误恢复和 Playwright E2E；桌面端包含 Tauri 2 应用、设备会话、双向同步、SQLite 离线队列、DTP/1 传输、Windows Credential Manager/路径适配、签名更新回退和脱敏诊断。
+当前仓库已完成 Sprint 1 至 Sprint 12 的代码侧交付，并把后端、Web、桌面安装包、更新器和 OpenAPI 契约统一到 Sprint 12 目标版本 `0.9.0`。其中 Sprint 7 和 Sprint 8 覆盖 `DC-001` 至 `DC-010`，Sprint 9 覆盖 `BE-036` 至 `BE-039`、`BE-044`、`BE-045`，Sprint 10 覆盖 `FE-001` 至 `FE-009`，Sprint 11 覆盖 `BE-040` 至 `BE-043`、`FE-010` 至 `FE-011`，Sprint 12 覆盖 `BE-046` 至 `BE-050`、`FE-012`、`OPS-001` 至 `OPS-003`、`QA-001` 至 `QA-002`。当前运行时 OpenAPI 快照统计为 116 个路径、148 个操作、178 个 schemas；数据库 migration head 为 `20260804_0026`。`frontend/` 包含 React/Vite/TypeScript 用户端与管理后台、生成式 API client、Cookie Session/CSRF、账号安全与 OIDC/LDAP 页面、治理看板、统一错误恢复和 Playwright E2E；桌面端包含 Tauri 2 应用、设备会话、双向同步、SQLite 离线队列、DTP/1 传输、Windows Credential Manager/路径适配、签名更新回退和脱敏诊断。
 
 Sprint 3 上传主链路已包含 `upload_sessions`、multipart init/presign/complete/abort、秒传、服务端 SHA-256、最终对象归档、失败清理、过期会话回收、限流、下载、容量流水以及对象/回收站治理。multipart complete 使用标准 S3 HTTP 控制面；同 hash 首次上传在 PostgreSQL 中通过原子 upsert 只创建一个 blob，异常 complete 可从对象事实恢复，失败路径会清理受控 `uploads/...` 临时对象。
 
@@ -80,9 +81,13 @@ Sprint 3 上传主链路已包含 `upload_sessions`、multipart init/presign/com
 
 Sprint 2 剩余增强已闭环：创建文件夹、移动、恢复和对应批量入口支持 `fail`、`keep_both`、`replace`。`keep_both` 自动生成 `名称 (n)`，文件名工具会保留扩展名；`replace` 把当前同名节点移入回收站后再完成新操作，不执行不可恢复覆盖。删除、恢复或彻底删除的子树超过 `DRIVE_FILE_TREE_ASYNC_THRESHOLD` 时返回 HTTP 202 和 operation ID，根节点先进入目标状态，maintenance Worker 通过 `file.process_tree_operations` 使用递归 CTE、`deleted_root_id` 和固定批次分段提交后代状态或容量/blob 清理。`GET /api/v1/files/operations/{operation_id}` 查询进度，失败任务可用 `POST .../retry` 恢复；每个批次可重入，Worker 中断后从 PostgreSQL 事实继续。
 
-`BE-027` 可观测性已完成：API `/metrics` 暴露路由模板维度的请求数/延迟、上传下载、权限、Outbox 和搜索延迟指标，正式 2-worker Uvicorn 使用 Prometheus multiprocess 聚合；5 个 Celery Worker 分别在 Compose 内部 `9100` 暴露 task 数量、状态、耗时及本进程业务指标。可选 `monitoring` profile 内置 Prometheus、Alertmanager 和 Grafana，两张预置看板通过 gateway `/grafana/` 访问，三项监控服务都不发布宿主端口。JSON 日志自动关联 `service`、`env`、`request_id`、`task_id`、`trace_id` 和 `span_id`；OpenTelemetry exporter 默认 `none`，可配置 Console 或 OTLP/HTTP。
+Sprint 12 治理模块新增 `/api/v1/admin/governance`：系统管理员可查看治理摘要和既有大目录任务，按 space 或 node 创建/查询/重试权限重算，维护租户生命周期策略，并创建 dry-run 或正式运行。权限重算把 snapshot、`permission_version`、稳定 cursor、处理/索引计数和错误码保存在 PostgreSQL；任务中断后继续固定批次，运行期间发现更高权限版本会从新快照重启。生命周期策略统一回收站/预览保留期，以及上传、分享、无引用 blob、孤儿对象开关；策略更新使用乐观版本，运行状态持久化到 `admin_jobs`。legal hold、高级内容分类和复杂 DLP 不在 Sprint 12，继续归远期 `GOV-001`。
 
-`BE-030` 已完成 API 与网络安全矩阵；Sprint 11 又把账号安全、OIDC/PKCE、LDAP Source/sync、身份页面和新增管理入口纳入 route matrix、CSRF、管理员、跨租户、重放和开放重定向边界。当前 OpenAPI 为 105 个路径、134 个操作、162 个 schemas。损坏/超大图片、OCR 页数/像素/体量边界、文档路径与扩展名注入、Range 权限、预签名 URL、管理 API、OIDC 绑定/回调和 LDAP 冲突/离职均进入相应测试；真实 Nginx raw HTTP smoke 继续验证未知 API/S3 Host、CL/TE 冲突、重复 Content-Length、API 请求体 413 与 storage 流式入口。
+审计治理把 `audit_logs` 改为 PostgreSQL 月分区表，并由 `audit.ensure_partitions` 预建未来分区；`audit.archive_retention` 按保留期生成签名 JSONL 归档，可配置归档成功后删除源记录。外部审计 HTTP 投递对正文生成 HMAC-SHA256 签名。Outbox 现按 transient/permanent 分类，使用带 jitter 的有界退避和处理超时恢复；系统管理员可通过 `/api/v1/admin/audit/governance` 与 `/api/v1/admin/outbox/dead-letters` 查看归档/投递摘要、dead-letter 列表/详情并执行幂等重放，响应只暴露 payload key 列表。
+
+`BE-027` 可观测性已完成：API `/metrics` 暴露路由模板维度的请求数/延迟、上传下载、权限、Outbox 和搜索延迟指标，正式 2-worker Uvicorn 使用 Prometheus multiprocess 聚合；5 个 Celery Worker 分别在 Compose 内部 `9100` 暴露 task 数量、状态、耗时及本进程业务指标。可选 `monitoring` profile 内置 Prometheus、Alertmanager 和 Grafana，运行概览、维护治理和 Sprint 12 治理三张预置看板通过 gateway `/grafana/` 访问，三项监控服务都不发布宿主端口。JSON 日志自动关联 `service`、`env`、`request_id`、`task_id`、`trace_id` 和 `span_id`；OpenTelemetry exporter 默认 `none`，可配置 Console 或 OTLP/HTTP。
+
+`BE-030` 已完成 API 与网络安全矩阵；Sprint 11 把账号安全、OIDC/PKCE、LDAP Source/sync 和身份页面纳入 route matrix，Sprint 12 又加入治理策略、权限重算、审计治理和 Outbox dead-letter 写入口的 CSRF、管理员、租户与重放边界。当前 OpenAPI 为 116 个路径、148 个操作、178 个 schemas。损坏/超大图片、OCR 页数/像素/体量边界、文档路径与扩展名注入、Range 权限、预签名 URL、管理 API、OIDC 绑定/回调、LDAP 冲突/离职和治理入口均进入相应测试；真实 Nginx raw HTTP smoke 继续验证未知 API/S3 Host、CL/TE 冲突、重复 Content-Length、API 请求体 413 与 storage 流式入口。
 
 Sprint 4 权限系统已新增 `space_members` 基础表，创建空间时会自动写入当前用户的 `owner` 角色成员关系。空间列表、文件树、上传初始化、multipart complete 和下载已通过 `PermissionService` 做空间级成员角色检查：`viewer` 可列表和下载，`editor` 可上传与修改，`owner/admin` 可执行全部空间级动作。空间成员管理 API 已接入，支持 owner/admin 添加、调整和移除成员，权限变更会递增空间权限版本并写入审计。节点 ACL 已支持 `user`、`department`、`group` 三类主体，基于 org 事实表展开用户部门和用户组，支持 allow/deny、继承开关和 deny 优先，并已覆盖文件列表、创建文件夹、上传初始化、multipart complete 和下载入口；文件列表响应会通过批量权限评估返回每个子节点的常用动作权限，避免列表页逐项查询。系统管理员现可通过管理 API 完成用户生命周期、部门层级重命名/移动/停用、用户组状态以及部门/组成员变更；部门路径更新会原子改写子树并拒绝环路，所有修改使用版本前置条件、租户隔离和审计。空间成员和节点 ACL 变更都会写入 `permission.changed` outbox event，`permission.invalidate_cache` 会消费该事件并删除匹配的 Redis 权限缓存 key；部门/用户组成员或状态变化会写入租户级事件，按受影响用户或整个租户失效权限缓存。搜索 ACL 已新增 token builder 和 `search.acl_rebuild_requested` outbox event；秒传、multipart complete、重命名、移动、删除、恢复和彻底删除会写入 `search.index_requested`，上传完成还会写入 `search.extract_requested`。`search.dispatch_outbox` 会从 PostgreSQL 重新构建文件索引文档写入 OpenSearch，不再活跃或已彻底删除的文件会删除索引文档，并在 ACL 变更后按 space 或 node 子树保守重建索引 token；搜索抽取支持 UTF-8 文本、可复制正文 PDF、DOCX/PPTX/XLSX、图片 OCR、扫描 PDF OCR，以及 LibreOffice 转换后的旧 Office/ODF 文档。Tesseract OCR 受页数、像素、渲染字节、正文字符数和命令超时边界约束，抽取结果写入 `file_versions.search_text` 并刷新索引 `content` 字段。预览链路使用 Pillow、Poppler 和 LibreOffice 生成私有 WebP 产物；`GET /api/v1/files/{node_id}/preview` 会刷新 `last_accessed_at` 并返回短期私有 URL，`preview.cleanup_artifacts` 周期清理非当前旧版本产物和超期孤儿预览对象。`GET /api/v1/search` 已接入 allow/deny token、签名 cursor、HTML 编码高亮、限流和 `read_meta` 二次权限校验。最终对象的 DB 驱动清理由 `file.cleanup_unreferenced_blobs` 承担；对象存储中没有 DB 元数据的孤儿最终对象由 `file.cleanup_orphaned_objects` 承担。
 
@@ -175,6 +180,7 @@ GitHub `backend-ci` 同时启动临时 PostgreSQL 16 容器、执行 Alembic upg
 - `企业网盘开发者技术计划书.md`：完整技术计划书。
 - `backend/README.md`：后端工程启动与验证说明。
 - `docs/deployment-windows-docker.md`：Windows 11 Docker Desktop 正式部署、运维、备份与回滚说明。
+- `docs/ops-sprint12-backup-portability.md`：manifest 来源签名、完整包保护、离线副本与 Redis/OpenSearch 可移植迁移。
 - `docs/deployment-preview-worker.md`：预览 Worker 资源配额和部署说明。
 - `docs/maintenance-monitoring.md`：maintenance 周期任务状态、指标、告警规则和排障顺序。
 - `docs/minio-security-risk.md`：固定 MinIO 镜像的 Critical 基线、可达性缓解和正式发布门禁。
@@ -190,10 +196,12 @@ GitHub `backend-ci` 同时启动临时 PostgreSQL 16 容器、执行 Alembic upg
 
 Compose 内的 Nginx gateway 是唯一宿主端口入口。默认本机模式使用 `http://localhost:18080` 同时提供 Web 页面和 API，S3 外部端点为 `http://localhost:19000`；内部 `web` 服务只在 Compose 网络暴露 `8080`。公网 TLS 模式已提供 ACME HTTP-01 bootstrap、Certbot 证书卷、TLS server block、HTTP `308` 跳转、`80/443` 双域名 Host 分流、证书续期与 Nginx 热重载命令；生产使用 `https://drive.example.com`、`https://storage.example.com` 时，必须先配置真实 DNS、邮箱、API/MinIO CORS、Trusted Hosts、Secure Cookie 和 S3 公共端点，执行 `manage.ps1 tls-init -Tls` 后再运行 `manage.ps1 up -Tls -Build`。Web、API、Worker、PostgreSQL、Redis、OpenSearch、MinIO API/Console 等内部服务不发布宿主端口；Worker metrics `9100` 也只暴露在 Compose 网络内。
 
-正式编排还包含真实 PostgreSQL `/readyz` 探针、独立 Celery beat、隔离的 Preview Worker、内部 Web、named volumes 和自动化备份恢复。`manage.ps1 backup` 会生成 PostgreSQL custom dump、MinIO/Redis/OpenSearch/TLS 停止状态卷归档、CMS 环境文件密文和严格 manifest；manifest 从 16 个无 profile 默认服务的实际 Compose 容器记录 image ID，并记录工件大小/SHA-256、精确 `compose.windows.yml` SHA-256、Git commit、项目版本、S3 bucket、OpenSearch index、`DRIVE_TLS_CERT_NAME` lineage 名称、Alembic revision 与 WAL LSN。`backup-verify` 要求当前 Git HEAD、Compose、项目版本、configuration lineage 和全部 16 个服务镜像与 manifest 精确一致，并在无网络、只读、drop capabilities 的临时容器/卷中预解包扫描 tar。`backup-retention` 按保留天数和最少份数轮换经过校验的托管备份，`restore-drill` 把最新或指定备份恢复到随机隔离 Compose project 并在结束后删除 target 容器/卷；两类操作都写入仓库外 restricted ACL JSON 记录，并支持 Windows 周期任务注册/删除。备份辅助容器默认限制为 `0.50 CPU / 512m memory / 512m memory-swap / 128 PIDs`，`pg_dump` 和 gzip 默认使用压缩等级 `1`；这些值可通过 `.env.windows` 中的 `DRIVE_BACKUP_*` 变量调整，但不得取消资源边界。
+正式编排还包含真实 PostgreSQL `/readyz` 探针、独立 Celery beat、隔离的 Preview Worker、内部 Web、named volumes 和自动化备份恢复。`manage.ps1 backup` 会生成 PostgreSQL custom dump、MinIO/Redis/OpenSearch/TLS 停止状态卷归档、CMS 环境文件密文和严格 manifest；manifest v2 从 16 个无 profile 默认服务的实际 Compose 容器记录 image ID，并记录工件大小/SHA-256、精确 `compose.windows.yml` SHA-256、Git commit、项目版本、S3 bucket、OpenSearch index、`DRIVE_TLS_CERT_NAME` lineage 名称、Alembic revision 与 WAL LSN。传入签名证书后会生成 detached CMS `manifest.p7s`；传入完整包加密证书后，payload 使用 AES-256-CBC，加上 HMAC-SHA256 完整性和 RSA-OAEP-SHA256 密钥封装，发布目录不保留明文数据工件。`backup-verify` 要求当前 Git HEAD、Compose、项目版本、configuration lineage 和全部 16 个服务镜像与 manifest 精确一致，并在无网络、只读、drop capabilities 的临时容器/卷中预解包扫描 tar。
 
 `backup` 和 `restore` 同时使用 project 级与逐 physical volume Windows mutex；备份根目录会拒绝卷根、仓库目录/祖先及未预先使用 restricted ACL 的既有非空目录，staging/正式备份、`-ForceRestore` rollback archive 和恢复后的 CMS 文件会自动应用只允许当前用户、SYSTEM、Administrators 的 restricted ACL。`restore` 只接受不同且已停止的 Compose project，并拒绝 source/target 卷重叠、错误卷标签、foreign attachment；使用 `-ForceRestore` 时会先归档原非空卷，失败后还原原非空卷、清空原空卷、删除新卷并停止 target，回滚异常则保留并报告归档路径。恢复提交后的 rollback cleanup 异常只报告维护失败，不会反向回滚已恢复数据。CMS 明文输出必须使用仓库和备份目录外的绝对新文件路径、已有父目录，并只在本次恢复模式全部门禁成功的末尾原子发布；若发布竞态中目标被其他进程创建，脚本保留该 foreign file。真实随机 source/target project 演练已验证数据库和对象回到同一备份点、CMS 环境文件解密、TLS lineage、Worker/beat、gateway 与健康检查。
 
-备份安全边界如下：Windows CMS 只加密 `.env.windows`，PostgreSQL dump、MinIO/Redis/OpenSearch 原始卷归档和 TLS 证书卷归档仍依赖 BitLocker、restricted NTFS ACL 与加密外部介质；SHA-256 只证明内容与 manifest 一致，不认证备份制作者身份；Redis/OpenSearch 原始卷只适用于相同 image reference/image ID、单节点同拓扑；`-ForceRestore` rollback 属于尽力恢复。当前 MinIO Server/Client 仍有 16/9 个 Critical 唯一 ID 基线，其中两个 MinIO 自身 Critical 在固定社区镜像中没有上游 patched version；CI 阻断新增 Critical 不代表现有风险已经消除。正式 `v0.4.0` tag/Release 在采用受支持修复镜像或可审计补丁镜像并重新扫描前保持阻塞，详见 [MinIO 安全风险与发布门禁](docs/minio-security-risk.md)。
+`backup-retention` 按保留天数和最少份数轮换经过校验的托管备份，`backup-offline-rotate` 把指定或最新托管备份原子复制到离线目录，逐文件对账 size/SHA-256 并记录 canonical inventory digest；`restore-drill` 把最新或指定备份恢复到随机隔离 Compose project 并在结束后删除 target 容器/卷。Redis/OpenSearch 升级不再复制原始卷：`data-migration-export` 生成 Redis RDB 和 OpenSearch settings/mappings/bulk NDJSON，`data-migration-apply` 在修改目标前创建 rollback export、拒绝向更低 major 版本迁移，并在失败时自动回退。完整命令、保留规则和报告字段见 [Sprint 12 备份安全、离线副本与跨版本数据迁移](docs/ops-sprint12-backup-portability.md)。
+
+备份安全边界如下：未启用完整包保护时，PostgreSQL dump、MinIO/Redis/OpenSearch 原始卷归档和 TLS 证书卷仍依赖 BitLocker、restricted NTFS ACL 与加密介质；detached CMS 签名验证来源和 manifest 完整性，但证书信任链、吊销和双人保管仍由组织 PKI 负责；完整包加密证书私钥丢失会使备份永久不可恢复。`-ForceRestore` rollback 与跨版本自动回退都属于有证据的尽力恢复。当前 MinIO Server/Client 仍有 16/9 个 Critical 唯一 ID 基线，其中两个 MinIO 自身 Critical 在固定社区镜像中没有上游 patched version；CI 阻断新增 Critical 不代表现有风险已经消除。正式 `v0.4.0` tag/Release 在采用受支持修复镜像或可审计补丁镜像并重新扫描前保持阻塞，详见 [MinIO 安全风险与发布门禁](docs/minio-security-risk.md)。
 
 本机已用自签名双域名证书在标准宿主 `80/443` 启动完整编排，验证 HTTP `308`、API readiness、MinIO CORS/S3v4、临时 ACME bootstrap、原 gateway 恢复和彻底清理；公网受信证书签发与真实续期仍需要生产 DNS/网络环境。生产完成后使用 `tls-validate-public` 一次性验证双域名只解析到公网地址、HTTP 精确 `308`、HTTPS readiness、证书链和剩余有效期，并保存 JSON 记录。完整流程见 [Windows 11 Docker 部署说明](docs/deployment-windows-docker.md)，预览资源限制见 [预览 Worker 部署说明](docs/deployment-preview-worker.md)。Kubernetes、systemd 仅作为未来可选迁移方案。
