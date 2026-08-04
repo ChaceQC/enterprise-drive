@@ -4,13 +4,13 @@
 
 ## 1. 总体结论
 
-当前项目处于 **v0.7.0、Sprint 10 Web 用户端与管理后台代码侧交付和本地专项验证已完成，正在等待本轮推送后的远端 CI 门禁确认阶段**：
+当前项目处于 **v0.7.0、Sprint 10 Web 用户端与管理后台实现、本地专项验证和远端 CI 门禁均已完成，下一产品阶段进入 Sprint 11**：
 
 - 后端核心能力、权限、分享、预览、搜索、完整管理 API、Windows 11 Docker 部署、监控 profile 和备份治理入口已经形成试点基础，Sprint 2 至 Sprint 6 代码侧剩余项为空。
 - `BE-036` 至 `BE-039`、`BE-044` 和 `BE-045` 已完成；`FE-001` 至 `FE-009` 也已实现，后端、Web、Rust workspace、Tauri 安装包、更新器和 OpenAPI 契约统一到 Sprint 10 目标版本 `0.7.0`。
 - Sprint 7 与 Sprint 8 的 `DC-001` 至 `DC-010` 已完成：Rust/Tauri Windows 11 骨架、设备会话、增量游标/tombstone、SQLite 离线队列、DTP/1 双向传输、文件监听、冲突副本、选择性同步、Windows 路径边界、诊断导出、签名更新和失败回退均已落地。
 - `frontend/` 已交付 React/Vite/TypeScript 工程、生成式 API client、Cookie Session/CSRF 壳、用户端与管理后台主要流程、公开分享入口、错误恢复和三浏览器 Playwright 配置；Compose 新增内部 `web` 服务，由 gateway 统一代理页面、静态资源和 `/api/v1`。
-- `backend-ci` 已增加 frontend scope，覆盖 npm 锁定安装、lint、typecheck、OpenAPI 归档/client 漂移、单元测试、Web 镜像构建及 Chromium/Firefox/WebKit E2E；本轮远端全绿结论须以推送后实际 run 为准。
+- `backend-ci` 已增加 frontend scope，覆盖 npm 锁定安装、lint、typecheck、OpenAPI 归档/client 漂移、单元测试、Web 镜像构建及 Chromium/Firefox/WebKit E2E；提交 `8da1abe` 对应 run `30893658311` 的 9 个 job 全部成功。
 - 真实生产 DNS/受信证书证据和 MinIO 修复镜像不在当前本机环境内，正式 `v0.4.0` tag/Release 保持阻塞；身份治理、规模化治理和 `v1.0.0` 尚未完成。
 
 ## 2. 当前仓库快照
@@ -24,6 +24,8 @@
 - Sprint 8 最终 CI：`backend-ci` run `30854694265`（8 个 job 全部成功）
 - Sprint 9 收尾提交：`d31eaaa`
 - Sprint 9 最终 CI：`backend-ci` run `30872900207`（8 个 job 全部成功）
+- Sprint 10 交付提交：`8da1abe`
+- Sprint 10 最终 CI：`backend-ci` run `30893658311`（9 个 job 全部成功）
 - Git tag：当前尚未建立 `v0.4.0` tag
 - 当前 OpenAPI 归档：83 个路径、110 个操作、132 个 schemas
 - 最新数据库迁移：`20260803_0023`
@@ -47,7 +49,7 @@
 | Sprint 7：Rust 桌面基础 | `DC-001` 至 `DC-006`：Cargo/Tauri 骨架、设备会话、增量游标/tombstone、Rust API client、SQLite 索引、DTP/1 队列、托盘、同步根和诊断导出；Windows CI 已全绿 | 无 |
 | Sprint 8：双向同步与桌面发布 | `DC-007` 至 `DC-010`：文件监听、远端增量、离线队列、重启恢复、冲突副本、选择性同步、限速并发、Windows 路径边界、逐文件诊断、签名安装包、更新验签和回退 | 无 |
 | Sprint 9：核心产品闭环 | `BE-036` 至 `BE-039`、`BE-044`、`BE-045` 已完成 | 无 |
-| Sprint 10：Web 用户端与管理后台 | `FE-001` 至 `FE-009` 已完成代码侧交付：React/Vite、生成 API Client、用户端、管理后台、公开分享、Compose Web、gateway 路由、frontend CI 与 Playwright E2E | 推送后确认本轮远端 CI 全绿；真实生产浏览器/网络验收并入发布门禁 |
+| Sprint 10：Web 用户端与管理后台 | `FE-001` 至 `FE-009` 已完成：React/Vite、生成 API Client、用户端、管理后台、公开分享、Compose Web、gateway 路由、frontend CI、Playwright E2E 与远端全 scope 门禁 | 无；真实生产浏览器/网络验收属于后续发布门禁 |
 | Sprint 11：身份与账号安全 | 已有本地登录、限流、CSRF、会话能力 | OIDC/OAuth、LDAP、密码管理、账号锁定、会话管理页面 |
 | Sprint 12：规模化治理与内容能力 | 已有文件树大目录删除/恢复/彻底删除后台任务、过期分享与预览产物治理、图片/扫描 PDF OCR、旧 Office/ODF 抽取、指标和基础治理 | 大目录权限重算/治理页面、审计分区、Outbox DLQ、治理看板、故障注入和完整集成矩阵 |
 | Sprint 13：稳定版发布 | 尚未开始 | UAT、压测、安全验收、升级回滚、统一版本、`v1.0.0`、发布包和验收报告 |
@@ -73,7 +75,8 @@
 - Sprint 9 版本收尾定向验证：`uv lock --check`、Ruff、Python format、Cargo metadata、Cargo fmt、JSON 解析和 `git diff --check` 通过；版本一致性、健康检查与桌面 OpenAPI 契约共 `12 passed`。本机定向 Cargo check 仍受缺少 MSVC `link.exe` 限制，完整 Rust 编译由本次 Windows CI 执行。
 - Sprint 9 最终 `backend-ci` run `30872900207`（提交 `d31eaaa`）的 8 个 job 全部成功；远端 Windows runner 已完成 Rust Clippy/tests/release、Tauri/NSIS、Authenticode 和签名更新工件验证。
 - Sprint 10 前端专项已确认 `npm ci` 完成 269 个依赖包安装并审计 270 个包、0 vulnerabilities；lint、typecheck、production build、OpenAPI archive/client 漂移均通过，单元测试为 5 个文件、14 个用例，OpenAPI breaking-change checker 为 6 个用例。
-- Sprint 10 Playwright 只运行新增和受影响流程并按失败项收敛，Chromium、Firefox、WebKit 累计 `13 passed, 2 skipped`；文件版本回滚、目录接收人分享、上传队列、搜索/回收站/通知、管理员与公开分享路径均已有本地浏览器证据。Web Docker build 及完整远端 scope 仍以本轮 `backend-ci` 为最终门禁。
+- Sprint 10 Playwright 只运行新增和受影响流程并按失败项收敛，Chromium、Firefox、WebKit 累计 `13 passed, 2 skipped`；文件版本回滚、目录接收人分享、上传队列、搜索/回收站/通知、管理员与公开分享路径均已有本地浏览器证据。
+- Sprint 10 最终 `backend-ci` run `30893658311`（提交 `8da1abe`）的 `changes`、`frontend`、`backend`、`rust-desktop`、`rust-dependency-policy`、`windows-desktop-installer`、`windows-deployment`、`minio-image-policy` 和 `minio-supply-chain` 共 9 个 job 全部成功。
 - Compose 声明 20 个服务，其中 16 个无 profile 默认服务；gateway 仍是唯一宿主端口发布者，`web` 使用内部 `8080` 和 `/web-healthz`，备份 smoke/integration 的服务清单已同步。
 - Rust CI 失败项均按实际日志收敛：先修正 Clippy `too_many_arguments`、reqwest `query` feature，再将 Windows 不支持的 cargo-deny 容器 action 移到 Ubuntu；依赖策略最终 advisories、bans、licenses、sources 均通过。
 - Sprint 7 的全绿 CI 验证提交为 `a57d3fb`；全绿后仅追加状态文档收尾，不改变该提交中已验证的代码与 CI 配置；未重复执行已通过的后端、MinIO、备份恢复或性能集合。
@@ -102,15 +105,14 @@
 
 ## 5. 下一步顺序
 
-1. 提交并推送 Sprint 10 代码、契约、Compose、CI 与文档变更，确认 frontend、backend、Windows 部署及按 scope 选中的远端 job 全部成功。
-2. 远端门禁完成后进入 Sprint 11 身份与账号安全，优先实现账号锁定/解锁、密码与会话治理、OIDC/OAuth 2.1 + PKCE 和 LDAP 同步契约。
-3. 在真实生产网络执行 `tls-validate-public`，保存双域名 DNS、HTTP `308`、HTTPS readiness 和受信证书记录。
-4. 采用受支持修复镜像或可审计补丁镜像解决 MinIO Critical，重新生成 SBOM/Grype 并运行真实 MinIO/备份恢复兼容门禁；解除后再创建正式 `v0.4.0` tag/Release。
+1. 进入 Sprint 11 身份与账号安全，优先实现账号锁定/解锁、密码与会话治理、OIDC/OAuth 2.1 + PKCE 和 LDAP 同步契约。
+2. 在真实生产网络执行 `tls-validate-public`，保存双域名 DNS、HTTP `308`、HTTPS readiness 和受信证书记录。
+3. 采用受支持修复镜像或可审计补丁镜像解决 MinIO Critical，重新生成 SBOM/Grype 并运行真实 MinIO/备份恢复兼容门禁；解除后再创建正式 `v0.4.0` tag/Release。
 
 ## 6. 状态判断
 
 当前项目已经超过“后端接口样例”阶段，具备完整后端主链路、Web 用户端与管理后台、普通目录双向同步桌面端和可验证部署/治理基础；但距离完整企业产品仍有明显工作量，主要缺口集中在：
 
 - 生产 DNS/受信证书证据、MinIO 修复镜像和正式发布；
-- Sprint 10 本轮远端 CI 与真实发布环境验收；
+- 真实发布环境中的浏览器、网络和受信证书验收；
 - 企业身份、规模化治理和 `v1.0.0` 验收。

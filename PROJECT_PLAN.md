@@ -149,7 +149,7 @@
 - 用户端覆盖登录、空间/目录、批量操作、上传队列、下载、搜索、预览、回收站、文件版本、分享创建、分享给我的、通知中心和账号基础页面。（`FE-003` 至 `FE-005` 已完成）
 - 管理后台覆盖用户、部门、用户组、空间、配额、审计、统计、维护任务状态和导出；管理员路由与后端管理权限同时校验。（`FE-006`、`FE-007` 已完成）
 - 构建产物通过 Compose 内部 Web 服务交给 gateway，同一 API 域名下使用 `/api/v1`，Web 服务不直接发布宿主端口。（`FE-009` 已完成：`web` 内部 `8080`，默认无 profile 服务 16 个，gateway 是唯一宿主端口发布者）
-- CI 增加 lint、类型检查、单元测试、构建、OpenAPI breaking-change 检查和 Playwright E2E；验收覆盖 Chromium、Firefox、WebKit 和 Windows 常用缩放比例。（`FE-008`、`FE-009` 已完成，本地受影响三引擎累计 `13 passed, 2 skipped`；最终全 scope 结论以本轮远端 CI 为准）
+- CI 增加 lint、类型检查、单元测试、构建、OpenAPI breaking-change 检查和 Playwright E2E；验收覆盖 Chromium、Firefox、WebKit 和 Windows 常用缩放比例。（`FE-008`、`FE-009` 已完成；本地与远端受影响三引擎均为 `13 passed, 2 skipped`，最终 run `30893658311` 全绿）
 
 ### Sprint 11：身份与账号安全（目标版本 `0.8.0`）
 
@@ -192,7 +192,7 @@
 
 ## 5. 当前下一步
 
-2026-08-04 Sprint 10 的 `FE-001` 至 `FE-009` 已完成代码侧实现：新增 `frontend/` React/Vite/TypeScript 工程、锁定依赖与生成式 API client，统一 Cookie Session、CSRF、request_id、401 会话事件和错误恢复；用户端覆盖文件/批量/上传下载、搜索预览回收站、分享通知和公开分享，管理后台覆盖用户、组织、空间、配额、审计、统计、维护与导出。项目版本已统一为 `0.7.0`，OpenAPI 归档为 83 个路径、110 个操作、132 个 schemas；Compose 增加内部 `web:8080`，16 个无 profile 默认服务仍只由 gateway 发布宿主 `18080/19000`。frontend CI 已覆盖 npm 锁定安装、lint、typecheck、OpenAPI 漂移、单元测试、Web 镜像和 Chromium/Firefox/WebKit Playwright；本轮下一步是统一提交推送并以实际远端 run 全绿完成 Sprint 10 门禁，然后进入 Sprint 11。
+2026-08-04 Sprint 10 的 `FE-001` 至 `FE-009` 已完成：新增 `frontend/` React/Vite/TypeScript 工程、锁定依赖与生成式 API client，统一 Cookie Session、CSRF、request_id、401 会话事件和错误恢复；用户端覆盖文件/批量/上传下载、搜索预览回收站、分享通知和公开分享，管理后台覆盖用户、组织、空间、配额、审计、统计、维护与导出。项目版本已统一为 `0.7.0`，OpenAPI 归档为 83 个路径、110 个操作、132 个 schemas；Compose 增加内部 `web:8080`，16 个无 profile 默认服务仍只由 gateway 发布宿主 `18080/19000`。提交 `8da1abe` 已推送到 `dev`，对应 `backend-ci` run `30893658311` 的 9 个 job 全部成功，Sprint 10 远端门禁完成；当前下一步进入 Sprint 11。
 
 2026-08-04 已开始收敛 `backend-ci` 的重复执行：新增可测试的变更范围路由和同分支并发取消，backend、Rust、Windows 部署、安装包、MinIO 与依赖策略按受影响文件运行；Rust crate 源码/测试只进入 `rust-desktop`，Tauri UI/配置/图标/签名只进入安装包，Tauri `src-tauri` Rust 入口同时进入两者，CI workflow/router 与文档变更只保留 changes 路由校验。安装包 job 移除“任意 push 都执行”的兜底条件；Rust job 先执行 workspace tests，再以 `cargo clippy --workspace --all-targets --no-deps` 检查本地 crate。Cargo registry/git cache 和锁定 workspace `cargo fetch` 继续复用，手工 `workflow_dispatch` 保留完整门禁；每周定时任务继续覆盖 MinIO 与 Rust 依赖数据库漂移。
 

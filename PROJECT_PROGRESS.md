@@ -4,7 +4,7 @@
 
 ### 当前状态
 
-- 分支：`dev`；Sprint 10 范围为 `FE-001` 至 `FE-009`，代码、契约、Compose、CI 和文档已在共享工作树完成，等待统一提交推送及远端 `backend-ci` 结论。
+- 分支：`dev`；Sprint 10 范围 `FE-001` 至 `FE-009` 已由提交 `8da1abe` 推送，远端 `backend-ci` run `30893658311` 的 9 个 job 全部成功。
 - 项目版本已统一为 `0.7.0`；当前 OpenAPI 归档为 83 个路径、110 个操作、132 个 schemas，后端、前端、Rust workspace、Tauri 配置与 UI 使用同一版本基线。
 - 本轮遵循“不重复测试、不运行无关测试”：复用已经通过的 Sprint 9、MinIO、备份恢复、性能与桌面证据，只执行 Sprint 10 新增或受影响的前端、契约、Compose/CI 专项。
 
@@ -29,19 +29,19 @@
 - `npm run test:contract`：6 个 OpenAPI breaking-change checker 用例通过；检查删除 path/operation/响应字段与新增 required 请求输入。
 - Playwright 三引擎只运行 Sprint 10 新增和受影响流程并按失败项收敛，累计结果为 `13 passed, 2 skipped`；最后受影响的登录、文件版本回滚、目录接收人分享和上传队列主流程在 Chromium、Firefox、WebKit 均通过。
 - 后端受影响的目录、版本一致性与静态门禁通过；CI scope 回归 `20 passed`，`cargo metadata --locked --no-deps`、`cargo fmt --all --check`、`uv lock --check` 和 `git diff --check` 通过。
-- Sprint 9 后端、MinIO、备份恢复、性能与完整桌面测试未重复运行；远端门禁尚未写成已确认全绿。
+- Sprint 9 后端、MinIO、备份恢复、性能与完整桌面测试未重复运行。
+- 远端 `backend-ci` run `30893658311` 已完成：frontend、backend、Rust workspace、依赖策略、Windows 安装包、Windows 部署、MinIO 镜像策略和供应链门禁全部成功；远端 Playwright 为 `13 passed, 2 skipped`。
 
 ### 阻塞与风险
 
-- 本轮提交推送后的远端 `backend-ci` 尚待确认；如果出现失败，只按实际日志修复对应 frontend/backend/Windows scope，不扩展到无关测试集合。
 - 生产 DNS/受信证书证据和 MinIO 修复镜像仍不在当前本机环境内，正式 `v0.4.0` tag/Release 继续保持阻塞。
 - Sprint 11 身份与账号安全、Sprint 12 规模化治理和 `v1.0.0` 稳定版仍未开始。
 
 ### 下一步
 
-1. 复核本轮工作树、提交并推送 `dev`，等待按 scope 选中的远端 CI job 全部成功。
-2. 若远端失败，只修复对应日志指向的代码、配置或 E2E；通过后把 run ID 和最终结论回写到本记录。
-3. Sprint 10 远端门禁完成后进入 Sprint 11，先固定账号锁定/解锁、密码、会话、OIDC/OAuth 2.1 + PKCE 和 LDAP 同步契约。
+1. 进入 Sprint 11，先固定账号锁定/解锁、密码、会话、OIDC/OAuth 2.1 + PKCE 和 LDAP 同步契约。
+2. 在真实生产网络补齐 DNS、HTTPS readiness、受信证书与浏览器验收记录。
+3. 采用受支持的 MinIO 修复镜像完成供应链与备份恢复兼容门禁。
 
 ### 涉及文件
 
