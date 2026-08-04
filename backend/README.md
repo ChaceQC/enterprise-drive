@@ -189,6 +189,8 @@ uv run pytest tests/test_storage_minio_integration.py -q
 
 `backend-ci` 会在 GitHub Actions 中启动临时 MinIO 并运行该集成测试文件，覆盖基于 MinIO 公共 `get_presigned_url` 和标准 S3 HTTP POST/DELETE 的 multipart 控制面、预签名 PUT/GET、copy、delete、list、服务端 hash 校验和孤儿最终对象扫描。运行时依赖限制为 `minio>=7.2.20,<8`，升级到新的 7.x 版本时必须通过同一真实 MinIO 门禁；`DRIVE_S3_CONTROL_REQUEST_TIMEOUT_SECONDS` 和 `DRIVE_S3_CONTROL_PRESIGN_EXPIRES_SECONDS` 分别控制内部控制请求超时和控制 URL 有效期。
 
+CI 先按变更路径决定是否进入后端 job；后端源码、桌面 OpenAPI 契约、根 Compose、监控或 Nginx 模板变化才运行完整后端门禁。Ruff、Bandit、pip-audit 和 Mypy 会先执行，全部通过后才启动 PostgreSQL/MinIO、执行 migration、pytest、Docker smoke 与镜像构建，静态失败不再提前占用集成服务。
+
 ### BE-029 性能基准
 
 性能基准工具位于 `backend/performance/`，使用 dev group 中的 Locust；不会构建、拉取或启动服务。先按 `docs/performance-benchmark.md` 启动已经构建的真实 Compose 环境，再用 `uv run python -X utf8 -m performance.runner` 运行 `smoke`、`baseline` 或显式 `target` profile。报告包含 Locust CSV/HTML 和项目 `report.json`，fixture 默认在运行结束后清理。

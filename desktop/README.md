@@ -26,6 +26,7 @@
 
 - `update-public-key.txt` 是客户端固定的 Ed25519 公钥；`signing/desktop-code-signing.pem` 是公开代码签名证书，私钥不进入仓库。
 - GitHub Actions 从 Secrets 注入更新签名密钥和 Windows PFX，校验 Authenticode 证书 DER SHA-256、更新清单签名、包签名与包 SHA-256，再上传签名安装包和更新工件。
+- CI 的 Rust job 只执行 format、Clippy 和 workspace tests，不再先额外执行一次与 Tauri/NSIS 重复的 release build。普通 Rust PR 只跑 Rust 校验；push 或 Tauri/签名/安装包相关变更才构建安装包，固定 `@tauri-apps/cli@2.11.4` 使用 npm 二进制缓存，避免每次重新编译 CLI。
 - 当前公开证书 DER SHA-256：`765e82aba7bd3276f18eeadddd7b33257a68b7a1ddcdac6d4fc7f7bc639a3ca5`。
 
 ## 本地验证

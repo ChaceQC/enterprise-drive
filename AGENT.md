@@ -393,20 +393,29 @@ CI 基线：
 
 ```text
 checkout
-  -> setup uv
-  -> uv sync --frozen --all-extras --dev
-  -> ruff check
-  -> ruff format --check
-  -> bandit（中危/高危代码模式）
-  -> pip-audit（已锁定 Python 依赖）
-  -> mypy app
-  -> pytest
-  -> docker compose --env-file .env.windows.example -f compose.windows.yml config --quiet
-  -> public TLS Compose + ACME/TLS Nginx template syntax checks
-  -> Windows PowerShell 5.1 parser + TLS/backup-restore guard checks
-  -> build docker image
-  -> dependency vulnerability scan
+  -> changes（按变更路径选择 backend / desktop / installer / windows / MinIO / Rust policy）
+  -> backend：
+       setup uv -> uv sync --frozen --all-extras --dev
+       -> ruff check -> ruff format --check
+       -> bandit（中危/高危代码模式）
+       -> pip-audit（已锁定 Python 依赖）
+       -> mypy app
+       -> PostgreSQL/MinIO -> Alembic -> pytest
+       -> Compose/TLS/监控/Nginx 校验 -> Docker smoke/image build
+  -> desktop：
+       cargo fmt -> cargo clippy -> cargo test
+       -> push 或安装包相关变更时构建 Tauri/NSIS 并验证签名更新工件
+  -> windows：
+       PowerShell 5.1 parser + TLS/backup-restore/governance guard checks
+  -> MinIO：
+       immutable image policy -> 一次 SBOM/Grype runner 扫描 Server + Client
+  -> Rust policy：
+       cargo-deny advisories/licenses/bans/sources
 ```
+
+- `push` 与 `pull_request` 使用同一并发组，新提交会取消同分支旧运行，避免重复消耗 runner。
+- MinIO/Rust 依赖供应链门禁还会在每周定时任务执行；`workflow_dispatch` 运行完整 scope。
+- 变更路由器本身位于 `.github/scripts/ci_scope.py`，必须有回归测试；只修改文档时只保留路由 job，不启动耗时门禁。
 
 Dockerfile 要求：
 

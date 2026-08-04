@@ -1,5 +1,35 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-04 CI 重复任务收敛
+
+### 当前状态
+
+- 分支：`dev`；工作树以 `d806212` 为起点，目标是减少同一提交内与连续提交之间的重复 runner 消耗，不删除后端、桌面、Windows 部署或供应链门禁。
+- 基线取自成功运行 `30872900207`：8 个 job 合计约 `46.78` runner-minutes，其中 `rust-desktop` 为 `17.25` 分钟、`windows-desktop-installer` 为 `20.80` 分钟；桌面路径合计占约 `38` 分钟。
+
+### 已完成
+
+- 新增 `.github/scripts/ci_scope.py` 与 10 个标准库回归用例，按 backend、desktop、installer、rust_policy、windows、minio 六类 scope 路由变更；桌面契约进入后端测试，普通桌面 README 不启动耗时 job。
+- `push` 与 `pull_request` 使用同一仓库/分支并发组并开启 `cancel-in-progress`，新提交会取消同分支旧运行。
+- 后端 job 先执行 Ruff、Bandit、pip-audit 和 Mypy，通过后才启动 PostgreSQL/MinIO、执行 Alembic、pytest、Compose/Nginx、Docker smoke 与镜像构建。
+- Rust job 保留 format、Clippy 和 workspace tests，移除与 Tauri/NSIS 重复的 workspace release build；普通 Rust PR 只跑 Rust 校验，push 或安装包相关变更才构建安装包。
+- Tauri CLI 从每次约 9 分钟的 `cargo install` 改为固定 `@tauri-apps/cli@2.11.4` npm 二进制，并使用固定 SHA 的 `actions/cache v6.1.0` 缓存。
+- MinIO Server/Client 由两个 matrix job 合并为一个 supply-chain job，只安装一次 Grype、统一上传一组 SBOM/报告；镜像配置变化和每周一 UTC 03:17 定时任务继续执行该门禁，Rust dependency policy 同时保留每周检查。
+- `workflow_dispatch` 会运行完整 scope；工作流或路由脚本自身变化也会强制运行全部门禁。
+
+### 验证
+
+- `python -X utf8 .github/scripts/test_ci_scope.py`：`10 passed`。
+- `python -m py_compile`：路由器和测试脚本通过。
+- `ruamel.yaml`：workflow 顶层结构、8 个 job、schedule 和依赖关系解析通过。
+- `actionlint 1.7.12`：`.github/workflows/backend-ci.yml` 通过。
+- 合并后的 MinIO shell block 通过 `bash -n`；固定 npm Tauri CLI 在本机临时目录安装耗时约 6 秒，`tauri-cli 2.11.4` 可执行。
+- `git diff --check`：通过。
+
+### 待完成
+
+- 提交并推送本轮改动，跟踪一次真实全 scope `backend-ci`；确认所有门禁与签名安装包通过后，再记录实际 job 数、耗时和节省比例。
+
 ## 2026-08-04 Sprint 9 版本与契约收尾
 
 ### 当前状态

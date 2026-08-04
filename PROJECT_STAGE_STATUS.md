@@ -9,6 +9,7 @@
 - 后端核心能力、权限、分享、预览、搜索、完整管理 API、Windows 11 Docker 部署、监控 profile 和备份治理入口已经形成试点基础，Sprint 2 至 Sprint 6 代码侧剩余项为空。
 - `BE-036` 至 `BE-039`、`BE-044` 和 `BE-045` 已完成；后端、Rust workspace、Tauri 安装包、更新器和桌面 OpenAPI 契约已统一到 Sprint 9 目标版本 `0.6.0`。
 - Sprint 7 与 Sprint 8 的 `DC-001` 至 `DC-010` 已完成：Rust/Tauri Windows 11 骨架、设备会话、增量游标/tombstone、SQLite 离线队列、DTP/1 双向传输、文件监听、冲突副本、选择性同步、Windows 路径边界、诊断导出、签名更新和失败回退均已落地。
+- `backend-ci` 已改为按 backend、desktop、installer、Windows、MinIO 和 Rust policy 变更范围执行，并对同分支旧运行启用自动取消；本地 workflow/actionlint 验证已通过，真实全 scope 运行待本轮推送确认。
 - 真实生产 DNS/受信证书证据和 MinIO 修复镜像不在当前本机环境内，正式 `v0.4.0` tag/Release 保持阻塞；Web 用户端、身份治理、规模化治理和 `v1.0.0` 尚未完成。
 
 ## 2. 当前仓库快照

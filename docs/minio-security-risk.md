@@ -42,7 +42,7 @@ CI 已把允许集收紧到本次实际观测的 16/9 个唯一 ID；任何新�
 - `MINIO_BROWSER=off`，MinIO Console 不发布宿主端口。
 - MinIO API 只在 Compose 内网暴露，宿主只能经 Nginx gateway 的 S3 入口访问。
 - gateway 对 API 和本机 S3 入口执行 Host allowlist；未知 Host 返回 `444`。
-- MinIO Server/Client 使用 release + digest 双固定，CI 生成 SBOM、完整 Grype JSON，并阻断允许集之外的新 Critical。
+- MinIO Server/Client 使用 release + digest 双固定，CI 在同一 supply-chain runner 中生成两份 SBOM 和完整 Grype JSON，并阻断允许集之外的新 Critical；镜像配置变化和每周定时任务都会执行该门禁。
 
 这些措施降低当前配置下两个 MinIO 身份漏洞的可达性，但不改变镜像本身仍处于受影响版本范围的事实。以后若启用 OIDC、LDAP、Console 或新的 MinIO 管理入口，必须先完成镜像替换与重新扫描。
 
