@@ -59,8 +59,10 @@ def scope_for_paths(paths: Iterable[str]) -> dict[str, bool]:
     """Map changed repository paths to CI jobs.
 
     ``desktop/contracts`` is consumed by backend contract tests but does not
-    require a Rust build.  Rust dependency policy is intentionally limited to
-    manifests/lockfiles and is also covered by the scheduled run.
+    require a Rust build.  Library source changes run Rust validation without
+    rebuilding the installer; Tauri app/package/signing changes select the
+    installer.  Rust dependency policy is intentionally limited to dependency
+    and toolchain configuration and is also covered by the scheduled run.
     """
 
     scope = _empty_scope()
@@ -70,7 +72,9 @@ def scope_for_paths(paths: Iterable[str]) -> dict[str, bool]:
             continue
 
         if path == WORKFLOW_PATH or path.startswith(SCOPE_SCRIPT_PREFIX):
-            return _all_scope()
+            # ``changes`` 已经执行路由器回归；CI 定义或路由器本身变化
+            # 不代表业务代码变化，避免每次改 workflow 都重新编译桌面端。
+            continue
 
         if (
             (
@@ -113,22 +117,47 @@ def scope_for_paths(paths: Iterable[str]) -> dict[str, bool]:
             scope["rust_policy"] = True
             continue
 
-        if path.startswith("desktop/apps/") or path.startswith("desktop/signing/"):
+        if path.startswith("desktop/.cargo/"):
             scope["desktop"] = True
+            scope["installer"] = True
+            scope["rust_policy"] = True
+            continue
+
+        if path.startswith("desktop/signing/") or path == "desktop/update-public-key.txt":
             scope["installer"] = True
             continue
 
-        if path == "desktop/update-public-key.txt":
-            scope["desktop"] = True
+        if path.startswith("desktop/apps/"):
+            if path.endswith(".rs"):
+                scope["desktop"] = True
+            if path.endswith("Cargo.toml"):
+                scope["rust_policy"] = True
+                scope["desktop"] = True
+            # Tauri UI, generated schemas, capabilities, icons and config are
+            # consumed only by the installer build; a separate Rust job would
+            # compile the same application again.
             scope["installer"] = True
             continue
 
-        if (
-            path.startswith("desktop/crates/")
-            or path.startswith("desktop/.cargo/")
-            or path.startswith("desktop/scripts/")
-        ):
-            scope["desktop"] = True
+        if path.startswith("desktop/crates/"):
+            if path.endswith("Cargo.toml"):
+                scope["desktop"] = True
+                scope["installer"] = True
+                scope["rust_policy"] = True
+                continue
+            if "/tests/" in path or "/benches/" in path:
+                scope["desktop"] = True
+                continue
+            if path.endswith(".rs") or path.endswith("build.rs"):
+                scope["desktop"] = True
+                if path.startswith("desktop/crates/drive-update/"):
+                    scope["installer"] = True
+                continue
+
+        if path.startswith("desktop/scripts/"):
+            # Icon/helper scripts do not participate in the CI build unless
+            # their generated assets are changed; keep this path lightweight.
+            continue
 
     return scope
 

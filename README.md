@@ -138,7 +138,7 @@ uv run pytest tests/test_storage_minio_integration.py -q
 
 GitHub `backend-ci` 会启动临时 MinIO，并运行这组真实对象存储集成测试，覆盖基于公共预签名 API 和标准 S3 HTTP 的 multipart 控制面、预签名上传/下载、copy、delete、list、hash 校验和孤儿最终对象扫描。
 
-`backend-ci` 先通过 `.github/scripts/ci_scope.py` 计算变更范围：后端、桌面、Windows 部署、MinIO 镜像和 Rust 依赖策略只运行受影响的门禁；桌面普通 Rust PR 不再重复构建安装包，push 或 Tauri/安装包相关变更才执行 NSIS 构建。Rust job 先跑 workspace tests，再以 `--no-deps` 执行 Clippy；Rust 校验与安装包 job 共享按 `Cargo.lock`/toolchain 计算的 Cargo registry/git cache，安装包先一次 `cargo fetch` 再以 offline 模式构建。Tauri release 构建完成后才构建 `sign-update`/`verify-update`，复用 Tauri 已生成的 release 依赖和本地库；push 签名时只调用这两个二进制，避免签名步骤再次用 debug `cargo run` 编译整套依赖。相同分支的新提交会取消旧运行，MinIO 与 Rust 依赖供应链扫描每周一 UTC 03:17 额外执行，手工 `workflow_dispatch` 仍运行完整门禁。
+`backend-ci` 先通过 `.github/scripts/ci_scope.py` 计算变更范围：Rust crate 源码/测试只运行 `rust-desktop`，Tauri UI/配置/图标/签名只运行安装包 job，Tauri Rust 入口同时运行两者；普通库源码不会因为 push 自动重复构建 NSIS。CI workflow/router、桌面 README 和其他文档变更只保留 `changes` 轻量校验，相关业务代码未变化时直接跳过对应重 job。Rust job 先跑 workspace tests，再以 `--no-deps` 执行 Clippy；Rust 校验与安装包 job共享按 `Cargo.lock`/toolchain 计算的 Cargo registry/git cache，安装包先一次 `cargo fetch` 再以 offline 模式构建。相同分支的新提交会取消旧运行，MinIO 与 Rust 依赖供应链扫描每周一 UTC 03:17 额外执行，手工 `workflow_dispatch` 仍运行完整门禁。
 
 BE-029 目标规模门禁已完成：10,000 节点、100 万 OpenSearch 文档和 1,000 万审计日志均已进入真实 target 环境；search、audit、mixed、upload-init 沿用既有通过工件，本轮只补此前未通过的 `upload_complete`。最终计入 1,936 个 complete 样本、0 失败，吞吐 `58.364 RPS`，不含 storage merge 的 API P95 为 `790 ms`，端到端 P95 为 `840 ms`，storage merge P95 为 `71 ms`，`report.json passed=true`；2,000 个准备节点已全部清理。详见 `docs/performance-benchmark.md`。
 

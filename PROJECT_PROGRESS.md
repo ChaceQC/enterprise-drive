@@ -4,36 +4,38 @@
 
 ### 当前状态
 
-- 分支：`dev`；首轮优化提交为 `2b45ac5`，目标是减少同一提交内与连续提交之间的重复 runner 消耗，不删除后端、桌面、Windows 部署或供应链门禁。
+- 分支：`dev`；已推送的第二轮提交为 `e1dae40`。远端 run `30880492890` 的 8 个 job 都完成成功，但 workflow 总结论记录为 `cancelled`；日志确认把更新工具构建移到 Tauri 之后仍有重复 release 编译，因此本轮按用户要求改为“相关代码未变化就跳过对应 CI”。
 - 基线取自成功运行 `30872900207`：8 个 job 合计约 `46.78` runner-minutes，其中 `rust-desktop` 为 `17.25` 分钟、`windows-desktop-installer` 为 `20.80` 分钟；桌面路径合计占约 `38` 分钟。
 
 ### 已完成
 
-- 新增 `.github/scripts/ci_scope.py` 与 10 个标准库回归用例，按 backend、desktop、installer、rust_policy、windows、minio 六类 scope 路由变更；桌面契约进入后端测试，普通桌面 README 不启动耗时 job。
+- 新增 `.github/scripts/ci_scope.py` 与标准库回归用例，按 backend、desktop、installer、rust_policy、windows、minio 六类 scope 路由变更；桌面契约进入后端测试，普通桌面 README 不启动耗时 job。
 - `push` 与 `pull_request` 使用同一仓库/分支并发组并开启 `cancel-in-progress`，新提交会取消同分支旧运行。
 - 后端 job 先执行 Ruff、Bandit、pip-audit 和 Mypy，通过后才启动 PostgreSQL/MinIO、执行 Alembic、pytest、Compose/Nginx、Docker smoke 与镜像构建。
-- Rust job 保留 format、workspace tests 和 Clippy，但改为先跑 tests、再以 `--no-deps` 检查 workspace crate，减少第三方依赖在 Clippy 阶段重复检查和编译；同时移除与 Tauri/NSIS 重复的 workspace release build。普通 Rust PR 只跑 Rust 校验，push 或安装包相关变更才构建安装包。
+- Rust job 保留 format、workspace tests 和 Clippy，但改为先跑 tests、再以 `--no-deps` 检查 workspace crate，减少第三方依赖在 Clippy 阶段重复检查和编译；同时移除与 Tauri/NSIS 重复的 workspace release build。
 - Tauri CLI 从每次约 9 分钟的 `cargo install` 改为固定 `@tauri-apps/cli@2.11.4` npm 二进制，并使用固定 SHA 的 `actions/cache v6.1.0` 缓存。
 - 首次真实全 scope run `30877250861` 已全绿：总 runner-minutes `29.13`，相对基线 `46.78` 下降约 `37.7%`；backend `4.70` 分钟、Rust `7.87` 分钟、安装包 `13.65` 分钟、MinIO 合并扫描 `1.23` 分钟。
-- 该 run 日志确认安装包 job 内的 `tauri build` 之后，两个 debug `cargo run` 又重新编译整套 update 依赖；本轮追加 Cargo registry/git cache、一次锁定 workspace `cargo fetch` 和 offline 构建，并把 `sign-update`/`verify-update` 的 release 构建移到 Tauri release 构建之后，让工具复用已生成的 release 依赖和 `drive-update` 库，签名步骤继续直接复用二进制。
+- 首轮日志确认安装包 job 内的 `tauri build` 之后，两个 debug `cargo run` 又重新编译整套 update 依赖；随后改为一次 release 构建并直接调用二进制。run `30880492890` 进一步确认 Tauri release 构建完成后，更新工具步骤仍出现 `158` 行 `Compiling`，该步骤耗时 `2m11s`，说明不同 Cargo package/feature 图没有复用同一批 release artifact。
+- 本轮把路由收窄到实际代码依赖：普通 Rust crate 源码/测试只运行 `rust-desktop`；Tauri UI、配置、图标、公开密钥和签名材料只运行安装包；Tauri `src-tauri` Rust 入口与 `drive-update` 签名代码同时运行两者；Cargo manifest/lock/toolchain 仍进入 Rust、安装包和 policy。
+- CI workflow/router 自身变化只保留 `changes` 轻量校验，不再强制 backend、Rust、安装包、Windows 和供应链全部重跑；安装包 job 同时移除“任意 push 都执行”的兜底条件，并允许 Rust/policy job 按 scope 正常 skipped。
 - MinIO Server/Client 由两个 matrix job 合并为一个 supply-chain job，只安装一次 Grype、统一上传一组 SBOM/报告；镜像配置变化和每周一 UTC 03:17 定时任务继续执行该门禁，Rust dependency policy 同时保留每周检查。
-- `workflow_dispatch` 会运行完整 scope；工作流或路由脚本自身变化也会强制运行全部门禁。
+- `workflow_dispatch` 会运行完整 scope；每周 schedule 继续运行 MinIO 与 Rust policy。
 
 ### 验证
 
-- `python -X utf8 .github/scripts/test_ci_scope.py`：`10 passed`。
+- `python -X utf8 .github/scripts/test_ci_scope.py`：现为 `17 passed`。
 - `python -m py_compile`：路由器和测试脚本通过。
 - `ruamel.yaml`：workflow 顶层结构、8 个 job、schedule 和依赖关系解析通过。
 - `actionlint 1.7.12`：`.github/workflows/backend-ci.yml` 通过。
 - 合并后的 MinIO shell block 通过 `bash -n`；固定 npm Tauri CLI 在本机临时目录安装耗时约 6 秒，`tauri-cli 2.11.4` 可执行。
-- 本轮再次执行 `actionlint 1.7.12`、10 个 scope 回归、`py_compile`、workflow 步骤顺序断言、`cargo clippy --help`、`cargo metadata --locked --no-deps`（9 个 workspace package）和 `git diff --check`，均通过。
+- 本轮再次执行 `actionlint 1.7.12`、17 个 scope 回归、`py_compile` 和四组实际路由输出检查：CI workflow/router 为 `summary=none`，UI-only 为 `installer`，普通 crate source 为 `desktop`，Tauri Rust 为 `desktop,installer`；均通过。
 - 首轮远端 run `30877250861` 的 8 个 job 全部成功，桌面安装包签名/更新工件上传成功。
 - `git diff --check`：通过。
 
 ### 待远端验证
 
-- 已修改 `.github/workflows/backend-ci.yml`：调整 Rust tests/Clippy 顺序并增加 `--no-deps`，将更新签名工具构建移到 Tauri release 构建之后。
-- 本地 workflow、YAML、脚本和差异校验已通过；下一步提交并推送，检查安装包日志中的 `Compiling` 行数、工具步骤耗时、Cargo cache 命中和新的 runner-minutes。
+- 已修改 `.github/scripts/ci_scope.py`、回归测试和安装包 job 条件；当前变更只涉及 CI workflow/router 与文档，推送后预期只有 `changes` job 运行，其余重 job 全部显示 skipped。
+- 下一步提交并推送，确认远端 summary 为 `none`，并以一个 UI-only 与普通 crate-source 路由用例继续验证 installer/Rust job 的互斥跳过语义。
 
 ## 2026-08-04 Sprint 9 版本与契约收尾
 

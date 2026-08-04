@@ -23,10 +23,46 @@ class CiScopeTests(unittest.TestCase):
     def test_backend_change(self) -> None:
         self.assertEqual(scope_for_paths(["backend/app/main.py"]), enabled("backend"))
 
-    def test_desktop_crate_change_skips_installer_on_pr_routing(self) -> None:
+    def test_desktop_crate_source_skips_installer(self) -> None:
         self.assertEqual(
             scope_for_paths(["desktop/crates/drive-sync-engine/src/lib.rs"]),
             enabled("desktop"),
+        )
+
+    def test_desktop_crate_test_only_skips_installer(self) -> None:
+        self.assertEqual(
+            scope_for_paths(["desktop/crates/drive-sync-engine/tests/smoke.rs"]),
+            enabled("desktop"),
+        )
+
+    def test_desktop_ui_change_skips_rust_job(self) -> None:
+        self.assertEqual(
+            scope_for_paths(["desktop/apps/drive-desktop/ui/app.js"]),
+            enabled("installer"),
+        )
+
+    def test_desktop_tauri_config_change_skips_rust_job(self) -> None:
+        self.assertEqual(
+            scope_for_paths(["desktop/apps/drive-desktop/src-tauri/tauri.conf.json"]),
+            enabled("installer"),
+        )
+
+    def test_desktop_app_rust_change_runs_rust_and_installer(self) -> None:
+        self.assertEqual(
+            scope_for_paths(["desktop/apps/drive-desktop/src-tauri/src/lib.rs"]),
+            enabled("desktop", "installer"),
+        )
+
+    def test_update_signing_code_runs_rust_and_installer(self) -> None:
+        self.assertEqual(
+            scope_for_paths(["desktop/crates/drive-update/src/lib.rs"]),
+            enabled("desktop", "installer"),
+        )
+
+    def test_desktop_app_manifest_routes_to_all_desktop_gates(self) -> None:
+        self.assertEqual(
+            scope_for_paths(["desktop/apps/drive-desktop/src-tauri/Cargo.toml"]),
+            enabled("desktop", "installer", "rust_policy"),
         )
 
     def test_desktop_contract_routes_to_backend(self) -> None:
@@ -59,10 +95,16 @@ class CiScopeTests(unittest.TestCase):
             enabled("minio"),
         )
 
-    def test_workflow_change_runs_every_gate(self) -> None:
+    def test_workflow_change_only_runs_scope_router(self) -> None:
         self.assertEqual(
             scope_for_paths([".github/workflows/backend-ci.yml"]),
-            enabled("backend", "desktop", "installer", "rust_policy", "windows", "minio"),
+            enabled(),
+        )
+
+    def test_ci_script_change_only_runs_scope_router(self) -> None:
+        self.assertEqual(
+            scope_for_paths([".github/scripts/ci_scope.py"]),
+            enabled(),
         )
 
     def test_docs_only_change_runs_no_expensive_gate(self) -> None:

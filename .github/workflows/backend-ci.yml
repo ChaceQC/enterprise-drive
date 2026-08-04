@@ -462,9 +462,11 @@ jobs:
       - rust-dependency-policy
     if: >-
       always() &&
-      needs.changes.outputs.desktop == 'true' &&
-      (needs.changes.outputs.installer == 'true' || github.event_name == 'push') &&
-      needs.rust-desktop.result == 'success' &&
+      needs.changes.outputs.installer == 'true' &&
+      (
+        needs.rust-desktop.result == 'success' ||
+        needs.rust-desktop.result == 'skipped'
+      ) &&
       (
         needs.rust-dependency-policy.result == 'success' ||
         needs.rust-dependency-policy.result == 'skipped'

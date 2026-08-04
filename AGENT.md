@@ -393,7 +393,8 @@ CI 基线：
 
 ```text
 checkout
-  -> changes（按变更路径选择 backend / desktop / installer / windows / MinIO / Rust policy）
+  -> changes（按变更路径选择 backend / desktop / installer / windows / MinIO / Rust policy；
+              CI workflow/router 或文档变更只保留 changes 轻量校验）
   -> backend：
        setup uv -> uv sync --frozen --all-extras --dev
        -> ruff check -> ruff format --check
@@ -404,6 +405,8 @@ checkout
        -> Compose/TLS/监控/Nginx 校验 -> Docker smoke/image build
   -> desktop：
        cargo fmt -> cargo test -> cargo clippy --no-deps
+       Rust crate 源码/测试只进入 desktop；Tauri UI/配置/签名只进入 installer；
+       Tauri Rust 入口同时进入两者；普通库源码不因 push 自动构建安装包
        -> 共享 Cargo registry/git cache
        -> 一次锁定 workspace cargo fetch，后续安装包构建使用 offline
        -> 一次 release 构建 sign-update/verify-update
@@ -418,7 +421,7 @@ checkout
 
 - `push` 与 `pull_request` 使用同一并发组，新提交会取消同分支旧运行，避免重复消耗 runner。
 - MinIO/Rust 依赖供应链门禁还会在每周定时任务执行；`workflow_dispatch` 运行完整 scope。
-- 变更路由器本身位于 `.github/scripts/ci_scope.py`，必须有回归测试；只修改文档时只保留路由 job，不启动耗时门禁。
+- 变更路由器本身位于 `.github/scripts/ci_scope.py`，必须有回归测试；只修改文档、CI workflow/router 或桌面 README 时只保留路由 job，不启动耗时门禁。
 
 Dockerfile 要求：
 
