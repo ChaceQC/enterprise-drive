@@ -228,6 +228,45 @@ jobs:
           DRIVE_DATABASE_URL: postgresql+asyncpg://drive:drive-ci-password@127.0.0.1:15432/enterprise_drive
         run: uv run alembic upgrade head
 
+      - name: Start Redis and OpenSearch
+        run: |
+          REDIS_IMAGE="$(sed -n 's/^REDIS_IMAGE=//p' ../.env.windows.example)"
+          OPENSEARCH_IMAGE="$(sed -n 's/^OPENSEARCH_IMAGE=//p' ../.env.windows.example)"
+          test -n "${REDIS_IMAGE}"
+          test -n "${OPENSEARCH_IMAGE}"
+          docker run -d --name enterprise-drive-ci-redis \
+            -p 16379:6379 \
+            "${REDIS_IMAGE}" \
+            redis-server --appendonly no --requirepass drive-ci-password
+          docker run -d --name enterprise-drive-ci-opensearch \
+            -p 19200:9200 \
+            -e discovery.type=single-node \
+            -e DISABLE_INSTALL_DEMO_CONFIG=true \
+            -e DISABLE_SECURITY_PLUGIN=true \
+            -e OPENSEARCH_JAVA_OPTS="-Xms512m -Xmx512m" \
+            -e OPENSEARCH_INITIAL_ADMIN_PASSWORD=Drive-ci-password-2026! \
+            --ulimit memlock=-1:-1 \
+            "${OPENSEARCH_IMAGE}"
+          for _ in {1..60}; do
+            if docker exec enterprise-drive-ci-redis \
+              redis-cli -a drive-ci-password ping 2>/dev/null |
+              grep -qx PONG; then
+              break
+            fi
+            sleep 2
+          done
+          docker exec enterprise-drive-ci-redis \
+            redis-cli -a drive-ci-password ping 2>/dev/null |
+            grep -qx PONG
+          for _ in {1..90}; do
+            if curl -fsS http://127.0.0.1:19200/_cluster/health >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs enterprise-drive-ci-opensearch
+          exit 1
+
       - name: Start MinIO
         run: |
           MINIO_IMAGE="$(sed -n 's/^MINIO_IMAGE=//p' ../.env.windows.example)"
@@ -255,7 +294,23 @@ jobs:
           DRIVE_TEST_MINIO_BUCKET: "enterprise-drive-ci"
           DRIVE_RUN_POSTGRES_TESTS: "1"
           DRIVE_TEST_POSTGRES_URL: postgresql+asyncpg://drive:drive-ci-password@127.0.0.1:15432/enterprise_drive
+          DRIVE_RUN_SPRINT12_MATRIX: "1"
+          DRIVE_TEST_POSTGRES_CONTAINER: enterprise-drive-ci-postgres
+          DRIVE_TEST_REDIS_URL: redis://:drive-ci-password@127.0.0.1:16379/0
+          DRIVE_TEST_REDIS_CONTAINER: enterprise-drive-ci-redis
+          DRIVE_TEST_MINIO_CONTAINER: enterprise-drive-ci-minio
+          DRIVE_TEST_OPENSEARCH_URL: http://127.0.0.1:19200
+          DRIVE_TEST_OPENSEARCH_CONTAINER: enterprise-drive-ci-opensearch
+          DRIVE_SPRINT12_MATRIX_REPORT: output/sprint12-dependency-matrix.json
         run: uv run pytest
+
+      - name: Upload Sprint 12 dependency matrix
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sprint12-dependency-matrix
+          path: backend/output/sprint12-dependency-matrix.json
+          if-no-files-found: warn
 
       - name: Validate Windows Docker Compose
         working-directory: .
@@ -497,6 +552,8 @@ jobs:
       - name: Stop integration containers
         if: always()
         run: |
+          docker rm -f enterprise-drive-ci-opensearch >/dev/null 2>&1 || true
+          docker rm -f enterprise-drive-ci-redis >/dev/null 2>&1 || true
           docker rm -f enterprise-drive-ci-minio >/dev/null 2>&1 || true
           docker rm -f enterprise-drive-ci-postgres >/dev/null 2>&1 || true
 

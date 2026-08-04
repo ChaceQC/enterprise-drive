@@ -212,6 +212,8 @@ async def test_admin_stats_and_export_job_lifecycle(
     monkeypatch.setattr(admin_tasks, "S3StorageAdapter", lambda *, settings: storage_adapter)
     result = await admin_tasks._generate_export(job_id=export_id)
     assert result["row_count"] == 1
+    assert len(str(result["content_sha256"])) == 64
+    assert result["signature_algorithm"] == "hmac-sha256"
 
     detail = await client.get(f"/api/v1/admin/exports/{export_id}")
     download = await client.get(f"/api/v1/admin/exports/{export_id}/download")
@@ -220,12 +222,18 @@ async def test_admin_stats_and_export_job_lifecycle(
     assert detail.json()["result"]["row_count"] == 1
     assert download.status_code == 200
     assert download.json()["size_bytes"] > 0
+    assert len(download.json()["content_sha256"]) == 64
+    assert download.json()["signature_algorithm"] == "hmac-sha256"
+    assert download.json()["signature_key_id"] == settings.audit_signing_key_id
+    assert len(download.json()["signature_value"]) == 64
     assert download.json()["download_url"].startswith("https://storage.test/")
 
     async with session_factory() as session:
         stored_job = await session.get(AdminJob, export_id)
         assert stored_job is not None
         assert stored_job.storage_key is not None
+        assert stored_job.content_sha256 == download.json()["content_sha256"]
+        assert stored_job.signature_value == download.json()["signature_value"]
         assert stored_job.storage_key.startswith(f"exports/{tenant_id}/{export_id}/")
         content = storage_adapter.object_contents[
             (settings.s3_bucket, stored_job.storage_key)

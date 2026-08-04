@@ -13,11 +13,14 @@ from app.core.config import Settings
 logger = logging.getLogger("enterprise_drive.maintenance")
 
 MAINTENANCE_TASK_INTERVAL_SECONDS: dict[str, str] = {
+    "audit.ensure_partitions": "audit_partition_maintenance_interval_seconds",
+    "audit.archive_retention": "audit_archive_interval_seconds",
     "upload.expire_sessions": "upload_cleanup_interval_seconds",
     "file.cleanup_expired_trash": "trash_cleanup_interval_seconds",
     "share.expire_shares": "share_expiry_interval_seconds",
     "preview.cleanup_artifacts": "preview_cleanup_interval_seconds",
     "file.process_tree_operations": "file_tree_operation_interval_seconds",
+    "governance.process_permission_rebuilds": "file_tree_operation_interval_seconds",
     "file.cleanup_unreferenced_blobs": "blob_cleanup_interval_seconds",
     "file.cleanup_orphaned_objects": "orphan_object_scan_interval_seconds",
     "quota.reconcile_space_usage": "quota_reconciliation_interval_seconds",

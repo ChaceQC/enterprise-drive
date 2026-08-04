@@ -20,6 +20,7 @@ from app.modules.audit.models import AuditLog
 from app.modules.audit.repository import AuditRepository
 from app.modules.audit.schemas import AuditContext, AuditEvent
 from app.modules.audit.service import AuditService
+from app.modules.audit.signing import ContentSignature, sign_content
 from app.modules.auth.models import User
 from app.modules.file.models import Node
 from app.modules.permission.models import SpaceMember
@@ -100,6 +101,12 @@ async def _generate_export(*, job_id: UUID) -> dict[str, object]:
         )
         file_name = _export_file_name(resource=job.operation, job_id=job.id)
         storage_key = f"exports/{job.tenant_id}/{job.id}/{file_name}"
+        signature = sign_content(
+            content=content,
+            key=settings.audit_signing_key or settings.secret_key,
+            key_id=settings.audit_signing_key_id,
+            purpose=f"admin-export:{job.operation}",
+        )
         storage = S3StorageAdapter(settings=settings)
         await storage.put_object_bytes(
             bucket=settings.s3_bucket,
@@ -128,8 +135,15 @@ async def _generate_export(*, job_id: UUID) -> dict[str, object]:
         storage_key=storage_key,
         file_name=file_name,
         size_bytes=len(content),
+        signature=signature,
     )
-    return {"row_count": row_count, "size_bytes": len(content)}
+    return {
+        "row_count": row_count,
+        "size_bytes": len(content),
+        "content_sha256": signature.content_sha256,
+        "signature_algorithm": signature.algorithm,
+        "signature_key_id": signature.key_id,
+    }
 
 
 async def _cleanup_expired_exports(
@@ -256,6 +270,7 @@ async def _finish_export_succeeded(
     storage_key: str,
     file_name: str,
     size_bytes: int,
+    signature: ContentSignature,
 ) -> None:
     session_factory = get_session_factory()
     async with session_factory() as session:
@@ -270,6 +285,10 @@ async def _finish_export_succeeded(
         job.file_name = file_name
         job.content_type = "text/csv; charset=utf-8"
         job.size_bytes = size_bytes
+        job.content_sha256 = signature.content_sha256
+        job.signature_algorithm = signature.algorithm
+        job.signature_key_id = signature.key_id
+        job.signature_value = signature.value
         job.completed_at = utc_now()
         job.version += 1
         await _record_job_completion(session=session, job=job)
@@ -326,6 +345,20 @@ async def _run_maintenance_operation(
     tenant_id = _uuid_parameter(parameters, "tenant_id")
     limit = _int_parameter(parameters, "limit", 100)
     request_id = _str_parameter(parameters, "request_id")
+    if operation == "audit.ensure_partitions":
+        from app.workers.audit_tasks import _ensure_partitions
+
+        return await _ensure_partitions(
+            months_ahead=_optional_int_parameter(parameters, "months_ahead")
+        )
+    if operation == "audit.archive_retention":
+        from app.workers.audit_tasks import _archive_retention
+
+        return await _archive_retention(
+            tenant_id=str(tenant_id) if tenant_id else None,
+            delete_source=_bool_parameter(parameters, "delete_source", False),
+            retention_days=_optional_int_parameter(parameters, "retention_days"),
+        )
     if operation == "upload.expire_sessions":
         return dict(
             await _expire_upload_sessions(

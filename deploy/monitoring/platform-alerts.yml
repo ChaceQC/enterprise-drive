@@ -106,6 +106,17 @@ groups:
           summary: "企业网盘 Outbox 积压"
           description: "待处理、失败或处理中事件合计持续超过 1000。"
 
+      - alert: EnterpriseDriveOutboxOldestPending
+        expr: outbox_oldest_pending_age_seconds > 900
+        for: 10m
+        labels:
+          severity: warning
+          service: enterprise-drive
+          component: outbox
+        annotations:
+          summary: "企业网盘 Outbox 最老事件等待过久"
+          description: "最老未完成 Outbox 事件已等待超过 15 分钟，请检查消费队列、dead-letter 和外部投递。"
+
       - alert: EnterpriseDriveSearchIndexLag
         expr: search_index_lag_seconds > 300
         for: 10m

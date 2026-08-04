@@ -12,6 +12,7 @@ from app.modules.auth.router import router as auth_router
 from app.modules.device.router import router as device_router
 from app.modules.file.acl_router import router as file_acl_router
 from app.modules.file.router import router as file_router
+from app.modules.governance.router import router as governance_router
 from app.modules.identity.router import admin_router as admin_identity_router
 from app.modules.identity.router import router as identity_router
 from app.modules.org.directory_router import router as directory_router
@@ -45,6 +46,11 @@ router.include_router(
     admin_identity_router,
     prefix="/admin/identity",
     tags=["admin-identity"],
+)
+router.include_router(
+    governance_router,
+    prefix="/admin/governance",
+    tags=["admin-governance-sprint12"],
 )
 router.include_router(auth_router, prefix="/auth", tags=["auth"])
 router.include_router(identity_router, prefix="/auth", tags=["identity"])

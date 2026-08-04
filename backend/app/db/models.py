@@ -6,6 +6,7 @@ from app.modules.auth import models as auth_models
 from app.modules.device import models as device_models
 from app.modules.file import models as file_models
 from app.modules.file_security import models as file_security_models
+from app.modules.governance import models as governance_models
 from app.modules.identity import models as identity_models
 from app.modules.org import models as org_models
 from app.modules.permission import models as permission_models
@@ -23,6 +24,7 @@ __all__ = [
     "device_models",
     "file_models",
     "file_security_models",
+    "governance_models",
     "identity_models",
     "org_models",
     "permission_models",

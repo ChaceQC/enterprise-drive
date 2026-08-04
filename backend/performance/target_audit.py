@@ -132,7 +132,7 @@ async def generate_audit_rows(
                        resource_id, result, risk_level, request_id, ip, user_agent,
                        metadata_json, created_at
                 FROM {_STAGE_TABLE}
-                ON CONFLICT (id) DO NOTHING
+                ON CONFLICT (created_at, id) DO NOTHING
                 """
             )
         inserted += _parse_count(command, _INSERT_COUNT_RE)

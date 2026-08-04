@@ -33,6 +33,18 @@ def build_beat_schedule(settings: Settings) -> dict[str, dict[str, object]]:
             "schedule": outbox_interval,
             "options": {"queue": "permission"},
         },
+        "ensure-audit-partitions": {
+            "task": "audit.ensure_partitions",
+            "schedule": float(settings.audit_partition_maintenance_interval_seconds),
+            "kwargs": {"months_ahead": settings.audit_partition_months_ahead},
+            "options": {"queue": "maintenance"},
+        },
+        "archive-audit-retention": {
+            "task": "audit.archive_retention",
+            "schedule": float(settings.audit_archive_interval_seconds),
+            "kwargs": {"delete_source": settings.audit_archive_delete_source},
+            "options": {"queue": "maintenance"},
+        },
         "expire-upload-sessions": {
             "task": "upload.expire_sessions",
             "schedule": float(settings.upload_cleanup_interval_seconds),
@@ -64,6 +76,12 @@ def build_beat_schedule(settings: Settings) -> dict[str, dict[str, object]]:
         },
         "process-file-tree-operations": {
             "task": "file.process_tree_operations",
+            "schedule": float(settings.file_tree_operation_interval_seconds),
+            "kwargs": {"limit": batch_size},
+            "options": {"queue": "maintenance"},
+        },
+        "process-permission-rebuilds": {
+            "task": "governance.process_permission_rebuilds",
             "schedule": float(settings.file_tree_operation_interval_seconds),
             "kwargs": {"limit": batch_size},
             "options": {"queue": "maintenance"},

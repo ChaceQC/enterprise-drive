@@ -38,7 +38,10 @@ async def emit_permission_changed(
         resource_id=resource_id,
         permission_version=permission_version,
         reason=reason,
-        metadata=metadata,
+        metadata={
+            "actor_id": str(actor_id),
+            **metadata,
+        },
     )
     if scope == "tenant":
         await emit_share_recipients_rebuild_requested(

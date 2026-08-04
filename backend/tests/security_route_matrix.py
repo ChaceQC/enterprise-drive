@@ -51,6 +51,8 @@ _OIDC_PROVIDER_ID = "00000000-0000-4000-8000-000000000013"
 _IDENTITY_LINK_ID = "00000000-0000-4000-8000-000000000014"
 _LDAP_SOURCE_ID = "00000000-0000-4000-8000-000000000015"
 _LDAP_RUN_ID = "00000000-0000-4000-8000-000000000016"
+_OUTBOX_EVENT_ID = "00000000-0000-4000-8000-000000000017"
+_PERMISSION_REBUILD_ID = "00000000-0000-4000-8000-000000000018"
 _RAW_SHARE_TOKEN = "0" * 32
 _CONTENT_HASH = "0" * 64
 
@@ -485,6 +487,146 @@ ROUTE_SECURITY_MATRIX: tuple[SecurityRouteCase, ...] = (
         method="GET",
         template_path="/api/v1/admin/maintenance/tasks",
         request_path="/api/v1/admin/maintenance/tasks",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="super_admin",
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/admin/audit/governance",
+        request_path="/api/v1/admin/audit/governance",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="super_admin",
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/admin/outbox/dead-letters",
+        request_path="/api/v1/admin/outbox/dead-letters",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="super_admin",
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/admin/outbox/dead-letters/{event_id}",
+        request_path=f"/api/v1/admin/outbox/dead-letters/{_OUTBOX_EVENT_ID}",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="super_admin",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/admin/outbox/dead-letters/{event_id}/replay",
+        request_path=f"/api/v1/admin/outbox/dead-letters/{_OUTBOX_EVENT_ID}/replay",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="required",
+        authorization="super_admin",
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/admin/governance/overview",
+        request_path="/api/v1/admin/governance/overview",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="super_admin",
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/admin/governance/lifecycle-policy",
+        request_path="/api/v1/admin/governance/lifecycle-policy",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="super_admin",
+    ),
+    SecurityRouteCase(
+        method="PATCH",
+        template_path="/api/v1/admin/governance/lifecycle-policy",
+        request_path="/api/v1/admin/governance/lifecycle-policy",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="required",
+        authorization="super_admin",
+        json_body={
+            "trash_retention_days": 30,
+            "preview_retention_days": 30,
+            "expected_version": 1,
+        },
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/admin/governance/lifecycle-runs",
+        request_path="/api/v1/admin/governance/lifecycle-runs",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="required",
+        authorization="super_admin",
+        json_body={"dry_run": True, "limit": 10},
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/admin/governance/lifecycle-runs",
+        request_path="/api/v1/admin/governance/lifecycle-runs",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="super_admin",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path="/api/v1/admin/governance/permission-rebuilds",
+        request_path="/api/v1/admin/governance/permission-rebuilds",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="required",
+        authorization="super_admin",
+        json_body={"scope": "space", "space_id": _SPACE_ID},
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/admin/governance/permission-rebuilds",
+        request_path="/api/v1/admin/governance/permission-rebuilds",
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="super_admin",
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/admin/governance/permission-rebuilds/{operation_id}",
+        request_path=(
+            f"/api/v1/admin/governance/permission-rebuilds/{_PERMISSION_REBUILD_ID}"
+        ),
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="none",
+        authorization="super_admin",
+    ),
+    SecurityRouteCase(
+        method="POST",
+        template_path=(
+            "/api/v1/admin/governance/permission-rebuilds/{operation_id}/retry"
+        ),
+        request_path=(
+            f"/api/v1/admin/governance/permission-rebuilds/"
+            f"{_PERMISSION_REBUILD_ID}/retry"
+        ),
+        access_mode="admin",
+        tenant_scope="session",
+        csrf_mode="required",
+        authorization="super_admin",
+    ),
+    SecurityRouteCase(
+        method="GET",
+        template_path="/api/v1/admin/governance/tree-operations",
+        request_path="/api/v1/admin/governance/tree-operations",
         access_mode="admin",
         tenant_scope="session",
         csrf_mode="none",

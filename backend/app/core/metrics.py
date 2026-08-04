@@ -104,6 +104,13 @@ outbox_pending_total = Gauge(
     multiprocess_mode="livemostrecent",
 )
 
+outbox_oldest_pending_age_seconds = Gauge(
+    "outbox_oldest_pending_age_seconds",
+    "最早未完成 Outbox 事件的积压时间",
+    registry=API_METRICS_REGISTRY,
+    multiprocess_mode="livemostrecent",
+)
+
 _OUTBOX_STATUSES = ("pending", "failed", "processing", "dead", "sent")
 _MAX_LABEL_LENGTH = 128
 P = ParamSpec("P")
@@ -226,6 +233,10 @@ def set_outbox_pending_metrics(counts: dict[str, int]) -> None:
         outbox_pending_total.labels(status=status).set(max(int(counts.get(status, 0)), 0))
 
 
+def set_outbox_oldest_pending_age(*, age_seconds: float) -> None:
+    outbox_oldest_pending_age_seconds.set(max(age_seconds, 0.0))
+
+
 def set_search_index_lag(*, lag_seconds: float) -> None:
     search_index_lag_seconds.set(max(lag_seconds, 0.0))
 
@@ -263,6 +274,21 @@ async def refresh_database_metrics(settings: Settings) -> None:
                     str(status): int(count) for status, count in result.all() if status is not None
                 }
                 set_outbox_pending_metrics(counts)
+
+                oldest_outbox = await session.scalar(
+                    select(func.min(OutboxEvent.created_at)).where(
+                        OutboxEvent.status.in_(["pending", "failed", "processing"]),
+                    )
+                )
+                if oldest_outbox is None:
+                    set_outbox_oldest_pending_age(age_seconds=0.0)
+                else:
+                    set_outbox_oldest_pending_age(
+                        age_seconds=max(
+                            (datetime.now(UTC) - ensure_utc(oldest_outbox)).total_seconds(),
+                            0.0,
+                        )
+                    )
 
                 oldest = await session.scalar(
                     select(func.min(OutboxEvent.created_at)).where(

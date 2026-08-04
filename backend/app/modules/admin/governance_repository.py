@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
-from app.modules.audit.models import OutboxEvent
+from app.modules.audit.models import AuditArchive, OutboxEvent
 from app.modules.auth.models import User
 from app.modules.file.models import FileVersion, Node
 from app.modules.quota.models import QuotaAccount
@@ -79,6 +79,35 @@ class AdminGovernanceRepository:
                 OutboxEvent.status == "dead",
             ),
         }
+
+    async def audit_archive_stats(self, *, tenant_id: UUID) -> dict[str, Any]:
+        result = await self.session.execute(
+            select(
+                func.count(AuditArchive.id),
+                func.count(AuditArchive.id).filter(AuditArchive.status == "failed"),
+                func.max(AuditArchive.updated_at).filter(AuditArchive.status == "succeeded"),
+            ).where(AuditArchive.tenant_id == tenant_id)
+        )
+        total, failed, last_succeeded_at = result.one()
+        return {
+            "total": int(total or 0),
+            "failed": int(failed or 0),
+            "last_succeeded_at": last_succeeded_at,
+        }
+
+    async def list_recent_audit_archives(
+        self,
+        *,
+        tenant_id: UUID,
+        limit: int,
+    ) -> list[AuditArchive]:
+        result = await self.session.execute(
+            select(AuditArchive)
+            .where(AuditArchive.tenant_id == tenant_id)
+            .order_by(AuditArchive.created_at.desc(), AuditArchive.id.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
 
     async def _count(
         self,

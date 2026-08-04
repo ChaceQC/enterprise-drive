@@ -36,10 +36,10 @@ def test_route_security_matrix_exactly_matches_runtime_openapi(settings: Setting
     matrix_keys = _matrix_route_keys(ROUTE_SECURITY_MATRIX)
     openapi_keys = _openapi_route_keys(create_app(settings))
 
-    assert len(ROUTE_SECURITY_MATRIX) == 134
+    assert len(ROUTE_SECURITY_MATRIX) == 148
     assert len(matrix_keys) == len(ROUTE_SECURITY_MATRIX)
     assert matrix_keys == openapi_keys
-    assert len(matrix_keys - {("GET", "/api/v1/ping"), ("POST", "/api/v1/auth/login")}) == 132
+    assert len(matrix_keys - {("GET", "/api/v1/ping"), ("POST", "/api/v1/auth/login")}) == 146
 
 
 def test_route_security_matrix_metadata_is_consistent() -> None:

@@ -117,7 +117,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "企业网盘"
-    app_version: str = "0.8.0"
+    app_version: str = "0.9.0"
     service_name: str = "enterprise-drive-api"
     environment: Literal["local", "test", "staging", "production"] = "local"
     debug: bool = False
@@ -168,6 +168,21 @@ class Settings(BaseSettings):
     outbox_batch_size: int = 100
     outbox_max_retries: int = 8
     outbox_dispatch_interval_seconds: int = Field(default=5, ge=1)
+    outbox_retry_max_delay_seconds: int = Field(default=300, ge=1, le=86400)
+    outbox_retry_jitter_ratio: float = Field(default=0.2, ge=0, le=1)
+    outbox_processing_timeout_seconds: int = Field(default=300, ge=1, le=86400)
+    audit_external_delivery_url: str | None = None
+    audit_external_hmac_key: str | None = None
+    audit_external_key_id: str = Field(default="default", min_length=1, max_length=128)
+    audit_external_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    audit_partition_months_ahead: int = Field(default=6, ge=1, le=24)
+    audit_partition_maintenance_interval_seconds: int = Field(default=86400, ge=60)
+    audit_retention_days: int = Field(default=365, ge=1, le=3650)
+    audit_archive_interval_seconds: int = Field(default=86400, ge=60)
+    audit_archive_max_rows: int = Field(default=250_000, ge=1, le=5_000_000)
+    audit_archive_delete_source: bool = False
+    audit_signing_key: str | None = None
+    audit_signing_key_id: str = Field(default="default", min_length=1, max_length=128)
     maintenance_task_batch_size: int = Field(default=100, ge=1)
     file_tree_async_threshold: int = Field(default=1000, ge=2)
     file_tree_operation_batch_size: int = Field(default=500, ge=1)

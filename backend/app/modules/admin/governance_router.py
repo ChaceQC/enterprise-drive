@@ -18,6 +18,7 @@ from app.db.session import get_db_session
 from app.infrastructure.storage.base import StorageAdapter
 from app.modules.admin.governance_repository import AdminGovernanceRepository
 from app.modules.admin.governance_schemas import (
+    AdminAuditGovernanceResponse,
     AdminExportCreateRequest,
     AdminExportDownloadResponse,
     AdminExportResource,
@@ -27,6 +28,9 @@ from app.modules.admin.governance_schemas import (
     AdminMaintenanceOperation,
     AdminMaintenanceOverviewResponse,
     AdminMaintenanceRunRequest,
+    AdminOutboxDeadLetterListResponse,
+    AdminOutboxDeadLetterResponse,
+    AdminOutboxReplayResponse,
     AdminOverviewStatsResponse,
 )
 from app.modules.admin.governance_service import AdminGovernanceService
@@ -73,6 +77,75 @@ async def get_admin_overview_stats(
 ) -> AdminOverviewStatsResponse:
     return await service.get_overview_stats(
         current_user=current_user,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.get("/audit/governance", response_model=AdminAuditGovernanceResponse)
+async def get_admin_audit_governance(
+    http_request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[AdminGovernanceService, Depends(get_admin_governance_service)],
+) -> AdminAuditGovernanceResponse:
+    return await service.get_audit_governance(
+        current_user=current_user,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.get(
+    "/outbox/dead-letters",
+    response_model=AdminOutboxDeadLetterListResponse,
+)
+async def list_admin_outbox_dead_letters(
+    http_request: Request,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[AdminGovernanceService, Depends(get_admin_governance_service)],
+    event_type: Annotated[str | None, Query(min_length=1, max_length=128)] = None,
+    error_kind: Annotated[str | None, Query(pattern="^(transient|permanent)$")] = None,
+    cursor: Annotated[str | None, Query(min_length=1)] = None,
+    page_size: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> AdminOutboxDeadLetterListResponse:
+    return await service.list_outbox_dead_letters(
+        current_user=current_user,
+        event_type=event_type,
+        error_kind=error_kind,
+        cursor=cursor,
+        page_size=page_size,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.get(
+    "/outbox/dead-letters/{event_id}",
+    response_model=AdminOutboxDeadLetterResponse,
+)
+async def get_admin_outbox_dead_letter(
+    http_request: Request,
+    event_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[AdminGovernanceService, Depends(get_admin_governance_service)],
+) -> AdminOutboxDeadLetterResponse:
+    return await service.get_outbox_dead_letter(
+        current_user=current_user,
+        event_id=event_id,
+        audit_context=build_audit_context(http_request),
+    )
+
+
+@router.post(
+    "/outbox/dead-letters/{event_id}/replay",
+    response_model=AdminOutboxReplayResponse,
+)
+async def replay_admin_outbox_dead_letter(
+    http_request: Request,
+    event_id: UUID,
+    current_user: Annotated[User, Depends(get_current_user)],
+    service: Annotated[AdminGovernanceService, Depends(get_admin_governance_service)],
+) -> AdminOutboxReplayResponse:
+    return await service.replay_outbox_dead_letter(
+        current_user=current_user,
+        event_id=event_id,
         audit_context=build_audit_context(http_request),
     )
 

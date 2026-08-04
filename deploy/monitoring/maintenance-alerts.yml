@@ -41,6 +41,26 @@ groups:
           summary: "企业网盘大目录后台操作失败"
           description: "最近 15 分钟有大目录删除、恢复或彻底删除任务进入 failed，请查询 operation 状态并在排障后重试。"
 
+      - alert: EnterpriseDrivePermissionRebuildFailed
+        expr: increase(maintenance_task_result_total{task="governance.process_permission_rebuilds",metric="failed"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: enterprise-drive
+        annotations:
+          summary: "企业网盘大目录权限重算失败"
+          description: "最近 15 分钟有权限重算任务失败，请在治理页面确认进度、错误分类并重试。"
+
+      - alert: EnterpriseDriveLifecycleRunFailed
+        expr: increase(worker_tasks_total{task="governance.run_lifecycle_policy",status!="success"}[15m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          service: enterprise-drive
+        annotations:
+          summary: "企业网盘生命周期治理运行失败"
+          description: "生命周期策略运行失败，请检查治理运行记录、对象存储和 maintenance Worker。"
+
       - alert: EnterpriseDriveQuotaDriftDetected
         expr: increase(maintenance_task_result_total{task="quota.reconcile_space_usage",metric=~"snapshot_drifts|ledger_drifts"}[1h]) > 0
         for: 0m

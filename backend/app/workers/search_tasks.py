@@ -15,6 +15,7 @@ from app.infrastructure.storage.s3 import S3StorageAdapter
 from app.modules.audit.dispatcher import LoggingOutboxPublisher, OutboxDispatcher, OutboxPublisher
 from app.modules.audit.models import OutboxEvent
 from app.modules.audit.repository import AuditRepository
+from app.modules.governance.repository import GovernanceRepository
 from app.modules.search.events import (
     SEARCH_ACL_REBUILD_REQUESTED,
     SEARCH_EXTRACT_REQUESTED,
@@ -61,6 +62,7 @@ async def _dispatch_search_outbox(batch_size: int | None = None) -> dict[str, in
         )
         publisher = SearchOutboxPublisher(
             index_service=index_service,
+            governance_repository=GovernanceRepository(session),
             extraction_service=SearchExtractionService(
                 repository=search_repository,
                 index_service=index_service,
@@ -103,10 +105,12 @@ class SearchOutboxPublisher:
         *,
         index_service: SearchIndexService,
         extraction_service: SearchExtractionService | None = None,
+        governance_repository: GovernanceRepository | None = None,
         fallback_publisher: OutboxPublisher,
     ) -> None:
         self.index_service = index_service
         self.extraction_service = extraction_service
+        self.governance_repository = governance_repository
         self.fallback_publisher = fallback_publisher
 
     async def publish(self, event: OutboxEvent) -> None:
@@ -137,6 +141,36 @@ class SearchOutboxPublisher:
         resource_id = event.payload.get("resource_id")
         if not isinstance(scope, str) or not isinstance(resource_id, str):
             raise ValueError("search acl rebuild event missing scope or resource_id")
+        if self.governance_repository is not None:
+            parsed_resource_id = UUID(resource_id)
+            permission_version = event.payload.get("permission_version")
+            if not isinstance(permission_version, int):
+                raise ValueError("search acl rebuild event missing permission_version")
+            requested_by = _optional_uuid(event.payload.get("actor_id"))
+            if scope == "space":
+                space_id = parsed_resource_id
+                root_node_id = None
+            elif scope == "node":
+                node = await self.governance_repository.get_node(
+                    tenant_id=event.tenant_id,
+                    node_id=parsed_resource_id,
+                )
+                if node is None:
+                    return
+                space_id = node.space_id
+                root_node_id = node.id
+            else:
+                raise ValueError(f"unsupported search acl rebuild scope: {scope}")
+            await self.governance_repository.create_or_refresh_permission_rebuild(
+                tenant_id=event.tenant_id,
+                space_id=space_id,
+                root_node_id=root_node_id,
+                scope=scope,
+                permission_version=permission_version,
+                requested_by=requested_by,
+                request_id=_optional_string(event.payload.get("request_id")),
+            )
+            return
         await self.index_service.rebuild_acl_tokens(
             tenant_id=event.tenant_id,
             scope=scope,
@@ -153,3 +187,14 @@ class SearchOutboxPublisher:
             tenant_id=event.tenant_id,
             version_id=UUID(version_id),
         )
+
+
+def _optional_uuid(value: object) -> UUID | None:
+    try:
+        return UUID(str(value)) if value else None
+    except ValueError:
+        return None
+
+
+def _optional_string(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None

@@ -1,15 +1,27 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import TypedDict
 from uuid import UUID, uuid4
 
-from sqlalchemy import and_, or_, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.pagination import PageCursor
 from app.core.security import utc_now
 from app.modules.audit.models import AuditLog, OutboxEvent
 from app.modules.audit.schemas import AuditContext, AuditEvent
+
+
+class OutboxGovernanceStats(TypedDict):
+    pending: int
+    processing: int
+    failed: int
+    dead: int
+    sent: int
+    last_sent_at: datetime | None
+    last_failed_at: datetime | None
+    oldest_pending_at: datetime | None
 
 
 class AuditRepository:
@@ -123,6 +135,20 @@ class AuditRepository:
         )
         return list(query_result.scalars().all())
 
+    async def get_audit_log(
+        self,
+        *,
+        audit_log_id: UUID,
+        tenant_id: UUID | None = None,
+    ) -> AuditLog | None:
+        conditions = [AuditLog.id == audit_log_id]
+        if tenant_id is not None:
+            conditions.append(AuditLog.tenant_id == tenant_id)
+        result = await self.session.execute(
+            select(AuditLog).where(*conditions).order_by(AuditLog.created_at.desc()).limit(1)
+        )
+        return result.scalar_one_or_none()
+
     async def claim_due_outbox_events(
         self,
         *,
@@ -168,6 +194,7 @@ class AuditRepository:
     ) -> None:
         now = sent_at or utc_now()
         event.status = "sent"
+        event.dead_at = None
         event.updated_at = now
         await self.session.flush()
 
@@ -177,14 +204,129 @@ class AuditRepository:
         event: OutboxEvent,
         next_retry_at: datetime,
         max_retries: int,
+        error_kind: str,
+        error_code: str,
+        permanent: bool = False,
         failed_at: datetime | None = None,
     ) -> None:
         now = failed_at or utc_now()
         event.retry_count += 1
-        event.status = "dead" if event.retry_count >= max_retries else "failed"
+        is_dead = permanent or event.retry_count >= max_retries
+        event.status = "dead" if is_dead else "failed"
         event.next_retry_at = next_retry_at
+        event.last_error_kind = error_kind
+        event.last_error_code = error_code
+        event.last_failed_at = now
+        event.dead_at = now if is_dead else None
         event.updated_at = now
         await self.session.flush()
+
+    async def list_dead_letters(
+        self,
+        *,
+        tenant_id: UUID,
+        event_type: str | None,
+        error_kind: str | None,
+        cursor: PageCursor | None,
+        limit: int,
+    ) -> list[OutboxEvent]:
+        conditions = [
+            OutboxEvent.tenant_id == tenant_id,
+            OutboxEvent.status == "dead",
+        ]
+        if event_type is not None:
+            conditions.append(OutboxEvent.event_type == event_type)
+        if error_kind is not None:
+            conditions.append(OutboxEvent.last_error_kind == error_kind)
+        if cursor is not None:
+            conditions.append(
+                or_(
+                    OutboxEvent.created_at < cursor.created_at,
+                    and_(
+                        OutboxEvent.created_at == cursor.created_at,
+                        OutboxEvent.id < cursor.item_id,
+                    ),
+                )
+            )
+        result = await self.session.execute(
+            select(OutboxEvent)
+            .where(*conditions)
+            .order_by(OutboxEvent.created_at.desc(), OutboxEvent.id.desc())
+            .limit(limit)
+        )
+        return list(result.scalars().all())
+
+    async def get_dead_letter(
+        self,
+        *,
+        tenant_id: UUID,
+        event_id: UUID,
+        for_update: bool = False,
+    ) -> OutboxEvent | None:
+        statement = select(OutboxEvent).where(
+            OutboxEvent.tenant_id == tenant_id,
+            OutboxEvent.id == event_id,
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        result = await self.session.execute(statement)
+        return result.scalar_one_or_none()
+
+    async def replay_dead_letter(
+        self,
+        *,
+        event: OutboxEvent,
+        replayed_by: UUID,
+        replayed_at: datetime | None = None,
+    ) -> bool:
+        if event.status != "dead":
+            return False
+        now = replayed_at or utc_now()
+        event.status = "pending"
+        event.retry_count = 0
+        event.next_retry_at = now
+        event.dead_at = None
+        event.last_error_kind = None
+        event.last_error_code = None
+        event.last_failed_at = None
+        event.replay_count += 1
+        event.last_replayed_at = now
+        event.last_replayed_by = replayed_by
+        event.updated_at = now
+        await self.session.flush()
+        return True
+
+    async def outbox_governance_stats(
+        self,
+        *,
+        tenant_id: UUID,
+    ) -> OutboxGovernanceStats:
+        counts_result = await self.session.execute(
+            select(OutboxEvent.status, func.count())
+            .where(OutboxEvent.tenant_id == tenant_id)
+            .group_by(OutboxEvent.status)
+        )
+        counts = {str(status): int(count) for status, count in counts_result.all()}
+        timestamps_result = await self.session.execute(
+            select(
+                func.max(OutboxEvent.updated_at).filter(OutboxEvent.status == "sent"),
+                func.max(OutboxEvent.last_failed_at),
+                func.min(OutboxEvent.created_at).filter(
+                    OutboxEvent.status.in_(["pending", "failed", "processing"])
+                ),
+            ).where(OutboxEvent.tenant_id == tenant_id)
+        )
+        last_sent_at, last_failed_at, oldest_pending_at = timestamps_result.one()
+        return {
+            "pending": counts.get("pending", 0),
+            "processing": counts.get("processing", 0),
+            "failed": counts.get("failed", 0),
+            "dead": counts.get("dead", 0),
+            "sent": counts.get("sent", 0),
+            "last_sent_at": last_sent_at,
+            "last_failed_at": last_failed_at,
+            "oldest_pending_at": oldest_pending_at,
+        }
 
     async def reset_stale_processing(
         self,

@@ -18,7 +18,7 @@ from app.core.logging import JsonFormatter, reset_log_context, set_log_context
 from app.main import create_app
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-PROJECT_VERSION = "0.8.0"
+PROJECT_VERSION = "0.9.0"
 
 
 @pytest_asyncio.fixture

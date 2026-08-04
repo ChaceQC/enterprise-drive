@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field
 
 AdminJobStatus = Literal["pending", "running", "succeeded", "failed", "expired"]
 AdminMaintenanceOperation = Literal[
+    "audit.ensure_partitions",
+    "audit.archive_retention",
     "upload.expire_sessions",
     "file.cleanup_expired_trash",
     "share.expire_shares",
@@ -63,6 +65,7 @@ class AdminMaintenanceRunRequest(BaseModel):
     limit: int = Field(default=100, ge=1, le=10_000)
     retention_days: int | None = Field(default=None, ge=1, le=3650)
     scan_all: bool = True
+    delete_source: bool = False
 
 
 class AdminJobResponse(BaseModel):
@@ -77,6 +80,10 @@ class AdminJobResponse(BaseModel):
     file_name: str | None
     content_type: str | None
     size_bytes: int | None
+    content_sha256: str | None
+    signature_algorithm: str | None
+    signature_key_id: str | None
+    signature_value: str | None
     error_code: str | None
     error_message: str | None
     version: int
@@ -101,5 +108,76 @@ class AdminExportDownloadResponse(BaseModel):
     file_name: str
     content_type: str
     size_bytes: int
+    content_sha256: str | None
+    signature_algorithm: str | None
+    signature_key_id: str | None
+    signature_value: str | None
     download_url: str
     expires_at: datetime
+
+
+class AdminAuditArchiveResponse(BaseModel):
+    id: UUID
+    period_start: datetime
+    period_end: datetime
+    status: str
+    row_count: int
+    file_name: str | None
+    size_bytes: int | None
+    content_sha256: str | None
+    signature_algorithm: str | None
+    signature_key_id: str | None
+    delete_source: bool
+    source_deleted_at: datetime | None
+    error_code: str | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminAuditGovernanceResponse(BaseModel):
+    generated_at: datetime
+    external_delivery_enabled: bool
+    partition_months_ahead: int
+    retention_days: int
+    archive_delete_source: bool
+    outbox_pending: int
+    outbox_processing: int
+    outbox_failed: int
+    outbox_dead: int
+    outbox_sent: int
+    oldest_pending_at: datetime | None
+    last_delivery_succeeded_at: datetime | None
+    last_delivery_failed_at: datetime | None
+    archives_total: int
+    archives_failed: int
+    last_archive_succeeded_at: datetime | None
+    recent_archives: list[AdminAuditArchiveResponse]
+
+
+class AdminOutboxDeadLetterResponse(BaseModel):
+    id: UUID
+    status: str
+    event_type: str
+    aggregate_type: str
+    aggregate_id: UUID
+    retry_count: int
+    last_error_kind: str | None
+    last_error_code: str | None
+    last_failed_at: datetime | None
+    dead_at: datetime | None
+    replay_count: int
+    last_replayed_at: datetime | None
+    last_replayed_by: UUID | None
+    created_at: datetime
+    updated_at: datetime
+    payload_keys: list[str]
+
+
+class AdminOutboxDeadLetterListResponse(BaseModel):
+    items: list[AdminOutboxDeadLetterResponse]
+    next_cursor: str | None = None
+
+
+class AdminOutboxReplayResponse(BaseModel):
+    event: AdminOutboxDeadLetterResponse
+    replayed: bool

@@ -18,6 +18,8 @@ from app.core.pagination import decode_page_cursor, encode_page_cursor
 from app.infrastructure.storage.base import StorageAdapter
 from app.modules.admin.governance_repository import AdminGovernanceRepository
 from app.modules.admin.governance_schemas import (
+    AdminAuditArchiveResponse,
+    AdminAuditGovernanceResponse,
     AdminExportCreateRequest,
     AdminExportDownloadResponse,
     AdminJobListResponse,
@@ -25,10 +27,14 @@ from app.modules.admin.governance_schemas import (
     AdminMaintenanceOverviewResponse,
     AdminMaintenanceRunRequest,
     AdminMaintenanceTaskHealthResponse,
+    AdminOutboxDeadLetterListResponse,
+    AdminOutboxDeadLetterResponse,
+    AdminOutboxReplayResponse,
     AdminOverviewStatsResponse,
 )
 from app.modules.admin.job_repository import AdminJobRepository
 from app.modules.admin.models import AdminJob
+from app.modules.audit.models import AuditArchive, OutboxEvent
 from app.modules.audit.schemas import AuditContext, AuditEvent
 from app.modules.audit.service import AuditService
 from app.modules.auth.models import User
@@ -79,6 +85,215 @@ class AdminGovernanceService:
         return AdminOverviewStatsResponse(
             generated_at=datetime.now(UTC),
             **values,
+        )
+
+    async def get_audit_governance(
+        self,
+        *,
+        current_user: User,
+        audit_context: AuditContext | None,
+    ) -> AdminAuditGovernanceResponse:
+        action = "admin.audit_governance.queried"
+        await self._require_admin(
+            current_user=current_user,
+            action=action,
+            resource_type="audit_governance",
+            resource_id=None,
+            audit_context=audit_context,
+        )
+        outbox = await self.audit_service.repository.outbox_governance_stats(
+            tenant_id=current_user.tenant_id
+        )
+        archive_stats = await self.repository.audit_archive_stats(tenant_id=current_user.tenant_id)
+        archives = await self.repository.list_recent_audit_archives(
+            tenant_id=current_user.tenant_id,
+            limit=20,
+        )
+        await self._record(
+            current_user=current_user,
+            action=action,
+            resource_type="audit_governance",
+            resource_id=None,
+            result="allowed",
+            audit_context=audit_context,
+            metadata={
+                "outbox_dead": outbox["dead"],
+                "archives_failed": archive_stats["failed"],
+            },
+        )
+        await self.job_repository.commit()
+        return AdminAuditGovernanceResponse(
+            generated_at=datetime.now(UTC),
+            external_delivery_enabled=bool(
+                self.settings.audit_external_delivery_url and self.settings.audit_external_hmac_key
+            ),
+            partition_months_ahead=self.settings.audit_partition_months_ahead,
+            retention_days=self.settings.audit_retention_days,
+            archive_delete_source=self.settings.audit_archive_delete_source,
+            outbox_pending=int(outbox["pending"]),
+            outbox_processing=int(outbox["processing"]),
+            outbox_failed=int(outbox["failed"]),
+            outbox_dead=int(outbox["dead"]),
+            outbox_sent=int(outbox["sent"]),
+            oldest_pending_at=_optional_datetime(outbox["oldest_pending_at"]),
+            last_delivery_succeeded_at=_optional_datetime(outbox["last_sent_at"]),
+            last_delivery_failed_at=_optional_datetime(outbox["last_failed_at"]),
+            archives_total=int(archive_stats["total"]),
+            archives_failed=int(archive_stats["failed"]),
+            last_archive_succeeded_at=_optional_datetime(archive_stats["last_succeeded_at"]),
+            recent_archives=[_archive_response(archive) for archive in archives],
+        )
+
+    async def list_outbox_dead_letters(
+        self,
+        *,
+        current_user: User,
+        event_type: str | None,
+        error_kind: str | None,
+        cursor: str | None,
+        page_size: int,
+        audit_context: AuditContext | None,
+    ) -> AdminOutboxDeadLetterListResponse:
+        action = "admin.outbox_dead_letters.queried"
+        await self._require_admin(
+            current_user=current_user,
+            action=action,
+            resource_type="outbox_dead_letter",
+            resource_id=None,
+            audit_context=audit_context,
+        )
+        decoded_cursor = decode_page_cursor(self.settings, cursor)
+        events = await self.audit_service.repository.list_dead_letters(
+            tenant_id=current_user.tenant_id,
+            event_type=event_type,
+            error_kind=error_kind,
+            cursor=decoded_cursor,
+            limit=page_size + 1,
+        )
+        page = events[:page_size]
+        next_cursor = None
+        if len(events) > page_size and page:
+            next_cursor = encode_page_cursor(
+                self.settings,
+                created_at=page[-1].created_at,
+                item_id=page[-1].id,
+            )
+        await self._record(
+            current_user=current_user,
+            action=action,
+            resource_type="outbox_dead_letter",
+            resource_id=None,
+            result="allowed",
+            audit_context=audit_context,
+            metadata={
+                "event_type": event_type,
+                "error_kind": error_kind,
+                "returned_count": len(page),
+                "has_next": next_cursor is not None,
+            },
+        )
+        await self.job_repository.commit()
+        return AdminOutboxDeadLetterListResponse(
+            items=[_dead_letter_response(event) for event in page],
+            next_cursor=next_cursor,
+        )
+
+    async def get_outbox_dead_letter(
+        self,
+        *,
+        current_user: User,
+        event_id: UUID,
+        audit_context: AuditContext | None,
+    ) -> AdminOutboxDeadLetterResponse:
+        action = "admin.outbox_dead_letter.viewed"
+        await self._require_admin(
+            current_user=current_user,
+            action=action,
+            resource_type="outbox_dead_letter",
+            resource_id=event_id,
+            audit_context=audit_context,
+        )
+        event = await self.audit_service.repository.get_dead_letter(
+            tenant_id=current_user.tenant_id,
+            event_id=event_id,
+        )
+        if event is None:
+            await self._deny(
+                current_user=current_user,
+                action=action,
+                resource_type="outbox_dead_letter",
+                resource_id=event_id,
+                code="OUTBOX_DEAD_LETTER_NOT_FOUND",
+                message="Outbox dead-letter 不存在",
+                status_code=404,
+                audit_context=audit_context,
+                metadata={"reason": "dead_letter_not_found"},
+            )
+        await self._record(
+            current_user=current_user,
+            action=action,
+            resource_type="outbox_dead_letter",
+            resource_id=event.id,
+            result="allowed",
+            audit_context=audit_context,
+            metadata={"event_type": event.event_type, "status": event.status},
+        )
+        await self.job_repository.commit()
+        return _dead_letter_response(event)
+
+    async def replay_outbox_dead_letter(
+        self,
+        *,
+        current_user: User,
+        event_id: UUID,
+        audit_context: AuditContext | None,
+    ) -> AdminOutboxReplayResponse:
+        action = "admin.outbox_dead_letter.replayed"
+        await self._require_admin(
+            current_user=current_user,
+            action=action,
+            resource_type="outbox_dead_letter",
+            resource_id=event_id,
+            audit_context=audit_context,
+        )
+        event = await self.audit_service.repository.get_dead_letter(
+            tenant_id=current_user.tenant_id,
+            event_id=event_id,
+            for_update=True,
+        )
+        if event is None:
+            await self._deny(
+                current_user=current_user,
+                action=action,
+                resource_type="outbox_dead_letter",
+                resource_id=event_id,
+                code="OUTBOX_DEAD_LETTER_NOT_FOUND",
+                message="Outbox dead-letter 不存在",
+                status_code=404,
+                audit_context=audit_context,
+                metadata={"reason": "dead_letter_not_found"},
+            )
+        replayed = await self.audit_service.repository.replay_dead_letter(
+            event=event,
+            replayed_by=current_user.id,
+        )
+        await self._record(
+            current_user=current_user,
+            action=action,
+            resource_type="outbox_dead_letter",
+            resource_id=event.id,
+            result="allowed",
+            audit_context=audit_context,
+            metadata={
+                "event_type": event.event_type,
+                "replayed": replayed,
+                "replay_count": event.replay_count,
+            },
+        )
+        await self.job_repository.commit()
+        return AdminOutboxReplayResponse(
+            event=_dead_letter_response(event),
+            replayed=replayed,
         )
 
     async def get_maintenance_overview(
@@ -389,6 +604,10 @@ class AdminGovernanceService:
             file_name=job.file_name,
             content_type=job.content_type,
             size_bytes=job.size_bytes,
+            content_sha256=job.content_sha256,
+            signature_algorithm=job.signature_algorithm,
+            signature_key_id=job.signature_key_id,
+            signature_value=job.signature_value,
             download_url=download.download_url,
             expires_at=download.expires_at,
         )
@@ -599,6 +818,10 @@ def _job_response(job: AdminJob) -> AdminJobResponse:
         file_name=job.file_name,
         content_type=job.content_type,
         size_bytes=job.size_bytes,
+        content_sha256=job.content_sha256,
+        signature_algorithm=job.signature_algorithm,
+        signature_key_id=job.signature_key_id,
+        signature_value=job.signature_value,
         error_code=job.error_code,
         error_message=job.error_message,
         version=job.version,
@@ -607,6 +830,51 @@ def _job_response(job: AdminJob) -> AdminJobResponse:
         started_at=job.started_at,
         completed_at=job.completed_at,
     )
+
+
+def _dead_letter_response(event: OutboxEvent) -> AdminOutboxDeadLetterResponse:
+    return AdminOutboxDeadLetterResponse(
+        id=event.id,
+        status=event.status,
+        event_type=event.event_type,
+        aggregate_type=event.aggregate_type,
+        aggregate_id=event.aggregate_id,
+        retry_count=event.retry_count,
+        last_error_kind=event.last_error_kind,
+        last_error_code=event.last_error_code,
+        last_failed_at=event.last_failed_at,
+        dead_at=event.dead_at,
+        replay_count=event.replay_count,
+        last_replayed_at=event.last_replayed_at,
+        last_replayed_by=event.last_replayed_by,
+        created_at=event.created_at,
+        updated_at=event.updated_at,
+        payload_keys=sorted(str(key) for key in event.payload),
+    )
+
+
+def _archive_response(archive: AuditArchive) -> AdminAuditArchiveResponse:
+    return AdminAuditArchiveResponse(
+        id=archive.id,
+        period_start=archive.period_start,
+        period_end=archive.period_end,
+        status=archive.status,
+        row_count=archive.row_count,
+        file_name=archive.file_name,
+        size_bytes=archive.size_bytes,
+        content_sha256=archive.content_sha256,
+        signature_algorithm=archive.signature_algorithm,
+        signature_key_id=archive.signature_key_id,
+        delete_source=archive.delete_source,
+        source_deleted_at=archive.source_deleted_at,
+        error_code=archive.error_code,
+        created_at=archive.created_at,
+        updated_at=archive.updated_at,
+    )
+
+
+def _optional_datetime(value: object) -> datetime | None:
+    return value if isinstance(value, datetime) else None
 
 
 def _timestamp(value: float) -> datetime | None:
@@ -626,6 +894,13 @@ def _maintenance_parameters(
     }
     if request.task_name == "file.cleanup_orphaned_objects":
         parameters.update({"dry_run": request.dry_run, "scan_all": request.scan_all})
+    elif request.task_name == "audit.archive_retention":
+        parameters.update(
+            {
+                "retention_days": request.retention_days,
+                "delete_source": request.delete_source,
+            }
+        )
     elif request.task_name == "preview.cleanup_artifacts":
         parameters.update(
             {
@@ -755,12 +1030,13 @@ def _validate_maintenance_request(request: AdminMaintenanceRunRequest) -> None:
             status_code=422,
         )
     if request.retention_days is not None and request.task_name not in {
+        "audit.archive_retention",
         "file.cleanup_expired_trash",
         "preview.cleanup_artifacts",
     }:
         raise ApiError(
             "ADMIN_MAINTENANCE_OPTION_INVALID",
-            "retention_days 仅适用于回收站或预览产物清理任务",
+            "retention_days 仅适用于审计归档、回收站或预览产物清理任务",
             status_code=422,
         )
     if not request.scan_all and request.task_name not in {
@@ -771,6 +1047,12 @@ def _validate_maintenance_request(request: AdminMaintenanceRunRequest) -> None:
         raise ApiError(
             "ADMIN_MAINTENANCE_OPTION_INVALID",
             "scan_all 仅适用于支持游标扫描的维护任务",
+            status_code=422,
+        )
+    if request.delete_source and request.task_name != "audit.archive_retention":
+        raise ApiError(
+            "ADMIN_MAINTENANCE_OPTION_INVALID",
+            "delete_source 仅适用于审计归档任务",
             status_code=422,
         )
     if request.task_name == "quota.reconcile_space_usage" and request.dry_run == request.repair:
