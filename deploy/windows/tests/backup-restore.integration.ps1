@@ -49,6 +49,7 @@ $TargetApiPort = 28081
 $TargetStoragePort = 29001
 $IntegrationRunningServices = @(
     "gateway",
+    "web",
     "api",
     "worker-audit",
     "worker-permission",

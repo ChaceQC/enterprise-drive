@@ -1,5 +1,67 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-04 Sprint 10 Web 用户端与管理后台交付
+
+### 当前状态
+
+- 分支：`dev`；Sprint 10 范围为 `FE-001` 至 `FE-009`，代码、契约、Compose、CI 和文档已在共享工作树完成，等待统一提交推送及远端 `backend-ci` 结论。
+- 项目版本已统一为 `0.7.0`；当前 OpenAPI 归档为 83 个路径、110 个操作、132 个 schemas，后端、前端、Rust workspace、Tauri 配置与 UI 使用同一版本基线。
+- 本轮遵循“不重复测试、不运行无关测试”：复用已经通过的 Sprint 9、MinIO、备份恢复、性能与桌面证据，只执行 Sprint 10 新增或受影响的前端、契约、Compose/CI 专项。
+
+### 已完成
+
+- `FE-001`：新增 `frontend/` TypeScript + React + Vite 工程、`package-lock.json`、Dockerfile、Nginx 静态服务配置和项目内工具链。
+- `FE-002`：生成并锁定 TypeScript API client；统一 `credentials` Cookie Session、CSRF、错误码、`request_id`、401 会话失效事件和路由守卫。
+- `FE-003`：完成空间/目录浏览、文件与批量操作、上传队列、秒传/multipart 恢复和下载入口。
+- `FE-004`：完成搜索、预览、文件版本和回收站的查询与恢复/彻底删除流程。
+- `FE-005`：完成分享创建、分享给我的、通知中心和公开分享访问流程。
+- `FE-006`：完成用户、部门、用户组、空间和配额管理页面。
+- `FE-007`：完成审计、统计、维护任务状态和异步导出页面。
+- `FE-008`：完成权限驱动展示、键盘/缩放配置、错误重试、网络与会话失效恢复边界。
+- `FE-009`：Compose 新增内部 `web` 服务，使用 `8080` 和 `/web-healthz`，gateway 代理 `/assets/`、页面路径与 `/api/v1`；20 个声明服务中 16 个无 profile 默认服务，gateway 仍是唯一宿主端口发布者，正式本机 Web/API 入口统一为 `http://localhost:18080`，S3 为 `http://localhost:19000`。
+- `backend-ci` 新增 frontend scope/job，执行 npm 锁定安装、lint、typecheck、OpenAPI 归档/client 漂移检查、单元测试、Web Docker build 和 Chromium/Firefox/WebKit Playwright；备份 smoke/integration 的默认服务清单同步加入 `web`。
+
+### 验证
+
+- `npm ci`：安装 269 个包、审计 270 个包，0 vulnerabilities。
+- `npm run lint`、`npm run typecheck`、`npm run build`、`npm run api:check` 均通过；OpenAPI 归档与生成 client 无漂移。
+- `npm run test:unit`：5 个测试文件、14 个用例全部通过；上传恢复专项覆盖缺失 ETag、过期分片大小、重试后的规范顺序、过期 session 重建和暂停 hashing 后快速继续。
+- `npm run test:contract`：6 个 OpenAPI breaking-change checker 用例通过；检查删除 path/operation/响应字段与新增 required 请求输入。
+- Playwright 三引擎只运行 Sprint 10 新增和受影响流程并按失败项收敛，累计结果为 `13 passed, 2 skipped`；最后受影响的登录、文件版本回滚、目录接收人分享和上传队列主流程在 Chromium、Firefox、WebKit 均通过。
+- 后端受影响的目录、版本一致性与静态门禁通过；CI scope 回归 `20 passed`，`cargo metadata --locked --no-deps`、`cargo fmt --all --check`、`uv lock --check` 和 `git diff --check` 通过。
+- Sprint 9 后端、MinIO、备份恢复、性能与完整桌面测试未重复运行；远端门禁尚未写成已确认全绿。
+
+### 阻塞与风险
+
+- 本轮提交推送后的远端 `backend-ci` 尚待确认；如果出现失败，只按实际日志修复对应 frontend/backend/Windows scope，不扩展到无关测试集合。
+- 生产 DNS/受信证书证据和 MinIO 修复镜像仍不在当前本机环境内，正式 `v0.4.0` tag/Release 继续保持阻塞。
+- Sprint 11 身份与账号安全、Sprint 12 规模化治理和 `v1.0.0` 稳定版仍未开始。
+
+### 下一步
+
+1. 复核本轮工作树、提交并推送 `dev`，等待按 scope 选中的远端 CI job 全部成功。
+2. 若远端失败，只修复对应日志指向的代码、配置或 E2E；通过后把 run ID 和最终结论回写到本记录。
+3. Sprint 10 远端门禁完成后进入 Sprint 11，先固定账号锁定/解锁、密码、会话、OIDC/OAuth 2.1 + PKCE 和 LDAP 同步契约。
+
+### 涉及文件
+
+- `frontend/`
+- `backend/`
+- `desktop/`
+- `compose.windows.yml`
+- `.env.windows.example`
+- `.github/scripts/`
+- `.github/workflows/backend-ci.yml`
+- `deploy/windows/`
+- `README.md`
+- `backend/README.md`
+- `desktop/README.md`
+- `docs/deployment-windows-docker.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `PROJECT_STAGE_STATUS.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-08-04 CI 重复任务收敛
 
 ### 当前状态

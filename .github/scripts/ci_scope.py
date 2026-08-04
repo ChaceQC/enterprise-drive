@@ -16,6 +16,7 @@ from pathlib import Path
 
 SCOPE_KEYS = (
     "backend",
+    "frontend",
     "desktop",
     "installer",
     "rust_policy",
@@ -86,6 +87,11 @@ def scope_for_paths(paths: Iterable[str]) -> dict[str, bool]:
             or path in {"compose.windows.yml", ".env.windows.example"}
         ):
             scope["backend"] = True
+
+        if path.startswith("frontend/"):
+            scope["frontend"] = True
+            if path.startswith("frontend/openapi/"):
+                scope["backend"] = True
 
         if path.startswith("deploy/windows/") and not path.startswith(
             "deploy/windows/nginx/"

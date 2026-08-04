@@ -1404,7 +1404,7 @@ function Restore-WindowsSourceServiceState {
     foreach ($Group in @(
         @("postgres"),
         @("redis", "minio", "opensearch"),
-        @("api"),
+        @("api", "web"),
         @(
             "worker-audit",
             "worker-permission",
@@ -2703,6 +2703,7 @@ function Invoke-WindowsBackup {
         )
         $SupportedRunningServices = @(
             "gateway",
+            "web",
             "api",
             "worker-audit",
             "worker-permission",
@@ -2816,7 +2817,7 @@ function Invoke-WindowsBackup {
         Stop-WindowsComposeServices `
             -ComposeBaseArguments $ComposeBaseArguments `
             -RunningServices $RunningServices `
-            -RequestedServices @("beat", "api") `
+            -RequestedServices @("beat", "api", "web") `
             -StoppedServices $StoppedServices `
             -TimeoutSeconds $QuiesceTimeoutSeconds
         Stop-WindowsComposeServices `

@@ -1,6 +1,6 @@
 # Windows 11 Docker 正式部署说明
 
-> 适用项目版本：`v0.6.0`
+> 适用项目版本：`v0.7.0`
 >
 > 当前代码基线：Windows 本机 HTTP `18080/19000`、公网 ACME/TLS `80/443`、可选 monitoring profile、备份轮换和隔离恢复演练均已落地；真实受信证书签发和双域名 HTTPS 记录仍需要生产 DNS/网络环境。
 
@@ -50,7 +50,8 @@ docker info --format '{{.OSType}}'
 
 | 服务 | 职责 | 宿主端口 |
 | --- | --- | --- |
-| `gateway` | Nginx 入口、API/存储分流、Range、安全响应头、ACME challenge、TLS 与 HTTP 跳转 | 唯一允许发布端口 |
+| `gateway` | Nginx 入口、Web/API/存储分流、Range、安全响应头、ACME challenge、TLS 与 HTTP 跳转 | 唯一允许发布端口 |
+| `web` | React/Vite 用户端与管理后台静态资源，容器内监听 `8080`，健康入口 `/web-healthz` | 不发布 |
 | `certbot` | `tls-tools` profile 下的一次性证书签发、检查和续期工具 | 不发布 |
 | `api` | FastAPI API | 不发布 |
 | `migration` | 一次性 Alembic migration | 不发布 |
@@ -72,10 +73,10 @@ docker info --format '{{.OSType}}'
 
 默认本机入口：
 
-- API：`http://localhost:18080`
+- Web/API：`http://localhost:18080`
 - S3 外部预签名端点：`http://localhost:19000`
 
-两个入口都由同一个 `gateway` 容器发布。MinIO、API 等内部服务本身不配置宿主端口。
+两个入口都由同一个 `gateway` 容器发布。Web、MinIO、API 等内部服务本身不配置宿主端口。
 
 5 个 Celery Worker 会在各自容器内监听 `9100` 指标端口，但该端口只通过 Compose `expose` 提供给内部监控网络，不发布到 Windows 宿主。API `/metrics` 聚合 API Uvicorn worker；Worker task/preview/维护指标必须按 `worker-audit`、`worker-permission`、`worker-search`、`worker-maintenance` 和 `worker-preview` 分别抓取。
 
@@ -103,6 +104,7 @@ Windows 11
   |
   +-- gateway (唯一宿主端口发布者)
         |
+        +-- web
         +-- api
         +-- minio
         |
@@ -227,7 +229,7 @@ GRAFANA_ROOT_URL=https://drive.example.com/grafana/
 
 ### 可选 monitoring profile
 
-监控 profile 不属于 15 个默认业务服务，也不进入业务备份 manifest。启用前必须：
+监控 profile 不属于 16 个默认业务服务，也不进入业务备份 manifest。启用前必须：
 
 1. 把 `GRAFANA_ADMIN_PASSWORD` 改成至少 16 字符的独立非示例密码。
 2. 把示例 webhook 文件复制到仓库外或 `.gitignore` 覆盖的 secret 路径，内容为单行可达 HTTP(S) URL。
@@ -260,7 +262,7 @@ Prometheus、Alertmanager、Grafana 只加入 `backend` 内网并使用独立 na
 | `status` | 查看全部容器与健康状态 |
 | `logs [-Service NAME] [-Tail N]` | 查看全部或指定服务日志 |
 | `backup -BackupDirectory PATH -ConfigEncryptionCertificateThumbprint THUMBPRINT` | 静默 source 写入面并创建 PostgreSQL、MinIO、Redis、OpenSearch、TLS 和 CMS 环境文件备份 |
-| `backup-verify -BackupPath PATH` | 校验 manifest、工件、PostgreSQL dump、隔离 tar 预扫描、精确代码/configuration lineage 及 15 个默认服务 image reference/actual image ID |
+| `backup-verify -BackupPath PATH` | 校验 manifest、工件、PostgreSQL dump、隔离 tar 预扫描、精确代码/configuration lineage 及 16 个默认服务 image reference/actual image ID |
 | `restore -BackupPath PATH` | 把已校验备份恢复到不同且已停止的 Compose project，支持受限 ACL ForceRestore rollback |
 | `backup-retention -BackupDirectory PATH [-ApplyRetention]` | 校验托管备份后按保留天数与最少份数预览或执行轮换，并写 JSON 记录 |
 | `backup-retention-register/unregister` | 注册或幂等删除每日备份轮换 Windows 计划任务 |
@@ -522,7 +524,7 @@ gateway 必须负责：
 - 归档时的 `compose.windows.yml` 与 Nginx templates
 - UTF-8 `manifest.json` 与 `manifest.sha256`
 
-manifest 记录工件大小和 SHA-256、source project、逐服务原状态、精确 Compose SHA-256、项目版本、Git commit、Alembic revision、PostgreSQL WAL LSN、CMS 证书 thumbprint，以及 `DRIVE_S3_BUCKET`、`DRIVE_OPENSEARCH_INDEX_NAME`、`DRIVE_TLS_CERT_NAME` lineage 名称。镜像清单覆盖 15 个无 profile 默认服务（`gateway`、`api`、`migration`、`seed`、`minio-init`、`beat`、5 个 Worker、PostgreSQL、Redis、MinIO、OpenSearch），每项 image ID 都来自该服务实际 Compose 容器，并在备份时确认与当前 image reference 指向的本地 image ID 一致。
+manifest 记录工件大小和 SHA-256、source project、逐服务原状态、精确 Compose SHA-256、项目版本、Git commit、Alembic revision、PostgreSQL WAL LSN、CMS 证书 thumbprint，以及 `DRIVE_S3_BUCKET`、`DRIVE_OPENSEARCH_INDEX_NAME`、`DRIVE_TLS_CERT_NAME` lineage 名称。镜像清单覆盖 16 个无 profile 默认服务（`gateway`、`web`、`api`、`migration`、`seed`、`minio-init`、`beat`、5 个 Worker、PostgreSQL、Redis、MinIO、OpenSearch），每项 image ID 都来自该服务实际 Compose 容器，并在备份时确认与当前 image reference 指向的本地 image ID 一致。
 
 备份根目录和 `.partial-*` staging 会自动关闭 ACL 继承，只允许当前 Windows 用户、SYSTEM、Administrators 完全控制；校验通过后 staging 原子改名为正式备份目录并保留该 restricted ACL。路径链中检测到 NTFS reparse point 时拒绝继续。
 
@@ -574,11 +576,11 @@ $backupPath = [string](
 - 校验每个工件的路径边界、唯一性、大小和 SHA-256。
 - 使用 `pg_restore --list` 验证 PostgreSQL custom dump。
 - 要求当前 `compose.windows.yml` SHA-256、Git commit、`backend/pyproject.toml` 项目版本、S3 bucket、OpenSearch index 和 `DRIVE_TLS_CERT_NAME` lineage 名称与 manifest 精确一致。
-- 要求 15 个默认服务逐项具有相同 image reference 和 image ID；归档工具也必须与 manifest 中 PostgreSQL 实际容器 image ID 一致。
+- 要求 16 个默认服务逐项具有相同 image reference 和 image ID；归档工具也必须与 manifest 中 PostgreSQL 实际容器 image ID 一致。
 - 先在 `--network none`、只读根文件系统、只读备份 bind、`--cap-drop ALL`、`no-new-privileges` 的容器中检查 tar 路径，再预解包到一次性临时 Docker volume；拒绝绝对路径、父目录穿越、硬链接、块/字符设备、FIFO、socket、悬空 symlink 和解析后越出临时卷的 symlink。
 - tar 检查结束后必须删除临时卷；扫描失败或临时卷清理失败都会使校验失败。
 
-因此，复制备份到另一台主机时，应先检出 manifest 记录的精确 Git commit，保持相同 `compose.windows.yml`、项目版本和 bucket/index/TLS lineage 配置，并准备全部 15 个服务对应的固定镜像，再执行 `backup-verify`。
+因此，复制备份到另一台主机时，应先检出 manifest 记录的精确 Git commit，保持相同 `compose.windows.yml`、项目版本和 bucket/index/TLS lineage 配置，并准备全部 16 个服务对应的固定镜像，再执行 `backup-verify`。
 
 仓库内真实集成脚本不会构建或拉取镜像。先执行只读 preflight：
 
@@ -611,13 +613,13 @@ Copy-Item .env.windows .env.restore.windows
     -NoStartAfterRestore
 ```
 
-恢复前脚本会再次执行完整备份校验，并要求全部 15 个默认服务的 target image reference 和本地 image ID 与 manifest 一致。target 有运行中或过渡态容器时始终拒绝恢复；source/target 任一 physical volume 重叠、已有卷 Compose project/logical-volume 标签不符，或卷仍附着到 foreign container 时也会拒绝。默认还会拒绝已有容器和非空目标卷。
+恢复前脚本会再次执行完整备份校验，并要求全部 16 个默认服务的 target image reference 和本地 image ID 与 manifest 一致。target 有运行中或过渡态容器时始终拒绝恢复；source/target 任一 physical volume 重叠、已有卷 Compose project/logical-volume 标签不符，或卷仍附着到 foreign container 时也会拒绝。默认还会拒绝已有容器和非空目标卷。
 
 `-ForceRestore` 只用于显式清理已停止的 target 容器或非空卷，不会跳过同 project、运行状态、卷重叠/标签/attachment、路径、SHA-256、tar、dump、代码/configuration lineage 或镜像一致性门禁。清空任何原非空目标卷前，脚本会在 Windows 临时目录创建 restricted ACL rollback archive；正常恢复成功后删除它。恢复一旦提交，后续归档清理失败只会返回 maintenance cleanup error、保留并报告归档路径，不会再次清空或回滚已经恢复的数据。`-NoStartAfterRestore` 会在 PostgreSQL dump 恢复和 Alembic revision 校验后停止 PostgreSQL，不启动完整业务栈，适合先检查数据卷和解密配置。
 
 `-RestoreEnvironmentOutput` 必须是仓库和备份目录外的绝对、尚不存在文件路径，父目录必须预先存在且不得经过 NTFS reparse point；它不会覆盖当前 target 的 `-EnvFile`。CMS 明文先保存在 PowerShell 内存中，只有本次恢复模式的数据卷、PostgreSQL、Alembic revision 和镜像门禁全部验证成功后，才在最后一步写入同目录 restricted ACL 临时文件并原子改名发布；未使用 `-NoStartAfterRestore` 时还会先完成完整服务健康与实际容器 image ID 对账。原子发布前失败不会创建输出；若发布竞态中目标路径被其他进程创建，脚本会保留该 foreign file，不在恢复失败清理中删除。
 
-未使用 `-NoStartAfterRestore` 时，脚本会启动完整 target Compose project 并等待健康，再逐项核对 15 个默认服务实际容器 image ID。恢复中途失败后，脚本会执行 Compose down、删除本轮新建卷、把原本为空的既有卷清回空状态，并从 rollback archive 还原 `-ForceRestore` 前的原非空卷；卷回滚失败时会保留并报告受限 ACL rollback archive 绝对路径。target 不会以半恢复状态继续对外提供服务。
+未使用 `-NoStartAfterRestore` 时，脚本会启动完整 target Compose project 并等待健康，再逐项核对 16 个默认服务实际容器 image ID。恢复中途失败后，脚本会执行 Compose down、删除本轮新建卷、把原本为空的既有卷清回空状态，并从 rollback archive 还原 `-ForceRestore` 前的原非空卷；卷回滚失败时会保留并报告受限 ACL rollback archive 绝对路径。target 不会以半恢复状态继续对外提供服务。
 
 ### 11.5 备份轮换与周期恢复演练
 

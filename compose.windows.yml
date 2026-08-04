@@ -130,6 +130,13 @@ x-preview-build: &preview-build
     PYTHON_IMAGE: "${PYTHON_IMAGE:-python:3.12.10-slim-bookworm}"
     UV_VERSION: "${UV_VERSION:-0.11.7}"
 
+x-web-build: &web-build
+  context: ./frontend
+  dockerfile: Dockerfile
+  args:
+    NODE_IMAGE: "${NODE_IMAGE:-node:24.13.0-alpine}"
+    NGINX_IMAGE: "${NGINX_IMAGE:-nginx:1.27-alpine}"
+
 x-app-common: &app-common
   image: "enterprise-drive-backend:${DRIVE_IMAGE_TAG:-windows-local}"
   build: *runtime-build
@@ -159,6 +166,8 @@ services:
     restart: unless-stopped
     depends_on:
       api:
+        condition: service_healthy
+      web:
         condition: service_healthy
       minio-init:
         condition: service_completed_successfully
@@ -207,6 +216,33 @@ services:
     cpus: "${GATEWAY_CPU_LIMIT:-0.50}"
     mem_limit: "${GATEWAY_MEMORY_LIMIT:-256m}"
     pids_limit: ${GATEWAY_PIDS_LIMIT:-128}
+    logging: *json-logging
+
+  web:
+    image: "enterprise-drive-frontend:${DRIVE_IMAGE_TAG:-windows-local}"
+    build: *web-build
+    restart: unless-stopped
+    expose:
+      - "8080"
+    networks:
+      - edge
+    user: "101:101"
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:uid=101,gid=101,mode=0755
+      - /var/run:uid=101,gid=101,mode=0755
+      - /tmp:uid=101,gid=101,mode=1777
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/web-healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    cpus: "${WEB_CPU_LIMIT:-0.50}"
+    mem_limit: "${WEB_MEMORY_LIMIT:-256m}"
+    pids_limit: ${WEB_PIDS_LIMIT:-128}
     logging: *json-logging
 
   certbot:

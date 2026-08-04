@@ -136,6 +136,7 @@ $script:SmokeDefaultServices = @(
     "api",
     "beat",
     "gateway",
+    "web",
     "migration",
     "minio",
     "minio-init",
@@ -1746,7 +1747,7 @@ try {
 
         $ExpectedCalls = @(
             "compose --project-name backup-source stop --timeout 30 gateway",
-            "compose --project-name backup-source stop --timeout 30 beat api",
+            "compose --project-name backup-source stop --timeout 30 beat api web",
             (
                 "compose --project-name backup-source stop --timeout 30 " +
                 "worker-permission worker-preview worker-search " +
@@ -1762,7 +1763,7 @@ try {
             ),
             (
                 "compose --project-name backup-source up --detach --no-deps " +
-                "--no-build --pull never api"
+                "--no-build --pull never api web"
             ),
             (
                 "compose --project-name backup-source up --detach --no-deps " +

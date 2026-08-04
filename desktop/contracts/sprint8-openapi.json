@@ -1,5 +1,5 @@
 {
-  "version": "0.6.0",
+  "version": "0.7.0",
   "operations": [
     ["POST", "/api/v1/uploads/init"],
     ["GET", "/api/v1/uploads/{session_id}"],

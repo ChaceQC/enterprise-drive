@@ -11,6 +11,7 @@ from ci_scope import scope_for_event, scope_for_paths
 def enabled(*keys: str) -> dict[str, bool]:
     return {key: key in keys for key in (
         "backend",
+        "frontend",
         "desktop",
         "installer",
         "rust_policy",
@@ -22,6 +23,18 @@ def enabled(*keys: str) -> dict[str, bool]:
 class CiScopeTests(unittest.TestCase):
     def test_backend_change(self) -> None:
         self.assertEqual(scope_for_paths(["backend/app/main.py"]), enabled("backend"))
+
+    def test_frontend_change(self) -> None:
+        self.assertEqual(
+            scope_for_paths(["frontend/src/main.tsx"]),
+            enabled("frontend"),
+        )
+
+    def test_frontend_contract_routes_to_backend_and_frontend(self) -> None:
+        self.assertEqual(
+            scope_for_paths(["frontend/openapi/openapi.json"]),
+            enabled("backend", "frontend"),
+        )
 
     def test_desktop_crate_source_skips_installer(self) -> None:
         self.assertEqual(
@@ -112,6 +125,20 @@ class CiScopeTests(unittest.TestCase):
 
     def test_schedule_keeps_supply_chain_coverage(self) -> None:
         self.assertEqual(scope_for_event("schedule"), enabled("rust_policy", "minio"))
+
+    def test_manual_run_keeps_all_gates(self) -> None:
+        self.assertEqual(
+            scope_for_event("workflow_dispatch"),
+            enabled(
+                "backend",
+                "frontend",
+                "desktop",
+                "installer",
+                "rust_policy",
+                "windows",
+                "minio",
+            ),
+        )
 
 
 if __name__ == "__main__":

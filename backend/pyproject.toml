@@ -1,6 +1,6 @@
 [project]
 name = "enterprise-drive-backend"
-version = "0.6.0"
+version = "0.7.0"
 description = "企业网盘后端"
 readme = "README.md"
 requires-python = ">=3.12"

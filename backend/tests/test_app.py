@@ -18,7 +18,7 @@ from app.core.logging import JsonFormatter, reset_log_context, set_log_context
 from app.main import create_app
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-PROJECT_VERSION = "0.6.0"
+PROJECT_VERSION = "0.7.0"
 
 
 @pytest_asyncio.fixture
@@ -55,6 +55,9 @@ def test_project_version_is_consistent_across_runtime_and_desktop_contracts() ->
     desktop_workspace = tomllib.loads(
         (PROJECT_ROOT / "desktop" / "Cargo.toml").read_text(encoding="utf-8")
     )
+    desktop_lock = tomllib.loads(
+        (PROJECT_ROOT / "desktop" / "Cargo.lock").read_text(encoding="utf-8")
+    )
     tauri_config = json.loads(
         (
             PROJECT_ROOT / "desktop" / "apps" / "drive-desktop" / "src-tauri" / "tauri.conf.json"
@@ -67,6 +70,11 @@ def test_project_version_is_consistent_across_runtime_and_desktop_contracts() ->
             PROJECT_ROOT / "desktop" / "contracts" / "sprint8-openapi.json",
         )
     }
+    local_desktop_versions = {
+        package["version"]
+        for package in desktop_lock["package"]
+        if package["name"].startswith("drive-") and "source" not in package
+    }
 
     assert {
         backend_project["project"]["version"],
@@ -74,6 +82,7 @@ def test_project_version_is_consistent_across_runtime_and_desktop_contracts() ->
         desktop_workspace["workspace"]["package"]["version"],
         tauri_config["version"],
         *contract_versions,
+        *local_desktop_versions,
     } == {PROJECT_VERSION}
 
 

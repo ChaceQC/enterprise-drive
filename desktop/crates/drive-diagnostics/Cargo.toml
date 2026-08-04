@@ -7,7 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 chrono.workspace = true
-drive-local-index = { path = "../drive-local-index", version = "0.6.0" }
+drive-local-index = { path = "../drive-local-index", version = "0.7.0" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

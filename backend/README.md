@@ -1,6 +1,6 @@
 # 后端工程
 
-> 适用项目版本：`v0.6.0`
+> 适用项目版本：`v0.7.0`
 
 本目录承载企业网盘后端，使用 Python 3.12+、uv、FastAPI、SQLAlchemy、PostgreSQL、Redis、S3 兼容对象存储、OpenSearch 和 Celery。
 
@@ -21,7 +21,7 @@ uv run fastapi dev app/main.py --host 127.0.0.1 --port 18080
 uv run celery -A app.infrastructure.queue.celery_app worker -Q audit,permission,preview,search,maintenance -l info
 ```
 
-本目录的 `docker-compose.yml` 只用于本地依赖开发，不包含正式 API、Worker 或 gateway。Windows 11 正式部署必须回到仓库根目录使用 `compose.windows.yml`，Nginx gateway 位于 Compose 内并且是唯一宿主端口入口；完整流程见 `../docs/deployment-windows-docker.md`。
+本目录的 `docker-compose.yml` 只用于本地依赖开发，不包含正式 API、Worker、Web 或 gateway。Windows 11 正式部署必须回到仓库根目录使用 `compose.windows.yml`，Nginx gateway 位于 Compose 内并且是唯一宿主端口入口；内部 `web:8080` 提供静态用户端与管理后台，完整流程见 `../docs/deployment-windows-docker.md`。
 
 正式部署使用根 `.env.windows.example` 生成未提交的 `.env.windows`，并通过 `deploy/windows/manage.ps1` 管理：
 
@@ -35,7 +35,7 @@ Copy-Item .env.windows.example .env.windows
 
 `up -Build` 是显式构建入口；普通 `up` 固定使用 `--no-build --pull never`，不会在后台补构建或拉取缺失镜像。第三方镜像应先单独 `docker pull`，项目 runtime/preview 镜像应先单独构建或明确执行一次 `up -Build`，随后再运行部署、备份或恢复门禁。
 
-正式环境中 API/Worker 使用 `http://minio:9000` 等 Compose 内部服务端点；默认浏览器预签名地址为 gateway 提供的 `http://localhost:19000`，默认 API 入口为 `http://localhost:18080`。公网模式把真实 `.env.windows` 中的 API/存储域名、`DRIVE_S3_PUBLIC_ENDPOINT_URL`、`DRIVE_CORS_ORIGINS`、`MINIO_CORS_ALLOWED_ORIGIN`、Trusted Hosts、Secure Cookie 和 Certbot 邮箱改为生产值后，可使用以下命令完成 ACME bootstrap、证书签发和 TLS gateway 启动：
+正式环境中 API/Worker 使用 `http://minio:9000` 等 Compose 内部服务端点；默认浏览器预签名地址为 gateway 提供的 `http://localhost:19000`，`http://localhost:18080` 同时提供 Web 页面与 API。公网模式把真实 `.env.windows` 中的 API/存储域名、`DRIVE_S3_PUBLIC_ENDPOINT_URL`、`DRIVE_CORS_ORIGINS`、`MINIO_CORS_ALLOWED_ORIGIN`、Trusted Hosts、Secure Cookie 和 Certbot 邮箱改为生产值后，可使用以下命令完成 ACME bootstrap、证书签发和 TLS gateway 启动：
 
 ```powershell
 .\deploy\windows\manage.ps1 config -Tls -Quiet
@@ -98,7 +98,7 @@ $backupPath = [string](
     -BackupPath $backupPath
 ```
 
-manifest 会记录 15 个无 profile 默认服务实际 Compose 容器的 image ID，而不是只记录 PostgreSQL 镜像；校验还要求当前 `compose.windows.yml` SHA-256、Git commit、`backend/pyproject.toml` 项目版本、`DRIVE_S3_BUCKET`、`DRIVE_OPENSEARCH_INDEX_NAME` 和 `DRIVE_TLS_CERT_NAME` lineage 名称与备份完全一致。卷 tar 会先在无网络、只读根文件系统、只读备份挂载、drop all capabilities 和 `no-new-privileges` 的临时容器/临时卷中预解包，拒绝路径穿越、硬链接、特殊文件及越界 symlink 后才进入恢复。
+manifest 会记录 16 个无 profile 默认服务实际 Compose 容器的 image ID，包括内部 `web`，而不是只记录 PostgreSQL 镜像；校验还要求当前 `compose.windows.yml` SHA-256、Git commit、`backend/pyproject.toml` 项目版本、`DRIVE_S3_BUCKET`、`DRIVE_OPENSEARCH_INDEX_NAME` 和 `DRIVE_TLS_CERT_NAME` lineage 名称与备份完全一致。卷 tar 会先在无网络、只读根文件系统、只读备份挂载、drop all capabilities 和 `no-new-privileges` 的临时容器/临时卷中预解包，拒绝路径穿越、硬链接、特殊文件及越界 symlink 后才进入恢复。
 
 隔离恢复必须使用另一个 `COMPOSE_PROJECT_NAME`。复制目标环境文件后，应同时调整目标宿主端口，并确认目标 project 没有运行中的容器：
 
@@ -115,7 +115,7 @@ Copy-Item .env.windows .env.restore.windows
     -NoStartAfterRestore
 ```
 
-`backup` 和 `restore` 会同时获取 project 级及每个 source/target physical volume 的 Windows named mutex。默认恢复会拒绝已有容器、非空目标卷、source/target physical volume 重叠、错误 Compose 卷标签或 foreign container attachment；15 个默认服务的 image reference/actual image ID 任一不一致也会拒绝。`-ForceRestore` 只允许清理已停止的 target 容器或非空卷，并会在清空原非空卷前创建 restricted ACL rollback archive；恢复失败时会停止 target、删除新卷、清空原空卷并还原原非空卷，回滚异常时保留并报告归档绝对路径。恢复一旦提交，后续 rollback archive 清理失败只会返回 maintenance cleanup error 并保留归档，不会再次清空或回滚已恢复卷。`-NoStartAfterRestore` 会在 PostgreSQL 恢复和 Alembic revision 校验后停止服务，适合隔离验收。
+`backup` 和 `restore` 会同时获取 project 级及每个 source/target physical volume 的 Windows named mutex。默认恢复会拒绝已有容器、非空目标卷、source/target physical volume 重叠、错误 Compose 卷标签或 foreign container attachment；16 个默认服务的 image reference/actual image ID 任一不一致也会拒绝。`-ForceRestore` 只允许清理已停止的 target 容器或非空卷，并会在清空原非空卷前创建 restricted ACL rollback archive；恢复失败时会停止 target、删除新卷、清空原空卷并还原原非空卷，回滚异常时保留并报告归档绝对路径。恢复一旦提交，后续 rollback archive 清理失败只会返回 maintenance cleanup error 并保留归档，不会再次清空或回滚已恢复卷。`-NoStartAfterRestore` 会在 PostgreSQL 恢复和 Alembic revision 校验后停止服务，适合隔离验收。
 
 `-RestoreEnvironmentOutput` 只把备份中的 CMS 环境文件解密到仓库和备份目录外的绝对、尚不存在文件路径，不会替换当前 target 的 `-EnvFile`；父目录必须预先存在且不得经过 reparse point。CMS 明文先保存在内存中，只在本次恢复模式的数据、Alembic revision 和镜像门禁全部成功后的最后一步，通过同目录 restricted ACL 临时文件原子发布；未使用 `-NoStartAfterRestore` 时还会先完成全栈健康和实际容器 image ID 对账。若原子发布时目标路径已被其他进程创建，失败清理会保留该 foreign file。备份根目录、staging/正式备份、rollback archive 和最终 CMS 输出会自动关闭 ACL 继承，并只允许当前用户、SYSTEM、Administrators 完全控制。
 
@@ -140,7 +140,7 @@ uv run pytest tests/test_route_security_matrix.py `
   tests/test_security_adversarial.py -q
 ```
 
-矩阵与运行时 OpenAPI 的 80 个路径、107 个操作完全对账，覆盖匿名、CSRF、管理员、设备会话、增量同步、真实跨租户资源和活跃会话撤权。对抗输入覆盖损坏/超大图片、OCR 页数/像素/体量边界、文档路径与扩展名注入、Range 权限、预签名 URL、用户/组织/空间/统计/维护/导出/配额/安全策略管理、不同 token 外链穷举、Trusted Host 和 CORS。
+当前 OpenAPI 归档为 83 个路径、110 个操作、132 个 schemas；路由安全矩阵覆盖匿名、CSRF、管理员、设备会话、增量同步、组织目录、真实跨租户资源和活跃会话撤权。对抗输入覆盖损坏/超大图片、OCR 页数/像素/体量边界、文档路径与扩展名注入、Range 权限、预签名 URL、用户/组织/空间/统计/维护/导出/配额/安全策略管理、不同 token 外链穷举、Trusted Host 和 CORS。
 
 真实 Nginx 原始 HTTP 安全 smoke：
 

@@ -4,6 +4,7 @@ on:
   push:
     paths:
       - "backend/**"
+      - "frontend/**"
       - "desktop/**"
       - "compose.windows.yml"
       - ".env.windows.example"
@@ -14,6 +15,7 @@ on:
   pull_request:
     paths:
       - "backend/**"
+      - "frontend/**"
       - "desktop/**"
       - "compose.windows.yml"
       - ".env.windows.example"
@@ -34,6 +36,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       backend: ${{ steps.scope.outputs.backend }}
+      frontend: ${{ steps.scope.outputs.frontend }}
       desktop: ${{ steps.scope.outputs.desktop }}
       installer: ${{ steps.scope.outputs.installer }}
       rust_policy: ${{ steps.scope.outputs.rust_policy }}
@@ -68,17 +71,26 @@ jobs:
         run: |
           echo "Selected CI scopes: ${{ steps.scope.outputs.summary }}" >> "${GITHUB_STEP_SUMMARY}"
 
-  backend:
+  frontend:
     needs: changes
-    if: needs.changes.outputs.backend == 'true'
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: backend
+        working-directory: frontend
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v7
+        with:
+          node-version-file: frontend/.nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -90,8 +102,91 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Test OpenAPI breaking-change checker
+        if: needs.changes.outputs.backend != 'true'
+        run: python -X utf8 scripts/test_check_openapi_breaking.py
+
+      - name: Check OpenAPI backward compatibility
+        if: needs.changes.outputs.backend != 'true'
+        env:
+          OPENAPI_BASE_REVISION: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
+        run: |
+          python -X utf8 scripts/check_openapi_breaking.py \
+            --allow-missing-base
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: OpenAPI archive check
+        if: needs.changes.outputs.backend != 'true'
+        env:
+          UV_FROZEN: "1"
+        run: npm run api:archive:check
+
+      - name: OpenAPI generated client check
+        run: npm run api:client:check
+
+      - name: Unit tests
+        run: npm run test:unit
+
+      - name: Build production Web image
+        run: docker build --file Dockerfile --tag enterprise-drive-frontend:ci .
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+
+      - name: Playwright E2E
+        run: npm run test:e2e
+
+  backend:
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Test OpenAPI breaking-change checker
+        working-directory: frontend
+        run: python -X utf8 scripts/test_check_openapi_breaking.py
+
+      - name: Check OpenAPI backward compatibility
+        working-directory: frontend
+        env:
+          OPENAPI_BASE_REVISION: ${{ github.event.pull_request.base.sha || github.event.before || '' }}
+        run: |
+          python -X utf8 scripts/check_openapi_breaking.py \
+            --allow-missing-base
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v8.2.0
+        with:
+          enable-cache: true
+
       - name: Install dependencies
         run: uv sync --frozen --all-extras --dev
+
+      - name: Validate current OpenAPI archive
+        env:
+          UV_FROZEN: "1"
+        run: uv run python ../frontend/scripts/export_openapi.py --check
 
       - name: Ruff check
         run: uv run ruff check .
