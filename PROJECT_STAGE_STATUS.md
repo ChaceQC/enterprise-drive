@@ -1,13 +1,13 @@
 # 项目阶段进度
 
-更新时间：2026-08-03
+更新时间：2026-08-04
 
 ## 1. 总体结论
 
-当前项目处于 **v0.5.0、Sprint 8 双向同步与桌面发布已完成实现和本地专项验收、等待本次远端 CI 与正式发布门禁收尾的阶段**：
+当前项目处于 **v0.6.0、Sprint 9 核心产品能力、版本与契约均已完成本地收尾，等待本次远端 CI 最终门禁的阶段**：
 
 - 后端核心能力、权限、分享、预览、搜索、完整管理 API、Windows 11 Docker 部署、监控 profile 和备份治理入口已经形成试点基础，Sprint 2 至 Sprint 6 代码侧剩余项为空。
-- `BE-036` 至 `BE-039`、`BE-044` 和 `BE-045` 已完成，Sprint 9 核心产品能力闭环。
+- `BE-036` 至 `BE-039`、`BE-044` 和 `BE-045` 已完成；后端、Rust workspace、Tauri 安装包、更新器和桌面 OpenAPI 契约已统一到 Sprint 9 目标版本 `0.6.0`。
 - Sprint 7 与 Sprint 8 的 `DC-001` 至 `DC-010` 已完成：Rust/Tauri Windows 11 骨架、设备会话、增量游标/tombstone、SQLite 离线队列、DTP/1 双向传输、文件监听、冲突副本、选择性同步、Windows 路径边界、诊断导出、签名更新和失败回退均已落地。
 - 真实生产 DNS/受信证书证据和 MinIO 修复镜像不在当前本机环境内，正式 `v0.4.0` tag/Release 保持阻塞；Web 用户端、身份治理、规模化治理和 `v1.0.0` 尚未完成。
 
@@ -15,13 +15,16 @@
 
 - 分支：`dev`
 - Sprint 3 对象存储稳定性基线：`31a0de1`；配额、安全与性能收尾：`6465c5a`；CI 安全解析与下载达限修复：`404cc08`、`d8185a5`
-- 项目版本：`0.5.0`
+- 项目版本：`0.6.0`
 - Sprint 7 最终代码提交：`a57d3fb`
 - Sprint 7 最终 CI：`backend-ci` run `30838990372`（8 个 job 全部成功）
+- Sprint 8 最终修复提交：`d3725a3`
+- Sprint 8 最终 CI：`backend-ci` run `30854694265`（8 个 job 全部成功）
 - Git tag：当前尚未建立 `v0.4.0` tag
 - 运行时 OpenAPI：80 个路径、107 个操作
 - 最新数据库迁移：`20260803_0023`
-- Sprint 8 范围：`DC-007` 至 `DC-010` 已完成实现与本地验收，本次 `dev` 推送需通过全部远端 CI job
+- Sprint 8 范围：`DC-007` 至 `DC-010` 已完成实现、本地验收和远端 CI
+- Sprint 9 收尾：`0.6.0` 版本清单、运行时版本、安装包版本和 OpenAPI 契约已对齐，本次 `dev` 推送需通过全部远端 CI job
 - 桌面更新公开证书 DER SHA-256：`765e82aba7bd3276f18eeadddd7b33257a68b7a1ddcdac6d4fc7f7bc639a3ca5`
 - 当前缺少目录：`frontend/`
 - 当前未实现：Web 用户端与管理后台、身份治理、大目录权限重算/治理页面、审计/Outbox/备份治理收尾和稳定版发布
@@ -61,6 +64,8 @@
 - 本轮只运行 8 个新增缺口用例：`drive-local-index` `1 passed`，覆盖多同步根操作/传输队列隔离；`drive-transfer` `4 passed`，覆盖 1 GiB 持久化 Range、真实进程重启续传、旧 `.drivepart` 清理和 hash 失败重试；`drive-sync-engine` `3 passed`，覆盖双端同时修改、目录移动/重命名冲突和设备吊销停止全部同步。
 - Rust workspace 已通过 `cargo fmt --all --check`；受影响的 `drive-local-index`、`drive-transfer`、`drive-sync-engine` 通过 GNU Clippy `-D warnings`。本机 MSVC shell 缺少 `link.exe`，完整 Tauri/NSIS/Authenticode 由本次 Windows CI 执行，不重复运行已知会在本机链接阶段停止的全 workspace。
 - 最终 `backend-ci` run `30838990372`（提交 `a57d3fb`）的 `rust-desktop`、`rust-dependency-policy`、`backend`、`windows-deployment`、`minio-image-policy`、两组 MinIO supply-chain 和 `windows-desktop-installer` 共 8 个 job 全部成功。
+- `backend-ci` run `30854694265`（提交 `d3725a3`）的 8 个 job 全部成功，完成 Sprint 8 Authenticode 指纹校验修复的远端门禁。
+- Sprint 9 版本收尾定向验证：`uv lock --check`、Ruff、Python format、Cargo metadata、Cargo fmt、JSON 解析和 `git diff --check` 通过；版本一致性、健康检查与桌面 OpenAPI 契约共 `12 passed`。本机定向 Cargo check 仍受缺少 MSVC `link.exe` 限制，完整 Rust 编译由本次 Windows CI 执行。
 - Rust CI 失败项均按实际日志收敛：先修正 Clippy `too_many_arguments`、reqwest `query` feature，再将 Windows 不支持的 cargo-deny 容器 action 移到 Ubuntu；依赖策略最终 advisories、bans、licenses、sources 均通过。
 - Sprint 7 的全绿 CI 验证提交为 `a57d3fb`；全绿后仅追加状态文档收尾，不改变该提交中已验证的代码与 CI 配置；未重复执行已通过的后端、MinIO、备份恢复或性能集合。
 - 本轮推送前已确认的 GitHub Actions `backend-ci` 基线：运行 `30782429638`、提交 `d8185a5`，5 个 job 全部成功。
@@ -88,8 +93,8 @@
 
 ## 5. 下一步顺序
 
-1. 提交并推送 Sprint 8 到 `dev`，跟踪对应 `backend-ci` 到全部 job 成功；只处理真实失败项，不重复执行无关本地集合。
-2. Sprint 8 远端门禁全绿后进入 Sprint 10 Web 用户端与管理后台；Sprint 9 后端核心产品闭环已经完成。
+1. 推送 Sprint 9 `0.6.0` 版本与契约收尾到 `dev`，跟踪对应 `backend-ci` 到全部 job 成功；只处理真实失败项，不重复执行无关本地集合。
+2. Sprint 9 远端门禁全绿后进入 Sprint 10 Web 用户端与管理后台。
 3. 在真实生产网络执行 `tls-validate-public`，保存双域名 DNS、HTTP `308`、HTTPS readiness 和受信证书记录。
 4. 采用受支持修复镜像或可审计补丁镜像解决 MinIO Critical，重新生成 SBOM/Grype 并运行真实 MinIO/备份恢复兼容门禁。
 5. 上述发布阻塞解除后创建 `v0.4.0` tag/Release；Sprint 3 目标规模性能证据继续复用已通过工件。

@@ -1,6 +1,6 @@
 # 后端工程
 
-> 适用项目版本：`v0.5.0`
+> 适用项目版本：`v0.6.0`
 
 本目录承载企业网盘后端，使用 Python 3.12+、uv、FastAPI、SQLAlchemy、PostgreSQL、Redis、S3 兼容对象存储、OpenSearch 和 Celery。
 

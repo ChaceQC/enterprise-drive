@@ -1,6 +1,6 @@
 # 企业网盘 Rust 桌面端
 
-`desktop/` 是 Sprint 7 与 Sprint 8 的 Windows 11 Rust/Tauri 工程，版本为 `0.5.0`。同步事实、传输状态、本地索引、凭据、更新校验和诊断均位于 Rust 层，Tauri 页面只展示状态并发送命令。
+`desktop/` 是 Sprint 7 与 Sprint 8 交付的 Windows 11 Rust/Tauri 工程，当前随 Sprint 9 项目基线统一为 `0.6.0`。同步事实、传输状态、本地索引、凭据、更新校验和诊断均位于 Rust 层，Tauri 页面只展示状态并发送命令。
 
 ## Workspace
 

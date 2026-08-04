@@ -117,7 +117,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "企业网盘"
-    app_version: str = "0.5.0"
+    app_version: str = "0.6.0"
     service_name: str = "enterprise-drive-api"
     environment: Literal["local", "test", "staging", "production"] = "local"
     debug: bool = False

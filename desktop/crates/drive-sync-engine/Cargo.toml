@@ -7,10 +7,10 @@ rust-version.workspace = true
 
 [dependencies]
 chrono.workspace = true
-drive-api-client = { path = "../drive-api-client", version = "0.5.0" }
-drive-local-index = { path = "../drive-local-index", version = "0.5.0" }
-drive-platform = { path = "../drive-platform", version = "0.5.0" }
-drive-transfer = { path = "../drive-transfer", version = "0.5.0" }
+drive-api-client = { path = "../drive-api-client", version = "0.6.0" }
+drive-local-index = { path = "../drive-local-index", version = "0.6.0" }
+drive-platform = { path = "../drive-platform", version = "0.6.0" }
+drive-transfer = { path = "../drive-transfer", version = "0.6.0" }
 hex.workspace = true
 parking_lot.workspace = true
 serde.workspace = true

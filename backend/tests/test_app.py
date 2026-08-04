@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import logging
+import tomllib
 from collections.abc import AsyncIterator
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -14,6 +16,9 @@ from app import health as health_module
 from app.core.config import Settings
 from app.core.logging import JsonFormatter, reset_log_context, set_log_context
 from app.main import create_app
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+PROJECT_VERSION = "0.6.0"
 
 
 @pytest_asyncio.fixture
@@ -38,9 +43,38 @@ async def test_healthz(client: AsyncClient) -> None:
     assert response.json() == {
         "status": "ok",
         "service": "企业网盘",
-        "version": "0.5.0",
+        "version": PROJECT_VERSION,
         "environment": "test",
     }
+
+
+def test_project_version_is_consistent_across_runtime_and_desktop_contracts() -> None:
+    backend_project = tomllib.loads(
+        (PROJECT_ROOT / "backend" / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    desktop_workspace = tomllib.loads(
+        (PROJECT_ROOT / "desktop" / "Cargo.toml").read_text(encoding="utf-8")
+    )
+    tauri_config = json.loads(
+        (
+            PROJECT_ROOT / "desktop" / "apps" / "drive-desktop" / "src-tauri" / "tauri.conf.json"
+        ).read_text(encoding="utf-8")
+    )
+    contract_versions = {
+        json.loads(path.read_text(encoding="utf-8"))["version"]
+        for path in (
+            PROJECT_ROOT / "desktop" / "contracts" / "sprint7-openapi.json",
+            PROJECT_ROOT / "desktop" / "contracts" / "sprint8-openapi.json",
+        )
+    }
+
+    assert {
+        backend_project["project"]["version"],
+        Settings.model_fields["app_version"].default,
+        desktop_workspace["workspace"]["package"]["version"],
+        tauri_config["version"],
+        *contract_versions,
+    } == {PROJECT_VERSION}
 
 
 @pytest.mark.asyncio

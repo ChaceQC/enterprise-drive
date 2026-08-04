@@ -29,7 +29,10 @@ impl ApiClient {
         }
         Ok(Self {
             http: Client::builder()
-                .user_agent("enterprise-drive-desktop/0.5.0")
+                .user_agent(concat!(
+                    "enterprise-drive-desktop/",
+                    env!("CARGO_PKG_VERSION")
+                ))
                 .build()?,
             base_url: parsed,
             device_token: Arc::new(RwLock::new(None)),

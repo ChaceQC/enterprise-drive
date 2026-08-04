@@ -1,6 +1,6 @@
 # 企业网盘
 
-企业网盘工程，当前已实现的代码为版本 `0.5.0`，已包含后端主链路与 Windows 11 Rust/Tauri 桌面端的双向同步、离线恢复和签名更新闭环；目标是形成可试点上线的企业级文件管理服务。项目以《企业网盘开发者技术计划书.md》为技术基线，优先保障文件元数据、对象存储、权限、审计、搜索和异步任务之间的一致性。
+企业网盘工程，当前已实现的代码为版本 `0.6.0`，已包含后端主链路、Sprint 9 核心产品能力闭环，以及 Windows 11 Rust/Tauri 桌面端的双向同步、离线恢复和签名更新；目标是形成可试点上线的企业级文件管理服务。项目以《企业网盘开发者技术计划书.md》为技术基线，优先保障文件元数据、对象存储、权限、审计、搜索和异步任务之间的一致性。
 
 ## 技术基线
 
@@ -60,7 +60,7 @@
 
 ## 当前状态
 
-当前仓库已完成 Sprint 1 至 Sprint 9 的代码侧交付，其中 Sprint 7 和 Sprint 8 覆盖 `DC-001` 至 `DC-010`，Sprint 9 的后端核心产品闭环也已完成。运行时 OpenAPI 为 80 个路径、107 个操作，数据库 migration head 为 `20260803_0023`。桌面端目录包含 Tauri 2 应用、设备会话、双向同步、SQLite 离线队列、DTP/1 传输、Windows Credential Manager/路径适配、签名更新回退和脱敏诊断；后端认证、权限、审计、搜索、管理 API、Compose 与 CI 基线保持一致。
+当前仓库已完成 Sprint 1 至 Sprint 9 的代码侧交付，并把后端、桌面安装包、更新器和 OpenAPI 契约统一到 Sprint 9 目标版本 `0.6.0`。其中 Sprint 7 和 Sprint 8 覆盖 `DC-001` 至 `DC-010`，Sprint 9 覆盖 `BE-036` 至 `BE-039`、`BE-044`、`BE-045`。运行时 OpenAPI 为 80 个路径、107 个操作，数据库 migration head 为 `20260803_0023`。桌面端目录包含 Tauri 2 应用、设备会话、双向同步、SQLite 离线队列、DTP/1 传输、Windows Credential Manager/路径适配、签名更新回退和脱敏诊断；后端认证、权限、审计、搜索、管理 API、Compose 与 CI 基线保持一致。
 
 Sprint 3 上传主链路已包含 `upload_sessions`、multipart init/presign/complete/abort、秒传、服务端 SHA-256、最终对象归档、失败清理、过期会话回收、限流、下载、容量流水以及对象/回收站治理。multipart complete 使用标准 S3 HTTP 控制面；同 hash 首次上传在 PostgreSQL 中通过原子 upsert 只创建一个 blob，异常 complete 可从对象事实恢复，失败路径会清理受控 `uploads/...` 临时对象。
 

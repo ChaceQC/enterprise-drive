@@ -158,7 +158,10 @@ impl UpdateManager {
         ensure_https(&manifest_url)?;
         Ok(Self {
             http: reqwest::Client::builder()
-                .user_agent("enterprise-drive-updater/0.5.0")
+                .user_agent(concat!(
+                    "enterprise-drive-updater/",
+                    env!("CARGO_PKG_VERSION")
+                ))
                 .build()?,
             verifier: UpdateVerifier::from_base64(public_key)?,
             manifest_url,

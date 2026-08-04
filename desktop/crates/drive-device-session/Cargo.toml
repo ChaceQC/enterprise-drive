@@ -6,7 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-drive-api-client = { path = "../drive-api-client", version = "0.5.0" }
-drive-platform = { path = "../drive-platform", version = "0.5.0" }
+drive-api-client = { path = "../drive-api-client", version = "0.6.0" }
+drive-platform = { path = "../drive-platform", version = "0.6.0" }
 thiserror.workspace = true
 uuid.workspace = true

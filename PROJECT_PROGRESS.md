@@ -1,5 +1,61 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-04 Sprint 9 版本与契约收尾
+
+### 当前状态
+
+- 分支：`dev`；Sprint 9 功能范围 `BE-036` 至 `BE-039`、`BE-044`、`BE-045` 此前已经完成，本轮处理阶段表与实际仓库之间最后的版本收尾缺口。
+- Sprint 8 最终修复提交 `d3725a3` 已推送，GitHub Actions `backend-ci` run `30854694265` 的 8 个 job 全部成功。
+- 项目目标版本从 Sprint 7/8 的 `0.5.0` 提升到 Sprint 9 的 `0.6.0`；不新增业务范围，不重跑已通过的 Sprint 9、MinIO、备份恢复、性能或完整桌面测试集合。
+
+### 已完成
+
+- 后端 `pyproject.toml`、Settings 默认版本、健康检查断言和 `uv.lock` 项目记录统一为 `0.6.0`。
+- Rust workspace、内部 path 依赖、Cargo 锁文件、本机 Tauri 安装包版本和 UI 初始版本统一为 `0.6.0`。
+- API client 与更新器 User-Agent 改为从 `CARGO_PKG_VERSION` 生成，避免后续版本提升时再次出现硬编码漂移。
+- Sprint 7/8 桌面 OpenAPI 兼容契约同步到当前运行时版本，并新增跨后端、Rust workspace、Tauri 和契约文件的版本一致性测试。
+- README、后端/桌面 README、Windows 部署说明、阶段表、执行计划和完整技术计划书同步到当前 `0.6.0` 基线；Sprint 7/8 的历史 `0.5.0` 记录保留。
+
+### 验证
+
+- `uv lock --check` 通过，锁文件解析为 148 个包。
+- 受影响的 `backend/app/core/config.py`、`backend/tests/test_app.py` 通过 Ruff check 和 format check。
+- 只运行版本一致性、健康检查和桌面 OpenAPI 契约相关的 `backend/tests/test_app.py`、`backend/tests/test_desktop_openapi_contract.py`，结果 `12 passed`。
+- `cargo metadata --locked --no-deps` 通过，9 个本地 `drive-*` package 均解析为 `0.6.0`；`cargo fmt --all --check` 通过。
+- 定向 `cargo check --locked -p drive-api-client -p drive-update` 在编译第三方 build script 时复现本机既有环境边界：当前只安装 MSVC target，但 shell 缺少 `link.exe`；没有进入本轮 Rust 源码诊断，完整编译继续由 Windows CI 验证。
+- 两个桌面 OpenAPI 契约和 Tauri 配置 JSON 解析通过，版本均为 `0.6.0`；`git diff --check` 通过。
+- 推送后只跟踪本次 `backend-ci`；若失败，只修复实际失败 job，不重复运行无关本地集合。
+
+### 阻塞与风险
+
+- 生产 DNS/受信证书证据和 MinIO 修复镜像仍不在当前本机环境内，正式 `v0.4.0` tag/Release 继续保持阻塞。
+- Web 用户端与管理后台属于 Sprint 10，不纳入本次 Sprint 9 版本收尾。
+
+### 下一步
+
+1. 提交并推送 `dev`，跟踪新的 `backend-ci` 到全部 job 成功。
+2. 远端门禁全绿后进入 Sprint 10 Web 用户端与管理后台。
+
+### 涉及文件
+
+- `backend/pyproject.toml`
+- `backend/app/core/config.py`
+- `backend/tests/test_app.py`
+- `backend/uv.lock`
+- `desktop/Cargo.toml`
+- `desktop/Cargo.lock`
+- `desktop/apps/drive-desktop/`
+- `desktop/crates/`
+- `desktop/contracts/`
+- `README.md`
+- `backend/README.md`
+- `desktop/README.md`
+- `docs/deployment-windows-docker.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `PROJECT_STAGE_STATUS.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-08-03 Sprint 8 Rust 双向同步与桌面发布交付
 
 ### 当前状态
