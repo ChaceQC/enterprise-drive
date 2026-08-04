@@ -9,7 +9,7 @@ test('登录、文件批量操作与上传队列', async ({ page }) => {
 
   await page.getByLabel('用户名').fill('admin')
   await page.getByLabel('密码').fill('admin-password')
-  await page.getByRole('button', { name: '登录' }).click()
+  await page.getByRole('button', { name: '登录', exact: true }).click()
   await expect(page.getByRole('heading', { name: '我的文件' })).toBeVisible()
 
   await page.getByLabel('文件版本').click()

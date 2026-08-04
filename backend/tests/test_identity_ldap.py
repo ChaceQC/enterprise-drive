@@ -443,9 +443,7 @@ async def test_ldap_bindings_survive_incremental_updates_and_manual_membership(
         )
         assert len(permission_events) == 1
         assert permission_events[0].payload["permission_version"] == 2
-        assert {
-            (event.aggregate_type, event.aggregate_id) for event in rebuild_events
-        } == {
+        assert {(event.aggregate_type, event.aggregate_id) for event in rebuild_events} == {
             ("department", first_bindings[("department", "dept-1")]),
             ("group", first_bindings[("group", "group-1")]),
             ("user", first_bindings[("user", "user-1")]),
