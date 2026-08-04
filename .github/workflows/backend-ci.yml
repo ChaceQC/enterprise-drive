@@ -417,14 +417,28 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Cache Cargo registry and git sources
+        id: cargo-cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('desktop/Cargo.lock', 'desktop/rust-toolchain.toml') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
       - name: Rust format
         run: cargo fmt --all --check
+        working-directory: desktop
 
       - name: Rust Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+        working-directory: desktop
 
       - name: Rust tests
         run: cargo test --workspace
+        working-directory: desktop
 
   rust-dependency-policy:
     needs: changes
@@ -462,6 +476,16 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+
+      - name: Restore Cargo registry and git cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: cargo-${{ runner.os }}-${{ hashFiles('desktop/Cargo.lock', 'desktop/rust-toolchain.toml') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
 
       - name: Cache pinned Tauri CLI
         id: tauri-cli-cache
@@ -567,10 +591,31 @@ jobs:
           "DRIVE_SIGNING_CERT_SHA256=$certificateSha256" >> $env:GITHUB_ENV
           "DRIVE_DESKTOP_VERSION=$version" >> $env:GITHUB_ENV
 
+      - name: Prefetch locked desktop crates once
+        shell: pwsh
+        run: cargo fetch --locked --manifest-path desktop/Cargo.toml --target x86_64-pc-windows-msvc
+
+      - name: Build update signing tools once
+        if: github.event_name == 'push'
+        env:
+          CARGO_NET_OFFLINE: "true"
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          cargo build `
+            --locked `
+            --release `
+            --manifest-path desktop/Cargo.toml `
+            --target x86_64-pc-windows-msvc `
+            -p drive-update `
+            --bin sign-update `
+            --bin verify-update
+
       - name: Build Windows installer
         uses: tauri-apps/tauri-action@1deb371b0cd8bd54025b384f1cd735e725c4060f
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CARGO_NET_OFFLINE: "true"
         with:
           projectPath: desktop/apps/drive-desktop
           tauriScript: tauri
@@ -671,27 +716,33 @@ jobs:
             "v$env:DRIVE_DESKTOP_VERSION/$($installer.Name)"
           )
           $manifestPath = Join-Path $artifactDir "latest.json"
-          cargo run `
-            --locked `
-            --manifest-path desktop/Cargo.toml `
-            -p drive-update `
-            --bin sign-update `
-            -- `
+          $updateToolDir = Join-Path `
+            $env:GITHUB_WORKSPACE `
+            "desktop/target/x86_64-pc-windows-msvc/release"
+          $signUpdate = Join-Path $updateToolDir "sign-update.exe"
+          $verifyUpdate = Join-Path $updateToolDir "verify-update.exe"
+          foreach ($tool in @($signUpdate, $verifyUpdate)) {
+            if (-not (Test-Path -LiteralPath $tool)) {
+              throw "Update signing tool was not built: $tool"
+            }
+          }
+          & $signUpdate `
             --package $signedInstaller `
             --version $env:DRIVE_DESKTOP_VERSION `
             --target x86_64-pc-windows-msvc `
             --url $packageUrl `
             --certificate-sha256 $env:DRIVE_SIGNING_CERT_SHA256 `
             --output $manifestPath
-          cargo run `
-            --locked `
-            --manifest-path desktop/Cargo.toml `
-            -p drive-update `
-            --bin verify-update `
-            -- `
+          if ($LASTEXITCODE -ne 0) {
+            throw "Update manifest signing failed."
+          }
+          & $verifyUpdate `
             --manifest $manifestPath `
             --package $signedInstaller `
             --public-key desktop/update-public-key.txt
+          if ($LASTEXITCODE -ne 0) {
+            throw "Update manifest verification failed."
+          }
           Copy-Item `
             -LiteralPath desktop/signing/desktop-code-signing.pem `
             -Destination $artifactDir

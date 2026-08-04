@@ -404,6 +404,9 @@ checkout
        -> Compose/TLS/监控/Nginx 校验 -> Docker smoke/image build
   -> desktop：
        cargo fmt -> cargo clippy -> cargo test
+       -> 共享 Cargo registry/git cache
+       -> 一次锁定 workspace cargo fetch，后续安装包构建使用 offline
+       -> 一次 release 构建 sign-update/verify-update
        -> push 或安装包相关变更时构建 Tauri/NSIS 并验证签名更新工件
   -> windows：
        PowerShell 5.1 parser + TLS/backup-restore/governance guard checks

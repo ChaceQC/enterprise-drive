@@ -4,7 +4,7 @@
 
 ### 当前状态
 
-- 分支：`dev`；工作树以 `d806212` 为起点，目标是减少同一提交内与连续提交之间的重复 runner 消耗，不删除后端、桌面、Windows 部署或供应链门禁。
+- 分支：`dev`；首轮优化提交为 `2b45ac5`，目标是减少同一提交内与连续提交之间的重复 runner 消耗，不删除后端、桌面、Windows 部署或供应链门禁。
 - 基线取自成功运行 `30872900207`：8 个 job 合计约 `46.78` runner-minutes，其中 `rust-desktop` 为 `17.25` 分钟、`windows-desktop-installer` 为 `20.80` 分钟；桌面路径合计占约 `38` 分钟。
 
 ### 已完成
@@ -14,6 +14,8 @@
 - 后端 job 先执行 Ruff、Bandit、pip-audit 和 Mypy，通过后才启动 PostgreSQL/MinIO、执行 Alembic、pytest、Compose/Nginx、Docker smoke 与镜像构建。
 - Rust job 保留 format、Clippy 和 workspace tests，移除与 Tauri/NSIS 重复的 workspace release build；普通 Rust PR 只跑 Rust 校验，push 或安装包相关变更才构建安装包。
 - Tauri CLI 从每次约 9 分钟的 `cargo install` 改为固定 `@tauri-apps/cli@2.11.4` npm 二进制，并使用固定 SHA 的 `actions/cache v6.1.0` 缓存。
+- 首次真实全 scope run `30877250861` 已全绿：总 runner-minutes `29.13`，相对基线 `46.78` 下降约 `37.7%`；backend `4.70` 分钟、Rust `7.87` 分钟、安装包 `13.65` 分钟、MinIO 合并扫描 `1.23` 分钟。
+- 该 run 日志确认安装包 job 内的 `tauri build` 之后，两个 debug `cargo run` 又重新编译整套 update 依赖；本轮追加 Cargo registry/git cache、一次锁定 workspace `cargo fetch` 和 offline 构建，并先一次 release 构建 `sign-update`/`verify-update`，签名步骤改为直接复用二进制。
 - MinIO Server/Client 由两个 matrix job 合并为一个 supply-chain job，只安装一次 Grype、统一上传一组 SBOM/报告；镜像配置变化和每周一 UTC 03:17 定时任务继续执行该门禁，Rust dependency policy 同时保留每周检查。
 - `workflow_dispatch` 会运行完整 scope；工作流或路由脚本自身变化也会强制运行全部门禁。
 
@@ -24,11 +26,12 @@
 - `ruamel.yaml`：workflow 顶层结构、8 个 job、schedule 和依赖关系解析通过。
 - `actionlint 1.7.12`：`.github/workflows/backend-ci.yml` 通过。
 - 合并后的 MinIO shell block 通过 `bash -n`；固定 npm Tauri CLI 在本机临时目录安装耗时约 6 秒，`tauri-cli 2.11.4` 可执行。
+- 首轮远端 run `30877250861` 的 8 个 job 全部成功，桌面安装包签名/更新工件上传成功。
 - `git diff --check`：通过。
 
 ### 待完成
 
-- 提交并推送本轮改动，跟踪一次真实全 scope `backend-ci`；确认所有门禁与签名安装包通过后，再记录实际 job 数、耗时和节省比例。
+- 推送本轮 Cargo cache 与 release 工具复用改动，确认安装包 job 不再出现签名阶段的重复 debug 编译，并记录 cache hit、下载行数和新的 runner-minutes。
 
 ## 2026-08-04 Sprint 9 版本与契约收尾
 
