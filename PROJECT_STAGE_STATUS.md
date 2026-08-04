@@ -4,7 +4,7 @@
 
 ## 1. 总体结论
 
-当前项目处于 **v0.9.0、Sprint 12 规模化治理代码侧已完成并进入最终集成门禁**：
+当前项目处于 **v0.9.0、Sprint 12 规模化治理代码、本地门禁与远端 CI 均已完成，下一产品阶段进入 Sprint 13 稳定版发布**：
 
 - 后端核心能力、权限、分享、预览、搜索、完整管理 API、Windows 11 Docker 部署、监控 profile 和备份治理入口已经形成试点基础，Sprint 2 至 Sprint 6 代码侧剩余项为空。
 - `BE-036` 至 `BE-050`、`FE-001` 至 `FE-012` 均已实现；后端、Web、Rust workspace、Tauri 安装包、更新器和 OpenAPI 契约已统一到 Sprint 12 目标版本 `0.9.0`。
@@ -15,7 +15,7 @@
 - Sprint 7 与 Sprint 8 的 `DC-001` 至 `DC-010` 已完成：Rust/Tauri Windows 11 骨架、设备会话、增量游标/tombstone、SQLite 离线队列、DTP/1 双向传输、文件监听、冲突副本、选择性同步、Windows 路径边界、诊断导出、签名更新和失败回退均已落地。
 - `frontend/` 已交付 React/Vite/TypeScript 工程、生成式 API client、Cookie Session/CSRF 壳、用户端与管理后台主要流程、公开分享入口、错误恢复和三浏览器 Playwright 配置；Compose 新增内部 `web` 服务，由 gateway 统一代理页面、静态资源和 `/api/v1`。
 - Sprint 10 的 `backend-ci` 历史证据继续保留：提交 `8da1abe` 对应 run `30893658311` 的 9 个 job 全部成功。Sprint 11 最终提交为 `e6b4f6d`，`backend-ci` run `30922718148` 成功；changes/backend 成功，7 个未受影响 job 按 scope 跳过，frontend 已由 run `30919983108` 验证，Rust/MinIO/Windows/安装包已由 run `30917345858` 验证。
-- Sprint 12 本地只执行新增与直接受影响门禁，统一提交、推送和远端 CI 尚待本轮最终集成确认；未重复执行 Sprint 10 浏览器全集、既有 MinIO 全集、性能 target 或桌面历史集合。
+- Sprint 12 最终功能/修复提交为 `91ad743`，`backend-ci` run `30935875456` 成功：`changes`、`frontend`、`backend` 成功，其余 6 个未受影响 job 按 scope 跳过，后端为 `456 passed, 2 warnings`；本地未重复执行 Sprint 10 浏览器全集、既有 MinIO 全集、性能 target 或桌面历史集合。
 - 真实生产 OIDC/LDAPS、DNS/受信证书证据和 MinIO 修复镜像不在当前本机环境内，正式 `v0.4.0` tag/Release 保持阻塞；`v1.0.0` 的完整 UAT、升级回滚、发布包和验收报告仍属于 Sprint 13。
 
 ## 2. 当前仓库快照
@@ -31,6 +31,9 @@
 - Sprint 9 最终 CI：`backend-ci` run `30872900207`（8 个 job 全部成功）
 - Sprint 10 交付提交：`8da1abe`
 - Sprint 10 最终 CI：`backend-ci` run `30893658311`（9 个 job 全部成功）
+- Sprint 12 最终功能/修复提交：`91ad743`
+- Sprint 12 最终 CI：`backend-ci` run `30935875456`（`changes`、`frontend`、`backend` 成功，其余 6 个 job 按 scope 跳过）
+- Sprint 12 四依赖报告：artifact `8903238332`，SHA-256 `4602126048cb0c8a8e3599be4d59f4aa4f75f9f3332967519c2d99b09f7fd989`
 - Git tag：当前尚未建立 `v0.4.0` tag
 - 当前 OpenAPI 归档：116 个路径、148 个操作、178 个 schemas
 - 最新数据库迁移：`20260804_0026`
@@ -38,10 +41,10 @@
 - Sprint 9 收尾：`0.6.0` 版本清单、运行时版本、安装包版本和 OpenAPI 契约已对齐，远端 CI 已全绿
 - Sprint 10 代码侧：`FE-001` 至 `FE-009`、`frontend/`、Compose `web`、gateway 路由和 frontend CI 已落地；当前默认无 profile 服务为 16 个
 - Sprint 11：`BE-040` 至 `BE-043`、`FE-010` 至 `FE-011`、身份安全 migration、OpenAPI/client 和 Windows 环境透传已落地，本地相关门禁与远端 CI 均已通过
-- Sprint 12：`BE-046` 至 `BE-050`、`FE-012`、`OPS-001` 至 `OPS-003`、`QA-001` 至 `QA-002` 已落地；本地新增和直接受影响门禁正在统一收口，远端 CI 待本轮推送确认
+- Sprint 12：`BE-046` 至 `BE-050`、`FE-012`、`OPS-001` 至 `OPS-003`、`QA-001` 至 `QA-002` 已落地，本地新增和直接受影响门禁与远端 CI 均已通过
 - 桌面更新公开证书 DER SHA-256：`765e82aba7bd3276f18eeadddd7b33257a68b7a1ddcdac6d4fc7f7bc639a3ca5`
 - 正式本机入口：gateway `http://localhost:18080` 同时提供 Web/API，`http://localhost:19000` 提供 S3；`web` 仅暴露 Compose 内部 `8080`
-- 当前未完成：Sprint 12 统一提交/远端 CI，真实生产 OIDC/LDAPS 验收、DNS/受信证书、MinIO 修复镜像，以及 Sprint 13 稳定版发布
+- 当前未完成：真实生产 OIDC/LDAPS 验收、DNS/受信证书、MinIO 修复镜像，以及 Sprint 13 完整 UAT、升级回滚、发布包和 `v1.0.0` 验收
 
 ## 3. 各阶段进度
 
@@ -58,7 +61,7 @@
 | Sprint 9：核心产品闭环 | `BE-036` 至 `BE-039`、`BE-044`、`BE-045` 已完成 | 无 |
 | Sprint 10：Web 用户端与管理后台 | `FE-001` 至 `FE-009` 已完成：React/Vite、生成 API Client、用户端、管理后台、公开分享、Compose Web、gateway 路由、frontend CI、Playwright E2E 与远端全 scope 门禁 | 无；真实生产浏览器/网络验收属于后续发布门禁 |
 | Sprint 11：身份与账号安全 | `BE-040` 至 `BE-043`、`FE-010` 至 `FE-011` 已完成代码侧交付：账号锁定/解锁、密码与全会话、OIDC/PKCE、LDAP 同步和用户/管理身份页面；本地相关门禁与远端 CI 已通过 | 真实生产 provider/目录验收属于发布门禁 |
-| Sprint 12：规模化治理与内容能力 | `BE-046` 至 `BE-050`、`FE-012`、`OPS-001` 至 `OPS-003`、`QA-001` 至 `QA-002` 已完成代码侧交付：权限重算、生命周期策略/运行、审计分区/归档/投递、Outbox DLQ、治理页面/看板、备份安全、离线副本、Redis/OpenSearch 可移植迁移和四依赖故障恢复矩阵 | 仅剩本轮统一提交、推送和远端 CI 证据；legal hold、复杂 DLP/内容分类不属于本 Sprint |
+| Sprint 12：规模化治理与内容能力 | `BE-046` 至 `BE-050`、`FE-012`、`OPS-001` 至 `OPS-003`、`QA-001` 至 `QA-002` 已完成代码侧交付、直接受影响本地门禁和远端 CI：权限重算、生命周期策略/运行、审计分区/归档/投递、Outbox DLQ、治理页面/看板、备份安全、离线副本、Redis/OpenSearch 可移植迁移和四依赖故障恢复矩阵 | 无代码或 CI 剩余项；生产密钥/外部审计接收端验收属于上线门禁，legal hold、复杂 DLP/内容分类属于远期 `GOV-001` |
 | Sprint 13：稳定版发布 | 尚未开始 | UAT、压测、安全验收、升级回滚、统一版本、`v1.0.0`、发布包和验收报告 |
 
 ## 4. 已有验证证据
@@ -67,8 +70,9 @@
 - Sprint 12 前端已通过 lint、typecheck 和 Chromium 聚焦治理 E2E `1 passed`；场景覆盖大目录进度、权限失败重试、生命周期 dry-run、审计归档摘要和 dead-letter 幂等重放，测试端口已清理。
 - Sprint 12 版本已统一为 `0.9.0`：`uv lock --check` 通过，版本一致性 `1 passed`，Cargo metadata 确认 9 个本地 `drive-*` 包均为 `0.9.0`，OpenAPI 归档为 116/148/178。
 - Sprint 12 OPS 已完成 12 个 PowerShell 脚本 parser、来源签名/完整包加密专项 smoke、离线副本/迁移治理 smoke 和既有直接受影响 backup/governance smoke；本机真实双 project Redis/OpenSearch 导出、应用和自动回退集成已通过，临时容器、卷和端口已清理。
-- 四依赖矩阵已在本机真实 Docker 中完成 PostgreSQL、Redis、MinIO、OpenSearch 初始健康、逐项故障探测、恢复和最终全健康；远端后端 job 仍在同一次 pytest 中通过 `DRIVE_RUN_SPRINT12_MATRIX=1` 复验并上传 UTF-8 JSON 报告。
+- 四依赖矩阵已在本机真实 Docker 中完成 PostgreSQL、Redis、MinIO、OpenSearch 初始健康、逐项故障探测、恢复和最终全健康；远端后端 job 在同一次 pytest 中通过 `DRIVE_RUN_SPRINT12_MATRIX=1` 复验并上传 UTF-8 JSON 报告。
 - 审计/Outbox 定向用例通过；真实 PostgreSQL 空库升级到 `20260804_0026` 并完成 `0026 -> 0024 -> 0026` 往返，分区专项 `1 passed`；Prometheus 规则、Grafana JSON、最终 OpenAPI/client、route matrix、Compose、actionlint 和 CI scope 均已通过本地直接门禁。
+- Sprint 12 最终远端证据：提交 `91ad743` 对应 [`backend-ci` run `30935875456`](https://github.com/ChaceQC/enterprise-drive/actions/runs/30935875456) 成功，后端 `456 passed, 2 warnings`；四依赖报告 artifact [`8903238332`](https://github.com/ChaceQC/enterprise-drive/actions/runs/30935875456/artifacts/8903238332) 的 SHA-256 为 `4602126048cb0c8a8e3599be4d59f4aa4f75f9f3332967519c2d99b09f7fd989`。
 - Sprint 11 账号安全专项 `tests/test_sprint11_account_security.py` 4 个用例均已分别通过；受影响既有回归为 Auth 8 passed、登录限流 2 passed、管理员用户生命周期 1 passed、桌面设备会话 1 passed。
 - Sprint 11 账号安全相关 15 个文件 Ruff/format 通过，Auth/Admin/Device 相关 12 个源码文件 Mypy 通过；管理员创建测试 helper 已同步新密码策略。
 - Sprint 11 本地门禁已通过：账号安全 4 项与受影响回归 12 项、OIDC/LDAP 10 项、route matrix 134 条路由及 6 项集合校验、前端三浏览器 12 场景均通过；静态、锁文件、OpenAPI/client、migration、Compose、Cargo metadata 和差异检查均通过。最终提交 `e6b4f6d`，`backend-ci` run `30922718148` 成功；changes/backend 成功，7 个未受影响 job 按 scope 跳过，frontend 已在 `30919983108` 成功，Rust/MinIO/Windows/安装包已在 `30917345858` 成功。
@@ -122,9 +126,9 @@
 
 ## 5. 下一步顺序
 
-1. 按子系统提交并推送 Sprint 12 到 `dev`；只处理本次 CI 失败 scope，确认全部 required jobs 成功后回填提交和 run ID。
-2. 进入 Sprint 13，执行全产品 UAT、升级/回滚、性能与安全发布门禁、RPO/RTO 签字和 `v1.0.0` 工件收口。
-3. 在真实生产网络执行 OIDC/LDAPS、`tls-validate-public` 和双域名证书验收；采用受支持修复镜像或可审计补丁镜像解决 MinIO Critical，重新生成 SBOM/Grype 并运行真实 MinIO/备份恢复兼容门禁。
+1. 进入 Sprint 13，执行全产品 UAT、升级/回滚、性能与安全发布门禁、RPO/RTO 签字和 `v1.0.0` 工件收口。
+2. 在真实生产网络执行 OIDC/LDAPS、`tls-validate-public` 和双域名证书验收。
+3. 采用受支持修复镜像或可审计补丁镜像解决 MinIO Critical，重新生成 SBOM/Grype 并运行真实 MinIO/备份恢复兼容门禁。
 
 ## 6. 状态判断
 

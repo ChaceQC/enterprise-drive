@@ -1,6 +1,6 @@
 # PROJECT_PLAN.md
 
-本文件是《企业网盘开发者技术计划书.md》的执行版摘要。完整架构、数据模型、接口契约、安全策略和里程碑以技术计划书为准。当前代码基线为 Sprint 12 / `0.9.0`：后端主链路、Rust 桌面端、Web 用户端与管理后台、身份安全，以及规模化治理能力均已完成代码侧收口；当前只完成本轮新增和直接受影响门禁，待统一提交、推送并确认远端 CI 后进入 Sprint 13 稳定版发布。
+本文件是《企业网盘开发者技术计划书.md》的执行版摘要。完整架构、数据模型、接口契约、安全策略和里程碑以技术计划书为准。当前代码基线为 Sprint 12 / `0.9.0`：后端主链路、Rust 桌面端、Web 用户端与管理后台、身份安全，以及规模化治理能力均已完成代码、本地直接受影响门禁和远端 CI 收口；下一阶段进入 Sprint 13 稳定版发布。
 
 ## 1. 项目目标
 
@@ -172,7 +172,7 @@
 - `FE-012` 已完成：`/admin/governance` 覆盖大目录任务、权限重算、生命周期策略与运行、审计归档/投递、dead-letter 查询/重放和治理告警，并通过生成式 OpenAPI client 调用服务端。
 - `OPS-001` 至 `OPS-003` 已完成：备份 manifest v2 支持 detached CMS 来源签名、AES-256-CBC + HMAC-SHA256 + RSA-OAEP-SHA256 完整包保护、离线副本原子复制/盘点/轮换，以及 Redis RDB 与 OpenSearch settings/mappings/bulk 的可移植导出、跨 major 门禁、自动回退和 JSON 记录。
 - `QA-001`/`QA-002` 已接入：后端 CI 在同一次 pytest 中运行 PostgreSQL、Redis、MinIO、OpenSearch 四依赖健康、逐项故障探测与恢复矩阵并上传报告；OpenAPI 归档、TypeScript client、route matrix 和 breaking-change 门禁继续保持。既有 `BE-029` 目标规模性能证据复用，不重复执行无关性能 target。
-- Grafana 新增 `enterprise-drive-governance` 看板，Prometheus 新增权限重算、生命周期失败和 Outbox 最老积压告警。当前本地已完成治理后端 4 项、前端 lint/typecheck 与 Chromium 聚焦 E2E、版本一致性、PowerShell parser/专项 smoke 等直接门禁；统一迁移、契约和远端 CI 由本轮集成收口。
+- Grafana 新增 `enterprise-drive-governance` 看板，Prometheus 新增权限重算、生命周期失败和 Outbox 最老积压告警。本地已完成治理后端 4 项、前端 lint/typecheck 与 Chromium 聚焦 E2E、版本一致性、PowerShell parser/专项 smoke、统一迁移和契约等直接门禁；最终功能/修复提交 `91ad743` 对应 `backend-ci` run `30935875456` 成功，后端 `456 passed, 2 warnings`，四依赖报告 artifact 为 `8903238332`。
 
 ### Sprint 13：稳定版发布（目标版本 `1.0.0`）
 
@@ -196,7 +196,7 @@
 
 ## 5. 当前下一步
 
-2026-08-04 Sprint 12 的代码与文档已进入提交收口：`BE-046` 至 `BE-050`、`FE-012`、`OPS-001` 至 `OPS-003`、`QA-001` 至 `QA-002` 已落地，项目版本统一为 `0.9.0`，migration head 更新为 `20260804_0026`，当前 OpenAPI 归档为 116 个路径、148 个操作、178 个 schemas。已确认治理后端 `4 passed`、审计/Outbox 定向用例、前端 lint/typecheck 与 Chromium 治理 E2E `1 passed`、版本一致性 `1 passed`、空库升级与 `0026 -> 0024 -> 0026` 往返、四依赖故障恢复、OPS 双 project Redis/OpenSearch 迁移/回退、监控规则/看板、OpenAPI/client、route matrix、Compose、actionlint 和 CI scope；没有重复运行 Sprint 10 浏览器全集、既有 MinIO 全集、性能 target 或桌面历史集合。当前下一步是统一提交并推送 `dev`，再以本次提交触发的远端 CI 全绿作为 Sprint 12 最终证据。
+2026-08-04 Sprint 12 已完成：`BE-046` 至 `BE-050`、`FE-012`、`OPS-001` 至 `OPS-003`、`QA-001` 至 `QA-002` 已落地，项目版本统一为 `0.9.0`，migration head 为 `20260804_0026`，OpenAPI 归档为 116 个路径、148 个操作、178 个 schemas。本地确认治理后端 `4 passed`、审计/Outbox 定向用例、前端 lint/typecheck 与 Chromium 治理 E2E `1 passed`、版本一致性 `1 passed`、空库升级与 `0026 -> 0024 -> 0026` 往返、四依赖故障恢复、OPS 双 project Redis/OpenSearch 迁移/回退、监控规则/看板、OpenAPI/client、route matrix、Compose、actionlint 和 CI scope；最终功能/修复提交 `91ad743` 已推送，`backend-ci` run `30935875456` 的 `changes`、`frontend`、`backend` 成功，其余 6 个未受影响 job 按 scope 跳过，后端 `456 passed, 2 warnings`，四依赖报告 artifact 为 `8903238332`。本轮没有重复运行 Sprint 10 浏览器全集、既有 MinIO 全集、性能 target 或桌面历史集合；当前下一步进入 Sprint 13 完整 UAT、升级回滚和 `v1.0.0` 发布门禁。
 
 2026-08-04 Sprint 11 的 `BE-040` 至 `BE-043`、`FE-010` 至 `FE-011` 已完成代码侧交付：项目版本统一为 `0.8.0`，新增账号锁定/解锁、密码策略与全会话治理、OIDC/OAuth 2.1 + PKCE、LDAP 只读目录同步和对应 Web 身份页面；migration head 为 `20260804_0024`。运行时 OpenAPI 归档、生成 client 与 route matrix 已精确对账为 105 个路径、134 个操作、162 个 schemas，本地相关门禁均已通过。最终提交 `e6b4f6d` 已推送，`backend-ci` run `30922718148` 成功；Sprint 11 远端门禁完成，下一步进入 Sprint 12，不重复执行未受影响的 Sprint 10、MinIO、备份恢复、性能和桌面历史集合。
 

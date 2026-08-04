@@ -1,13 +1,13 @@
 # PROJECT_PROGRESS.md
 
-## 2026-08-04 Sprint 12 规模化治理代码侧收口
+## 2026-08-04 Sprint 12 规模化治理交付完成
 
 ### 当前状态
 
-- 分支：`dev`；本轮基于 Sprint 11 最终提交 `c371526` 开始集成，工作树由多个 Sprint 12 子系统共同修改，尚未提交或推送。
+- 分支：`dev`；本轮基于 Sprint 11 最终提交 `c371526` 开始集成，后端治理、前端/契约、OPS/监控、版本/文档和 CI 定向修复均已提交并推送，最终功能/修复提交为 `91ad743`。
 - Sprint 12 范围 `BE-046` 至 `BE-050`、`FE-012`、`OPS-001` 至 `OPS-003`、`QA-001` 至 `QA-002` 已完成代码侧实现，项目版本统一为 `0.9.0`，migration head 为 `20260804_0026`。
 - 当前 OpenAPI 归档为 116 个路径、148 个操作、178 个 schemas；前端治理页使用生成式 API client，桌面端仍消费同一 `0.9.0` 契约版本。
-- 本轮继续遵循“不重复测试、不运行无关测试”：只执行 Sprint 12 新增和直接受影响门禁，既有 Sprint 10 三浏览器全集、MinIO 历史全集、`BE-029` 性能 target、完整备份恢复和桌面历史集合不在本地重复运行。
+- 本轮遵循“不重复测试、不运行无关测试”：本地只执行 Sprint 12 新增和直接受影响门禁；远端失败项只定向修复 Ruff format、安全矩阵固定计数和维护任务枚举，既有 Sprint 10 三浏览器全集、MinIO 历史全集、`BE-029` 性能 target、完整备份恢复和桌面历史集合未在本地重复运行。
 
 ### 已完成
 
@@ -36,6 +36,9 @@
 - 版本与契约：`uv lock --check`、版本一致性测试 `1 passed`、`cargo metadata --locked --no-deps`、最终 `api:generate`/`api:check` 和前端 typecheck 通过；OpenAPI 统计为 116/148/178。
 - OPS：12 个 PowerShell 脚本 parser 通过；来源签名/完整包加密、离线副本/迁移治理专项 smoke 通过；既有直接受影响 `backup-restore.smoke` 为 `27 passed`，governance smoke 通过；真实双 project Redis/OpenSearch 导出、应用和自动回退集成通过；`manage.ps1 config -EnvFile .env.windows.example -Quiet` 通过。
 - 监控与 CI 配置：Grafana JSON 解析为 5 个 panel，Prometheus `promtool` 检查 maintenance 7 条和 platform 12 条规则通过；`actionlint`、Compose config 和 CI scope 20 个用例通过。
+- 最终远端门禁：提交 `91ad743` 对应 [`backend-ci` run `30935875456`](https://github.com/ChaceQC/enterprise-drive/actions/runs/30935875456) 成功；`changes`、`frontend`、`backend` 成功，其余 6 个未受影响 job 按 scope 跳过；后端为 `456 passed, 2 warnings`。
+- 四依赖远端报告：artifact [`sprint12-dependency-matrix`（ID `8903238332`）](https://github.com/ChaceQC/enterprise-drive/actions/runs/30935875456/artifacts/8903238332)，SHA-256 为 `4602126048cb0c8a8e3599be4d59f4aa4f75f9f3332967519c2d99b09f7fd989`。
+- 远端收敛过程只处理实际失败 scope：run `30933353493` 修复两处 Ruff format；run `30935062565` 修复安全矩阵固定计数和维护任务枚举；最终 run `30935875456` 全绿。
 
 ### 阻塞与风险
 
@@ -45,9 +48,9 @@
 
 ### 下一步
 
-1. 按后端治理、前端/契约、OPS/监控、版本/文档拆分中文提交，推送 `dev` 并确认本次 `backend-ci` required jobs 全绿。
-2. 只处理本次远端 CI 的失败 scope，不重复运行已经通过且未受影响的历史集合。
-3. CI 成功后回填 Sprint 12 最终 commit、run ID 和远端四依赖/Windows 证据，再进入 Sprint 13 完整 UAT、升级回滚和 `v1.0.0` 发布门禁。
+1. 进入 Sprint 13，执行完整 UAT、升级/回滚、性能与安全发布门禁、RPO/RTO 签字和 `v1.0.0` 工件收口。
+2. 在真实生产网络完成 OIDC/LDAPS、DNS/受信证书和双域名 HTTPS 验收。
+3. 采用受支持修复镜像或可审计补丁镜像解决 MinIO Critical，重新生成 SBOM/Grype，并执行真实 MinIO 与备份恢复兼容门禁；上述发布阻塞解除前不创建 tag/Release。
 
 ### 涉及文件
 
