@@ -181,11 +181,13 @@ async def _archive_next_month(
     deleted_rows = 0
     if delete_source:
         delete_result = await session.execute(
-            delete(AuditLog).where(
+            delete(AuditLog)
+            .where(
                 AuditLog.tenant_id == tenant_id,
                 AuditLog.created_at >= period_start,
                 AuditLog.created_at < period_end,
-            ).execution_options(synchronize_session=False)
+            )
+            .execution_options(synchronize_session=False)
         )
         deleted_rows = int(getattr(delete_result, "rowcount", 0) or 0)
         archive.source_deleted_at = datetime.now(UTC)

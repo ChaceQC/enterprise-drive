@@ -601,9 +601,7 @@ ROUTE_SECURITY_MATRIX: tuple[SecurityRouteCase, ...] = (
     SecurityRouteCase(
         method="GET",
         template_path="/api/v1/admin/governance/permission-rebuilds/{operation_id}",
-        request_path=(
-            f"/api/v1/admin/governance/permission-rebuilds/{_PERMISSION_REBUILD_ID}"
-        ),
+        request_path=(f"/api/v1/admin/governance/permission-rebuilds/{_PERMISSION_REBUILD_ID}"),
         access_mode="admin",
         tenant_scope="session",
         csrf_mode="none",
@@ -611,12 +609,9 @@ ROUTE_SECURITY_MATRIX: tuple[SecurityRouteCase, ...] = (
     ),
     SecurityRouteCase(
         method="POST",
-        template_path=(
-            "/api/v1/admin/governance/permission-rebuilds/{operation_id}/retry"
-        ),
+        template_path=("/api/v1/admin/governance/permission-rebuilds/{operation_id}/retry"),
         request_path=(
-            f"/api/v1/admin/governance/permission-rebuilds/"
-            f"{_PERMISSION_REBUILD_ID}/retry"
+            f"/api/v1/admin/governance/permission-rebuilds/{_PERMISSION_REBUILD_ID}/retry"
         ),
         access_mode="admin",
         tenant_scope="session",
