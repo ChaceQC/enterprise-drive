@@ -7,6 +7,9 @@
 - 分支：`dev`；对象存储替换功能提交
   `ba378cf2f18a5d56ea154a8f50f24bf6d3d2079d` 已推送到 `origin/dev`，对应
   `backend-ci` run `31031565671` 全绿。
+- 发布状态与 CI scope 收口提交
+  `5144dede8117fc3fc3ee9eb09a11d9f3d767080e` 已推送；run `31033796164`
+  成功并生成当前 Windows 候选 artifact `8942405724`。
 - 正式 `compose.windows.yml` 使用
   `chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602`
   （OCI revision `875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa`）、`seaweedfs`、
@@ -59,9 +62,17 @@
   （ZIP digest `sha256:13ffc1fa5e2ec0a19f153c5e8047458ca3780a3618441ec7a04ee6cb773a48b4`）
   复核为 `0 Critical / 1 High`；四依赖 artifact `8941042883` 对 PostgreSQL、
   Redis、S3、OpenSearch 的 4 个故障场景均检测并恢复，最终状态为 healthy。
-- CI scope router `21 tests` 通过；当前文档与路由器差异仅选择 installer，因为
+- CI scope router `21 tests` 通过；提交 `5144dede8117` 仅选择 installer，因为
   `docs/release-v1.0.0.md` 会进入 Windows Release artifact，其余普通 Markdown
   不触发昂贵业务门禁。
+- Run `31033796164` 的 changes 与 `windows-desktop-installer` 成功，其余不受影响
+  job 跳过。Artifact `8942405724` 的 ZIP digest 为
+  `sha256:43064a14eb24722c94be4263789ec174d2d1e632e27ddcb328e58109f3d6e55a`；
+  `release_manifest.py verify` 通过，manifest 为 `REL-005/1`、`1.0.0`、提交
+  `5144dede8117` 和 7 个受管角色。当前安装包 SHA-256 为
+  `c80717730a5b1fd0bba3e0da6be7bb03be36de9213e86dd76a7976fa5d4e1ecd`，
+  `0.9.0` 回滚包为
+  `513a075a2fc5604a889784c882fa3307c7d0f3ef31f741b9f4643d26e03d735b`。
 - 本轮遵循“不重复测试”：本地没有重跑已通过的全量 pytest、Playwright、历史性能
   target 或无关 Rust/桌面集合；远端 backend 已按受影响门禁执行 `468 passed`。
   完整备份恢复主流程只执行一次，最后失败项仅做 gateway Host 探针的定向修复和复测。
@@ -87,7 +98,7 @@
    S3 级迁移和 inventory 对账。
 2. 完成 SeaweedFS High 风险处理、候选 target 性能、UAT、soak、升级/回滚、
    RPO/RTO 和外部环境签字。
-3. 使用最终候选重新生成完整 Windows/Release 工件；全部门禁通过后才执行
+3. 外部门禁关闭后使用最终候选生成正式镜像 digest 与 Release 资产，再执行
    `dev -> main -> v1.0.0 tag/Release`。
 
 ### 涉及文件

@@ -216,11 +216,13 @@ object-storage-image-policy、object-storage-supply-chain 成功，未受影响�
 frontend、Rust 和 installer 按 scope 跳过。backend 为 `468 passed, 2 warnings`，
 当前 SeaweedFS digest 的供应链 artifact `8940899557` 为 `0 Critical / 1 High`，
 四依赖 artifact `8941042883` 最终状态 healthy；Windows backup/restore smoke
-`27 passed`，完整隔离恢复和 gateway Host 探针也已验证。旧 Windows artifact 不包含
-对象存储替换，当前候选必须重新生成完整 Release 工件。本地没有重复历史性能 target、
+`27 passed`，完整隔离恢复和 gateway Host 探针也已验证。提交 `5144dede8117`
+对应 run `31033796164` 的 changes 与 Windows installer 成功，artifact
+`8942405724` 已按 `REL-005/1` 复验为 `1.0.0`、7 个受管角色及当前/`0.9.0`
+回滚安装包；旧 artifact `8937081786` 仅保留历史证据。本地没有重复历史性能 target、
 全量 Playwright 或全量 pytest；仍需处理 High（若更换 digest 则重新扫描）、全量迁移、
-候选 target 性能、UAT、soak、升级/RPO-RTO、DNS/TLS、OIDC/LDAPS、告警签字及正式
-tag/Release。
+候选 target 性能、UAT、soak、升级/RPO-RTO、DNS/TLS、OIDC/LDAPS、告警签字，并在
+外部门禁关闭后生成正式镜像 digest、Release 资产和 tag。
 
 2026-08-04 Sprint 12 已完成：`BE-046` 至 `BE-050`、`FE-012`、`OPS-001` 至 `OPS-003`、`QA-001` 至 `QA-002` 已落地，项目版本统一为 `0.9.0`，migration head 为 `20260804_0026`，OpenAPI 归档为 116 个路径、148 个操作、178 个 schemas。本地确认治理后端 `4 passed`、审计/Outbox 定向用例、前端 lint/typecheck 与 Chromium 治理 E2E `1 passed`、版本一致性 `1 passed`、空库升级与 `0026 -> 0024 -> 0026` 往返、四依赖故障恢复、OPS 双 project Redis/OpenSearch 迁移/回退、监控规则/看板、OpenAPI/client、route matrix、Compose、actionlint 和 CI scope；最终功能/修复提交 `91ad743` 已推送，`backend-ci` run `30935875456` 的 `changes`、`frontend`、`backend` 成功，其余 6 个未受影响 job 按 scope 跳过，后端 `456 passed, 2 warnings`，四依赖报告 artifact 为 `8903238332`。本轮没有重复运行 Sprint 10 浏览器全集、既有 MinIO 全集、性能 target 或桌面历史集合；当前下一步进入 Sprint 13 完整 UAT、升级回滚和 `v1.0.0` 发布门禁。
 
