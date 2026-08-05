@@ -126,6 +126,79 @@ class OpenApiBreakingChangeTests(unittest.TestCase):
             find_breaking_changes(base, current),
         )
 
+    def test_narrowed_response_enum_is_breaking(self) -> None:
+        base = _document(
+            {
+                "/items": {
+                    "get": {
+                        "responses": {
+                            "200": _json_response(
+                                {"type": "string", "enum": ["a", "b"]}
+                            )
+                        }
+                    }
+                }
+            }
+        )
+        current_payload = copy.deepcopy(base.payload)
+        current_payload["paths"]["/items"]["get"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]["enum"] = ["a"]
+        current = OpenApiDocument(current_payload)
+
+        self.assertIn(
+            (
+                "GET /items response 200 application/json $ enum narrowed: "
+                'removed ["b"]'
+            ),
+            find_breaking_changes(base, current),
+        )
+
+    def test_request_type_and_format_changes_are_breaking(self) -> None:
+        base = _document(
+            {
+                "/items": {
+                    "post": {
+                        "requestBody": {
+                            "content": {
+                                "application/json": {
+                                    "schema": {
+                                        "type": "object",
+                                        "properties": {
+                                            "id": {
+                                                "type": "string",
+                                                "format": "uuid",
+                                            }
+                                        },
+                                    }
+                                }
+                            }
+                        },
+                        "responses": {"200": _json_response({})},
+                    }
+                }
+            }
+        )
+        current_payload = copy.deepcopy(base.payload)
+        current_schema = current_payload["paths"]["/items"]["post"]["requestBody"][
+            "content"
+        ]["application/json"]["schema"]["properties"]["id"]
+        current_schema["type"] = "integer"
+        current_schema["format"] = "int64"
+        current = OpenApiDocument(current_payload)
+
+        changes = find_breaking_changes(base, current)
+        self.assertIn(
+            "POST /items request application/json $.id type changed: "
+            '"string" -> "integer"',
+            changes,
+        )
+        self.assertIn(
+            "POST /items request application/json $.id format changed: "
+            '"uuid" -> "int64"',
+            changes,
+        )
+
     def test_optional_request_and_response_additions_are_compatible(self) -> None:
         base = _document(
             {

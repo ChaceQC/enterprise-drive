@@ -54,6 +54,29 @@ TARGET_MIN_RPS_BY_SCENARIO: dict[str, dict[str, float]] = {
     "upload_complete": {"upload_complete_end_to_end": 50.0},
 }
 
+TARGET_REQUIRED_METRICS_BY_SCENARIO: dict[str, frozenset[str]] = {
+    "mixed": frozenset(
+        {
+            "file_list_permission_batch",
+            "search",
+            "upload_init",
+            "admin_audit",
+        }
+    ),
+    "login": frozenset({"auth_login"}),
+    "auth_me": frozenset({"auth_me"}),
+    "list": frozenset({"file_list_permission_batch"}),
+    "search": frozenset({"search"}),
+    "upload_init": frozenset({"upload_init"}),
+    "upload_complete": frozenset(
+        {
+            "upload_complete_api_without_storage_merge",
+            "upload_complete_end_to_end",
+        }
+    ),
+    "audit": frozenset({"admin_audit"}),
+}
+
 
 def get_profile(name: str) -> BenchmarkProfile:
     try:

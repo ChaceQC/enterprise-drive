@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import tomllib
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -18,7 +19,7 @@ from app.core.logging import JsonFormatter, reset_log_context, set_log_context
 from app.main import create_app
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-PROJECT_VERSION = "0.9.0"
+PROJECT_VERSION = "1.0.0"
 
 
 @pytest_asyncio.fixture
@@ -48,9 +49,26 @@ async def test_healthz(client: AsyncClient) -> None:
     }
 
 
-def test_project_version_is_consistent_across_runtime_and_desktop_contracts() -> None:
+def test_project_version_is_consistent_across_runtime_web_and_desktop_artifacts() -> None:
     backend_project = tomllib.loads(
         (PROJECT_ROOT / "backend" / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    backend_lock = tomllib.loads((PROJECT_ROOT / "backend" / "uv.lock").read_text(encoding="utf-8"))
+    frontend_package = json.loads(
+        (PROJECT_ROOT / "frontend" / "package.json").read_text(encoding="utf-8")
+    )
+    frontend_lock = json.loads(
+        (PROJECT_ROOT / "frontend" / "package-lock.json").read_text(encoding="utf-8")
+    )
+    frontend_openapi = json.loads(
+        (PROJECT_ROOT / "frontend" / "openapi" / "openapi.json").read_text(encoding="utf-8")
+    )
+    generated_openapi_text = (
+        PROJECT_ROOT / "frontend" / "src" / "api" / "generated" / "core" / "OpenAPI.ts"
+    ).read_text(encoding="utf-8")
+    generated_version_match = re.search(
+        r"\bVERSION:\s*'(?P<version>\d+\.\d+\.\d+)'",
+        generated_openapi_text,
     )
     desktop_workspace = tomllib.loads(
         (PROJECT_ROOT / "desktop" / "Cargo.toml").read_text(encoding="utf-8")
@@ -75,14 +93,42 @@ def test_project_version_is_consistent_across_runtime_and_desktop_contracts() ->
         for package in desktop_lock["package"]
         if package["name"].startswith("drive-") and "source" not in package
     }
+    local_dependency_versions: set[str] = set()
+    for manifest_path in (PROJECT_ROOT / "desktop").rglob("Cargo.toml"):
+        manifest = tomllib.loads(manifest_path.read_text(encoding="utf-8"))
+        for section_name in ("dependencies", "dev-dependencies", "build-dependencies"):
+            for dependency in manifest.get(section_name, {}).values():
+                if (
+                    isinstance(dependency, dict)
+                    and "path" in dependency
+                    and "version" in dependency
+                ):
+                    local_dependency_versions.add(str(dependency["version"]))
+    backend_locked_version = next(
+        package["version"]
+        for package in backend_lock["package"]
+        if package["name"] == backend_project["project"]["name"]
+    )
+    desktop_ui = (
+        PROJECT_ROOT / "desktop" / "apps" / "drive-desktop" / "ui" / "index.html"
+    ).read_text(encoding="utf-8")
 
+    assert generated_version_match is not None
+    assert f"v{PROJECT_VERSION}" in desktop_ui
     assert {
         backend_project["project"]["version"],
+        backend_locked_version,
         Settings.model_fields["app_version"].default,
+        frontend_package["version"],
+        frontend_lock["version"],
+        frontend_lock["packages"][""]["version"],
+        frontend_openapi["info"]["version"],
+        generated_version_match.group("version"),
         desktop_workspace["workspace"]["package"]["version"],
         tauri_config["version"],
         *contract_versions,
         *local_desktop_versions,
+        *local_dependency_versions,
     } == {PROJECT_VERSION}
 
 

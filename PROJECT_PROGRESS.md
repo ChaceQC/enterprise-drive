@@ -1,5 +1,113 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-05 Sprint 13 v1.0.0 候选发布收口
+
+### 当前状态
+
+- 分支：`dev`；基线 HEAD 为 `a2ac96a`，当前 Sprint 13 候选改动待统一提交和推送。
+- 后端、Web、OpenAPI client、Rust workspace、Tauri、桌面契约及依赖锁文件已统一为
+  `1.0.0`；migration head 保持 `20260804_0026`，OpenAPI 保持
+  116 paths / 148 operations / 178 schemas。
+- 本轮只处理 `REL-001` 至 `REL-005` 的直接缺口，不重复运行历史性能 target、全量
+  Playwright、全量 pytest、MinIO/备份恢复和无关桌面测试集合。
+
+### 已完成
+
+- 扩展跨端版本一致性断言：覆盖后端 `pyproject.toml`/`uv.lock`/运行时默认值、
+  Web `package.json`/`package-lock.json`/OpenAPI/生成 client，以及 Cargo workspace、
+  本地 crate lock、path dependency、Tauri、桌面契约和 UI 版本。
+- 性能 target 为 mixed、login、auth_me、list、search、upload-init、
+  upload-complete 和 audit 固定必需指标；缺指标或零请求样本时报告失败，既有吞吐与
+  P95 门槛继续生效。
+- OpenAPI breaking checker 递归检测请求、响应和参数 schema 的 `type`、`format`
+  变化与 enum 收窄。
+- 桌面更新清单强制包含版本等于当前客户端的上一版回滚安装包；缺少回滚包时阻止
+  安装，不再静默跳过 watchdog。
+- `sign-update`/`verify-update` 同时签名和验证当前包、回滚包；下载暂存后通过
+  Windows `WinVerifyTrust` 验证 Authenticode 完整性，并核对签名者证书 DER
+  SHA-256。
+- 桌面健康标记从 Tauri 构建前移除，改为 setup 成功、托盘建立和后台循环调度后延迟
+  15 秒写入；本地操作恢复、传输恢复或已保存 watcher 启动失败时不写健康标记。
+  watchdog 参数、回滚包或回滚启动失败会使 helper 进程以错误退出，不再吞错后启动
+  普通桌面应用。
+- Windows CI 使用完整 Git 历史解析上一版本，本次候选将从 `899ee09` 构建
+  `0.9.0` 回滚安装包；当前包和回滚包均执行 Authenticode、Ed25519、SHA-256 和
+  固定签名者验证。
+- 新增 `.github/scripts/release_manifest.py`，生成并复验
+  `release-manifest.json`/`SHA256SUMS`，拒绝缺件、篡改、路径穿越、绝对路径、
+  UNC、symlink 和大小写冲突；Windows artifact 同时纳入当前/回滚安装包、
+  `latest.json`、OpenAPI、发布说明、更新公钥和公开证书。
+- 新增 `docs/release-v1.0.0.md` 与 `docs/sprint13-release-readiness.md`，固定
+  UAT 角色、性能/soak、安全与供应链、升级/回滚、运维责任、RPO/RTO、风险签字和
+  `dev -> main -> v1.0.0` 发布顺序。
+
+### 验证
+
+- 版本一致性：`1 passed`；`uv lock --check` 通过；Cargo metadata 确认 9 个本地
+  package 均为 `1.0.0`。
+- 性能门禁聚焦测试：`4 passed`。
+- OpenAPI breaking checker：`8 tests`，`OK`；候选归档/client current。
+- 发布清单工具：`6 tests`，`OK`。
+- Rust `drive-update`：GNU target check 通过、`3 passed`、Clippy `-D warnings`
+  通过；`drive-desktop` GNU check/Clippy 通过；`cargo fmt --all --check` 通过。
+- 后端直接受影响 Ruff lint/format 通过；actionlint、CI scope 20 个用例和
+  `git diff --check` 通过。
+- 本机 MSVC shell 仍缺少 `link.exe`，未重复执行已知会在链接阶段停止的 workspace
+  全集；MSVC、NSIS、真实 Authenticode 和回滚安装包由本次 Windows CI 验证。
+
+### 阻塞与风险
+
+- 当前 MinIO Server/Client 既有 Critical 风险尚未由受支持修复镜像或可审计补丁
+  镜像关闭，正式 tag/Release 保持阻塞。
+- 真实 DNS、受信证书、企业 OIDC/LDAPS、生产告警接收端和密钥保管需要生产环境。
+- 角色 UAT、长期 soak、`0.9.0 -> 1.0.0` 全栈升级/回滚、恢复耗时和 RPO/RTO 尚需
+  使用本次 CI 生成的同一候选工件执行并签字。
+
+### 下一步
+
+1. 统一审查并提交当前 Sprint 13 候选改动，推送 `dev`。
+2. 监控本次 `backend-ci`；只针对真实失败 job 定向修复，不重复无关测试。
+3. 下载并核对 Windows artifact 的当前/回滚安装包、更新清单、
+   `release-manifest.json` 和 `SHA256SUMS`。
+4. 在外部阻塞关闭并完成候选环境签字后，再合并 `main`、创建 `v1.0.0` tag 和
+   GitHub Release。
+
+### 涉及文件
+
+- `backend/app/core/config.py`
+- `backend/performance/`
+- `backend/tests/test_app.py`
+- `backend/tests/test_performance_benchmark.py`
+- `backend/pyproject.toml`
+- `backend/uv.lock`
+- `frontend/package.json`
+- `frontend/package-lock.json`
+- `frontend/openapi/openapi.json`
+- `frontend/src/api/generated/core/OpenAPI.ts`
+- `frontend/scripts/check_openapi_breaking.py`
+- `frontend/scripts/test_check_openapi_breaking.py`
+- `desktop/Cargo.toml`
+- `desktop/Cargo.lock`
+- `desktop/apps/drive-desktop/`
+- `desktop/contracts/`
+- `desktop/crates/drive-update/`
+- `.github/scripts/release_manifest.py`
+- `.github/scripts/test_release_manifest.py`
+- `.github/workflows/backend-ci.yml`
+- `docs/release-v1.0.0.md`
+- `docs/sprint13-release-readiness.md`
+- `docs/minio-security-risk.md`
+- `docs/deployment-windows-docker.md`
+- `docs/identity-security.md`
+- `docs/security-testing.md`
+- `AGENT.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_STAGE_STATUS.md`
+- `README.md`
+- `backend/README.md`
+- `desktop/README.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-08-04 Sprint 12 规模化治理交付完成
 
 ### 当前状态

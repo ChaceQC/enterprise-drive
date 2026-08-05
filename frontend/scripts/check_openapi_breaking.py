@@ -162,6 +162,70 @@ def _sequence(value: Any) -> Sequence[Any]:
     return ()
 
 
+def _display_schema_value(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def _contains_enum_value(values: Sequence[Any], candidate: Any) -> bool:
+    return any(value == candidate for value in values)
+
+
+def _compare_schema_constraints(
+    base_document: OpenApiDocument,
+    current_document: OpenApiDocument,
+    base_schema: Any,
+    current_schema: Any,
+    location: str,
+    changes: list[str],
+) -> None:
+    base_resolved = base_document.resolve(base_schema)
+    current_resolved = current_document.resolve(current_schema)
+    if not isinstance(base_resolved, Mapping) or not isinstance(
+        current_resolved, Mapping
+    ):
+        return
+
+    base_type = base_resolved.get("type")
+    current_type = current_resolved.get("type")
+    if base_type != current_type and (base_type is not None or current_type is not None):
+        changes.append(
+            f"{location} type changed: "
+            f"{_display_schema_value(base_type)} -> "
+            f"{_display_schema_value(current_type)}"
+        )
+
+    base_format = base_resolved.get("format")
+    current_format = current_resolved.get("format")
+    if base_format != current_format and (
+        base_format is not None or current_format is not None
+    ):
+        changes.append(
+            f"{location} format changed: "
+            f"{_display_schema_value(base_format)} -> "
+            f"{_display_schema_value(current_format)}"
+        )
+
+    base_enum = base_resolved.get("enum")
+    current_enum = current_resolved.get("enum")
+    if isinstance(current_enum, Sequence) and not isinstance(current_enum, (str, bytes)):
+        if isinstance(base_enum, Sequence) and not isinstance(base_enum, (str, bytes)):
+            removed = [
+                value
+                for value in base_enum
+                if not _contains_enum_value(current_enum, value)
+            ]
+            if removed:
+                changes.append(
+                    f"{location} enum narrowed: removed "
+                    f"{_display_schema_value(removed)}"
+                )
+        elif "enum" not in base_resolved:
+            changes.append(
+                f"{location} enum narrowed: introduced "
+                f"{_display_schema_value(list(current_enum))}"
+            )
+
+
 def _object_shape(
     document: OpenApiDocument,
     schema: Any,
@@ -284,6 +348,14 @@ def _compare_response_schema(
         return
     seen.add(pair)
 
+    _compare_schema_constraints(
+        base_document,
+        current_document,
+        base_schema,
+        current_schema,
+        location,
+        changes,
+    )
     base_properties, _ = _object_shape(base_document, base_schema)
     current_properties, _ = _object_shape(current_document, current_schema)
     for name in sorted(base_properties.keys() - current_properties.keys()):
@@ -355,6 +427,14 @@ def _compare_required_request_schema(
         return
     seen.add(pair)
 
+    _compare_schema_constraints(
+        base_document,
+        current_document,
+        base_schema,
+        current_schema,
+        location,
+        changes,
+    )
     base_properties, base_required = _object_shape(base_document, base_schema)
     current_properties, current_required = _object_shape(
         current_document,
@@ -428,14 +508,29 @@ def _compare_required_parameters(
         current_operation,
     )
     for key, current_parameter in sorted(current_parameters.items()):
-        if not bool(current_parameter.get("required")):
-            continue
         base_parameter = base_parameters.get(key)
-        if base_parameter is None or not bool(base_parameter.get("required")):
+        if bool(current_parameter.get("required")) and (
+            base_parameter is None or not bool(base_parameter.get("required"))
+        ):
             location, name = key
             changes.append(
                 f"{operation_label} required {location} parameter added: {name}"
             )
+        if base_parameter is None:
+            continue
+        base_schema = base_parameter.get("schema")
+        current_schema = current_parameter.get("schema")
+        if base_schema is None or current_schema is None:
+            continue
+        location, name = key
+        _compare_schema_constraints(
+            base_document,
+            current_document,
+            base_schema,
+            current_schema,
+            f"{operation_label} {location} parameter {name}",
+            changes,
+        )
 
 
 def _compare_request_body(

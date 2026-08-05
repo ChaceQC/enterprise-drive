@@ -52,6 +52,28 @@ def _fixture() -> BenchmarkFixture:
     )
 
 
+def _write_performance_stat(path: Path, row: dict[str, str]) -> None:
+    with path.open("w", encoding="utf-8", newline="") as handle:
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=[
+                "Type",
+                "Name",
+                "Request Count",
+                "Failure Count",
+                "Median Response Time",
+                "Average Response Time",
+                "Min Response Time",
+                "Max Response Time",
+                "Requests/s",
+                "95%",
+                "99%",
+            ],
+        )
+        writer.writeheader()
+        writer.writerow(row)
+
+
 def test_profiles_keep_smoke_below_target_resource_budget() -> None:
     smoke = get_profile("smoke")
     assert smoke.fixture_folders == 100
@@ -317,6 +339,77 @@ def test_target_upload_init_requires_100_rps(tmp_path: Path) -> None:
     assert result["target_min_rps"] == 100.0
     assert result["passed"] is False
     assert report["summary"]["missing_required_metrics"] == []
+    assert report["passed"] is False
+
+
+def test_target_mixed_requires_each_gate_metric(tmp_path: Path) -> None:
+    _write_performance_stat(
+        tmp_path / "stats_stats.csv",
+        {
+            "Type": "GET",
+            "Name": "auth_me",
+            "Request Count": "100",
+            "Failure Count": "0",
+            "Median Response Time": "20",
+            "Average Response Time": "20",
+            "Min Response Time": "10",
+            "Max Response Time": "30",
+            "Requests/s": "100",
+            "95%": "25",
+            "99%": "30",
+        },
+    )
+
+    report = _write_report(
+        output_dir=tmp_path,
+        profile="target",
+        scenario="mixed",
+        fixture=_fixture(),
+        users=50,
+        spawn_rate=5.0,
+        run_time="300s",
+        locust_exit_code=0,
+    )
+
+    assert report["summary"]["missing_required_metrics"] == [
+        "admin_audit",
+        "file_list_permission_batch",
+        "search",
+        "upload_init",
+    ]
+    assert report["passed"] is False
+
+
+def test_target_required_metric_requires_at_least_one_sample(tmp_path: Path) -> None:
+    _write_performance_stat(
+        tmp_path / "stats_stats.csv",
+        {
+            "Type": "GET",
+            "Name": "file_list_permission_batch",
+            "Request Count": "0",
+            "Failure Count": "0",
+            "Median Response Time": "0",
+            "Average Response Time": "0",
+            "Min Response Time": "0",
+            "Max Response Time": "0",
+            "Requests/s": "0",
+            "95%": "0",
+            "99%": "0",
+        },
+    )
+
+    report = _write_report(
+        output_dir=tmp_path,
+        profile="target",
+        scenario="list",
+        fixture=_fixture(),
+        users=50,
+        spawn_rate=5.0,
+        run_time="300s",
+        locust_exit_code=0,
+    )
+
+    assert report["summary"]["missing_required_metrics"] == ["file_list_permission_batch"]
     assert report["passed"] is False
 
 

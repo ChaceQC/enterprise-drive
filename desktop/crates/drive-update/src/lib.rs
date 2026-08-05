@@ -34,10 +34,26 @@ pub enum UpdateError {
     PackageSignatureInvalid,
     #[error("update package SHA-256 does not match the signed manifest")]
     PackageHashMismatch,
+    #[error("update package Authenticode certificate SHA-256 is invalid")]
+    InvalidAuthenticodeCertificateHash,
+    #[error("update package Authenticode verification failed with status 0x{0:08x}")]
+    AuthenticodeSignatureInvalid(u32),
+    #[error("update package Authenticode signer certificate is unavailable")]
+    AuthenticodeSignerUnavailable,
+    #[error("update package Authenticode signer certificate does not match the signed manifest")]
+    AuthenticodeCertificateMismatch,
+    #[error("update package Authenticode verification is only available on Windows")]
+    AuthenticodeUnsupported,
     #[error("update URL must use HTTPS")]
     InsecureUrl,
     #[error("update manifest target does not match this client")]
     TargetMismatch,
+    #[error("update manifest does not include a rollback package")]
+    RollbackPackageUnavailable,
+    #[error(
+        "update rollback package version {actual} does not match the current client version {expected}"
+    )]
+    RollbackVersionMismatch { expected: String, actual: String },
     #[error("staged update journal is unavailable")]
     JournalUnavailable,
     #[error("update helper arguments are invalid")]
@@ -134,6 +150,10 @@ impl UpdateVerifier {
             .verify(bytes, &signature)
             .map_err(|_| UpdateError::PackageSignatureInvalid)
     }
+
+    pub fn verify_authenticode(&self, package: &UpdatePackage, path: &Path) -> Result<()> {
+        verify_authenticode_package(path, &package.authenticode_certificate_sha256)
+    }
 }
 
 #[derive(Clone)]
@@ -188,6 +208,21 @@ impl UpdateManager {
         if target_version <= self.current_version {
             return Ok(None);
         }
+        let rollback_package = manifest
+            .payload
+            .rollback_package
+            .as_ref()
+            .ok_or(UpdateError::RollbackPackageUnavailable)?;
+        if rollback_package.target != self.expected_target {
+            return Err(UpdateError::TargetMismatch);
+        }
+        let rollback_version = Version::parse(&rollback_package.version)?;
+        if rollback_version != self.current_version {
+            return Err(UpdateError::RollbackVersionMismatch {
+                expected: self.current_version.to_string(),
+                actual: rollback_version.to_string(),
+            });
+        }
         let staging_dir = self
             .data_dir
             .join("updates")
@@ -197,17 +232,10 @@ impl UpdateManager {
         let package_path = staging_dir.join("enterprise-drive-update.exe");
         self.download_and_verify(&manifest.payload.package, &package_path)
             .await?;
-        let rollback_package_path =
-            if let Some(package) = manifest.payload.rollback_package.as_ref() {
-                if package.target != self.expected_target {
-                    return Err(UpdateError::TargetMismatch);
-                }
-                let path = staging_dir.join("enterprise-drive-rollback.exe");
-                self.download_and_verify(package, &path).await?;
-                Some(path)
-            } else {
-                None
-            };
+        let rollback_path = staging_dir.join("enterprise-drive-rollback.exe");
+        self.download_and_verify(rollback_package, &rollback_path)
+            .await?;
+        let rollback_package_path = Some(rollback_path);
         let health_marker_path = self
             .data_dir
             .join("updates")
@@ -245,15 +273,18 @@ impl UpdateManager {
         journal.updated_at = Utc::now();
         self.write_journal(&journal)?;
 
-        if let Some(rollback_package) = staged.rollback_package_path.as_ref() {
-            Command::new(current_executable)
-                .arg("--drive-update-watchdog")
-                .arg(&staged.health_marker_path)
-                .arg(rollback_package)
-                .arg("300")
-                .spawn()
-                .map_err(|_| UpdateError::InstallLaunchFailed)?;
-        }
+        let rollback_package = staged
+            .rollback_package_path
+            .as_ref()
+            .filter(|path| path.is_file())
+            .ok_or(UpdateError::RollbackPackageUnavailable)?;
+        Command::new(current_executable)
+            .arg("--drive-update-watchdog")
+            .arg(&staged.health_marker_path)
+            .arg(rollback_package)
+            .arg("300")
+            .spawn()
+            .map_err(|_| UpdateError::InstallLaunchFailed)?;
         Command::new(&staged.package_path)
             .arg("/S")
             .spawn()
@@ -338,8 +369,14 @@ impl UpdateManager {
             .bytes()
             .await?;
         self.verifier.verify_package(package, &bytes)?;
-        let temporary = destination.with_extension("exe.partial");
+        // Keep an executable suffix so Windows selects the PE/Authenticode SIP
+        // when WinVerifyTrust inspects the staged file.
+        let temporary = destination.with_extension("partial.exe");
         tokio::fs::write(&temporary, &bytes).await?;
+        if let Err(error) = self.verifier.verify_authenticode(package, &temporary) {
+            let _ = tokio::fs::remove_file(&temporary).await;
+            return Err(error);
+        }
         if destination.exists() {
             atomic_replace(temporary, destination)?;
         } else {
@@ -370,7 +407,10 @@ pub fn run_watchdog_from_args() -> Result<bool> {
         }
         std::thread::sleep(Duration::from_secs(2));
     }
-    if !health_marker.exists() && rollback_package.exists() {
+    if !health_marker.exists() {
+        if !rollback_package.is_file() {
+            return Err(UpdateError::RollbackPackageUnavailable);
+        }
         Command::new(rollback_package)
             .arg("/S")
             .spawn()
@@ -411,14 +451,134 @@ fn ensure_https(url: &str) -> Result<()> {
     Ok(())
 }
 
+fn verify_authenticode_certificate_hash(expected: &str, certificate_der: &[u8]) -> Result<()> {
+    let expected = normalize_certificate_hash(expected)?;
+    let actual = hex::encode(Sha256::digest(certificate_der));
+    if actual != expected {
+        return Err(UpdateError::AuthenticodeCertificateMismatch);
+    }
+    Ok(())
+}
+
+fn normalize_certificate_hash(value: &str) -> Result<String> {
+    let value = value.trim();
+    if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return Err(UpdateError::InvalidAuthenticodeCertificateHash);
+    }
+    Ok(value.to_ascii_lowercase())
+}
+
+#[cfg(windows)]
+fn verify_authenticode_package(path: &Path, expected_certificate_hash: &str) -> Result<()> {
+    use std::ffi::c_void;
+    use std::mem::size_of;
+    use std::os::windows::ffi::OsStrExt;
+    use std::slice;
+
+    use windows_sys::Win32::Foundation::{CERT_E_CHAINING, CERT_E_UNTRUSTEDROOT};
+    use windows_sys::Win32::Security::WinTrust::{
+        WTHelperGetProvCertFromChain, WTHelperGetProvSignerFromChain,
+        WTHelperProvDataFromStateData, WinVerifyTrust, WINTRUST_ACTION_GENERIC_VERIFY_V2,
+        WINTRUST_DATA, WINTRUST_DATA_0, WINTRUST_FILE_INFO, WTD_CACHE_ONLY_URL_RETRIEVAL,
+        WTD_CHOICE_FILE, WTD_REVOKE_NONE, WTD_STATEACTION_CLOSE, WTD_STATEACTION_VERIFY,
+        WTD_UICONTEXT_INSTALL, WTD_UI_NONE,
+    };
+
+    normalize_certificate_hash(expected_certificate_hash)?;
+    let path = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect::<Vec<_>>();
+    let mut file_info = WINTRUST_FILE_INFO {
+        cbStruct: size_of::<WINTRUST_FILE_INFO>() as u32,
+        pcwszFilePath: path.as_ptr(),
+        hFile: std::ptr::null_mut(),
+        pgKnownSubject: std::ptr::null_mut(),
+    };
+    let mut trust_data = WINTRUST_DATA {
+        cbStruct: size_of::<WINTRUST_DATA>() as u32,
+        pPolicyCallbackData: std::ptr::null_mut(),
+        pSIPClientData: std::ptr::null_mut(),
+        dwUIChoice: WTD_UI_NONE,
+        fdwRevocationChecks: WTD_REVOKE_NONE,
+        dwUnionChoice: WTD_CHOICE_FILE,
+        Anonymous: WINTRUST_DATA_0 {
+            pFile: &mut file_info,
+        },
+        dwStateAction: WTD_STATEACTION_VERIFY,
+        hWVTStateData: std::ptr::null_mut(),
+        pwszURLReference: std::ptr::null_mut(),
+        dwProvFlags: WTD_CACHE_ONLY_URL_RETRIEVAL,
+        dwUIContext: WTD_UICONTEXT_INSTALL,
+        pSignatureSettings: std::ptr::null_mut(),
+    };
+    let mut action = WINTRUST_ACTION_GENERIC_VERIFY_V2;
+    let status = unsafe {
+        WinVerifyTrust(
+            std::ptr::null_mut(),
+            &mut action,
+            &mut trust_data as *mut WINTRUST_DATA as *mut c_void,
+        )
+    };
+    let status_is_acceptable =
+        status == 0 || status == CERT_E_UNTRUSTEDROOT || status == CERT_E_CHAINING;
+    let certificate = if status_is_acceptable {
+        unsafe {
+            let provider_data = WTHelperProvDataFromStateData(trust_data.hWVTStateData);
+            if provider_data.is_null() {
+                Err(UpdateError::AuthenticodeSignerUnavailable)
+            } else {
+                let signer = WTHelperGetProvSignerFromChain(provider_data, 0, 0, 0);
+                if signer.is_null() {
+                    Err(UpdateError::AuthenticodeSignerUnavailable)
+                } else {
+                    let provider_certificate = WTHelperGetProvCertFromChain(signer, 0);
+                    if provider_certificate.is_null()
+                        || (*provider_certificate).pCert.is_null()
+                        || (*(*provider_certificate).pCert).pbCertEncoded.is_null()
+                        || (*(*provider_certificate).pCert).cbCertEncoded == 0
+                    {
+                        Err(UpdateError::AuthenticodeSignerUnavailable)
+                    } else {
+                        let certificate = (*provider_certificate).pCert;
+                        Ok(slice::from_raw_parts(
+                            (*certificate).pbCertEncoded,
+                            (*certificate).cbCertEncoded as usize,
+                        )
+                        .to_vec())
+                    }
+                }
+            }
+        }
+    } else {
+        Err(UpdateError::AuthenticodeSignatureInvalid(status as u32))
+    };
+    trust_data.dwStateAction = WTD_STATEACTION_CLOSE;
+    unsafe {
+        WinVerifyTrust(
+            std::ptr::null_mut(),
+            &mut action,
+            &mut trust_data as *mut WINTRUST_DATA as *mut c_void,
+        );
+    }
+    verify_authenticode_certificate_hash(expected_certificate_hash, &certificate?)
+}
+
+#[cfg(not(windows))]
+fn verify_authenticode_package(_path: &Path, expected_certificate_hash: &str) -> Result<()> {
+    normalize_certificate_hash(expected_certificate_hash)?;
+    Err(UpdateError::AuthenticodeUnsupported)
+}
+
 #[cfg(test)]
 mod tests {
     use chrono::Utc;
     use ed25519_dalek::SigningKey;
 
     use super::{
-        sign_manifest, sign_package, SignedUpdateManifest, UpdateManifestPayload, UpdatePackage,
-        UpdateVerifier,
+        sign_manifest, sign_package, verify_authenticode_certificate_hash, SignedUpdateManifest,
+        UpdateError, UpdateManifestPayload, UpdatePackage, UpdateVerifier,
     };
     use base64::engine::general_purpose::STANDARD as BASE64;
     use base64::Engine;
@@ -460,5 +620,56 @@ mod tests {
         let mut tampered: SignedUpdateManifest = manifest;
         tampered.payload.package.url = "https://attacker.invalid/setup.exe".to_string();
         assert!(verifier.verify_manifest(&tampered).is_err());
+    }
+
+    #[test]
+    fn authenticode_certificate_hash_is_pinned_to_der_bytes() {
+        let certificate_der = b"test signer certificate";
+        let expected = hex::encode(sha2::Sha256::digest(certificate_der)).to_ascii_uppercase();
+
+        verify_authenticode_certificate_hash(&expected, certificate_der).unwrap();
+        assert!(matches!(
+            verify_authenticode_certificate_hash(&"ab".repeat(32), certificate_der),
+            Err(UpdateError::AuthenticodeCertificateMismatch)
+        ));
+        assert!(matches!(
+            verify_authenticode_certificate_hash("not-a-sha256", certificate_der),
+            Err(UpdateError::InvalidAuthenticodeCertificateHash)
+        ));
+    }
+
+    #[test]
+    fn signed_manifest_preserves_the_rollback_package() {
+        let secret = [9_u8; 32];
+        let rollback_bytes = b"previous enterprise drive installer";
+        let rollback_package = UpdatePackage {
+            version: "0.9.0".to_string(),
+            target: "x86_64-pc-windows-msvc".to_string(),
+            url: "https://github.com/example/release/rollback.exe".to_string(),
+            sha256: hex::encode(sha2::Sha256::digest(rollback_bytes)),
+            signature: sign_package(&secret, rollback_bytes),
+            authenticode_certificate_sha256: "cd".repeat(32),
+        };
+        let package = UpdatePackage {
+            version: "1.0.0".to_string(),
+            target: rollback_package.target.clone(),
+            url: "https://github.com/example/release/setup.exe".to_string(),
+            sha256: hex::encode(sha2::Sha256::digest(b"current installer")),
+            signature: sign_package(&secret, b"current installer"),
+            authenticode_certificate_sha256: "ab".repeat(32),
+        };
+
+        let manifest = sign_manifest(
+            &secret,
+            UpdateManifestPayload {
+                schema_version: 1,
+                published_at: Utc::now(),
+                package,
+                rollback_package: Some(rollback_package.clone()),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(manifest.payload.rollback_package, Some(rollback_package));
     }
 }

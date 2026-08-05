@@ -1,6 +1,6 @@
 # PROJECT_PLAN.md
 
-本文件是《企业网盘开发者技术计划书.md》的执行版摘要。完整架构、数据模型、接口契约、安全策略和里程碑以技术计划书为准。当前代码基线为 Sprint 12 / `0.9.0`：后端主链路、Rust 桌面端、Web 用户端与管理后台、身份安全，以及规模化治理能力均已完成代码、本地直接受影响门禁和远端 CI 收口；下一阶段进入 Sprint 13 稳定版发布。
+本文件是《企业网盘开发者技术计划书.md》的执行版摘要。完整架构、数据模型、接口契约、安全策略和里程碑以技术计划书为准。当前代码基线为 Sprint 13 候选发布 / `1.0.0`：后端主链路、Rust 桌面端、Web 用户端与管理后台、身份安全，以及规模化治理能力均已完成代码和直接受影响门禁；真实生产前置条件与正式 Release 仍按发布清单单独验收。
 
 ## 1. 项目目标
 
@@ -176,10 +176,20 @@
 
 ### Sprint 13：稳定版发布（目标版本 `1.0.0`）
 
-- 后端、Web、Rust 桌面端完成统一版本、契约、安装升级、回滚和发布说明。
-- 执行完整 UAT、性能压测、安全测试、依赖与镜像扫描、备份恢复、桌面升级和浏览器兼容验收。
-- 修复所有阻断试点和正式发布的问题，明确已接受风险、运维责任、告警阈值、RPO/RTO 和支持边界。
-- `dev` 合并 `main`，生成 `v1.0.0` tag、Release、OpenAPI 快照、SBOM、安装包、镜像和验收报告。
+- `REL-001` 全产品 UAT：按普通用户、空间角色、系统管理员、身份管理员、外部接收人、
+  Windows 桌面用户和运维角色执行真实 gateway/API 流程，形成缺陷关闭与最终签字。
+- `REL-002` 性能与安全发布门禁：固定 target 场景必需指标、OpenAPI type/format/enum
+  兼容门禁，执行候选版本性能、长期 soak、代码/依赖/镜像扫描和非阻断风险接受；
+  MinIO Critical 必须按专项风险文档通过修复发行版或可审计补丁镜像关闭。
+- `REL-003` 安装、升级与回滚：从 `0.9.0` 演练到 `1.0.0`，验证备份/恢复、
+  Redis/OpenSearch 迁移、依赖故障恢复和带上一版安装包的桌面自动回退。
+- `REL-004` 运维责任与 RPO/RTO：固定 DNS/证书、身份、备份、告警、供应链和桌面
+  签名责任矩阵，以实测值完成 RPO/RTO、MTTD/MTTA 和风险签字。
+- `REL-005` `v1.0.0` 发布：统一后端、Web、OpenAPI、Rust/Tauri 和锁文件版本，生成
+  发布说明、OpenAPI、SBOM、安装包、镜像 digest、`release-manifest.json` 与
+  `SHA256SUMS`；生产前置门禁通过后再执行 `dev -> main`、tag、Release 和试点交接。
+- 执行与签字格式以 `docs/release-v1.0.0.md` 和
+  `docs/sprint13-release-readiness.md` 为准。
 
 ### 远期正式 Backlog
 
@@ -195,6 +205,8 @@
 - `BILL-001`：多租户计费。
 
 ## 5. 当前下一步
+
+2026-08-05 Sprint 13 候选发布代码侧已收口：后端、Web、OpenAPI client、Rust workspace、Tauri、桌面契约和锁文件统一为 `1.0.0`；性能 target 补齐场景必需指标与零样本失败，OpenAPI 门禁补齐 `type`、`format` 和 enum 收窄检测；桌面更新强制携带当前客户端对应的 `0.9.0` 回滚安装包，并对当前/回滚包执行 Ed25519、SHA-256、目标平台和 Authenticode 固定签名者验证，关键恢复失败不写健康标记，watchdog 错误 fail-closed；Windows CI 从 Git 历史构建回滚包并生成 `release-manifest.json`/`SHA256SUMS`。本地只运行新增和直接受影响门禁，未重复历史性能 target、全量 Playwright、全量 pytest、MinIO/备份恢复或无关桌面集合。当前改动尚待提交、推送和同提交 CI/Windows artifact 核对；真实 UAT、soak、升级/恢复/RPO-RTO、MinIO 修复镜像、DNS/TLS、OIDC/LDAPS、告警签字及正式 tag/Release 继续按发布清单执行。
 
 2026-08-04 Sprint 12 已完成：`BE-046` 至 `BE-050`、`FE-012`、`OPS-001` 至 `OPS-003`、`QA-001` 至 `QA-002` 已落地，项目版本统一为 `0.9.0`，migration head 为 `20260804_0026`，OpenAPI 归档为 116 个路径、148 个操作、178 个 schemas。本地确认治理后端 `4 passed`、审计/Outbox 定向用例、前端 lint/typecheck 与 Chromium 治理 E2E `1 passed`、版本一致性 `1 passed`、空库升级与 `0026 -> 0024 -> 0026` 往返、四依赖故障恢复、OPS 双 project Redis/OpenSearch 迁移/回退、监控规则/看板、OpenAPI/client、route matrix、Compose、actionlint 和 CI scope；最终功能/修复提交 `91ad743` 已推送，`backend-ci` run `30935875456` 的 `changes`、`frontend`、`backend` 成功，其余 6 个未受影响 job 按 scope 跳过，后端 `456 passed, 2 warnings`，四依赖报告 artifact 为 `8903238332`。本轮没有重复运行 Sprint 10 浏览器全集、既有 MinIO 全集、性能 target 或桌面历史集合；当前下一步进入 Sprint 13 完整 UAT、升级回滚和 `v1.0.0` 发布门禁。
 
@@ -236,7 +248,7 @@
 
 2026-07-31 `BE-030` 首轮安全测试修复已通过提交 `25acecf` 和 GitHub Actions run `30660034411` 闭环：对当前虚拟环境 123 个实际包的审计发现 20 条记录全部来自攻击者可达的图片预览依赖 `Pillow 12.2.0`，已升级并锁定 `Pillow 12.3.0`；加入项目内 `bandit` 与 `pip-audit` dev 依赖和 CI 门禁，升级后审计 145 个环境包为 0 已知漏洞，Bandit 中危/高危为 0。登录新增来源 IP 与账号哈希双维 Redis 固定窗口，不存在租户/用户时仍执行 Argon2id dummy verify；422 校验错误不再回显原始 `input`。随后 production `Settings` 应用内 fail-fast 已通过提交 `a52b4ce` 和 GitHub Actions run `30661668693` 闭环：API、Worker、beat、migration 和 seed 会拒绝示例/过短 secret、无强密码连接 URL、关闭限流、Wildcard Trusted Hosts 及不安全公网 CORS/S3/Cookie 配置，同时保留纯 localhost/回环 HTTP 基线；完整后端门禁为 `188 passed, 4 skipped`，受限 runtime 镜像和真实 PostgreSQL/认证 Redis/API/Worker Docker smoke 均已通过并彻底清理。2026-08-01 已继续完成 route 身份/租户、撤权、恶意文件、Range、预签名 URL、外链穷举、Host/CORS 和真实 Nginx 原始 HTTP 门禁，`BE-030` 进入提交与远端 CI 收尾。
 
-2026-07-31 已把此前仅停留在接口示例、技术建议或“后续接入”的能力补成 Sprint 9 至 Sprint 13、工程任务和远期 Backlog。2026-08-03 Sprint 6 和 Sprint 9 的代码侧能力已完成；正式 `v0.4.0` 仍需生产 DNS/受信证书记录和 MinIO 修复镜像门禁。当前并行顺序为：外部发布门禁不伪造完成，同时开始桌面端依赖的设备会话与增量同步契约；随后推进 Sprint 7/8 Rust 桌面端、Web 用户端与管理后台、身份安全、规模治理和 `v1.0.0` 稳定发布。Web 页面不得反向定义后端业务规则。
+2026-07-31 已把此前仅停留在接口示例、技术建议或“后续接入”的能力补成 Sprint 9 至 Sprint 13、工程任务和远期 Backlog。2026-08-03 Sprint 6 和 Sprint 9 的代码侧能力已完成；当时规划的 `v0.4.0` 未进入正式发布，其生产 DNS/受信证书记录和 MinIO 修复镜像门禁现继续阻塞 `v1.0.0`。当前并行顺序为：外部发布门禁不伪造完成，同时开始桌面端依赖的设备会话与增量同步契约；随后推进 Sprint 7/8 Rust 桌面端、Web 用户端与管理后台、身份安全、规模治理和 `v1.0.0` 稳定发布。Web 页面不得反向定义后端业务规则。
 
 2026-07-31 已把 Rust 桌面客户端从笼统的二期增强项提升为 Sprint 7 和 Sprint 8 正式路线。当时仓库仍没有桌面客户端代码；其后已按 `0.5.0` 目标完成 Sprint 7 的架构 ADR、后端设备会话/增量同步契约、Rust API client、本地索引和单向传输，下一阶段进入双向同步、冲突处理和签名发布；正式发布仍不得绕过 MinIO 风险门禁。
 
@@ -246,6 +258,6 @@
 
 备份和恢复会自动把备份根目录、staging/正式备份、rollback archive 与最终 CMS 明文文件限制为当前用户、SYSTEM、Administrators，并在无网络、只读根文件系统、drop capabilities 的临时容器/卷中预解包扫描 tar。`-RestoreEnvironmentOutput` 必须是仓库和备份目录外的绝对新文件路径，父目录预先存在；CMS 明文只在本次恢复模式全部门禁成功的末尾通过同目录临时文件原子发布，发布竞态中的 foreign file 不会被失败清理删除。恢复提交后的 rollback archive 清理异常只报告维护失败并保留路径，不会再次清空或回滚已恢复卷。
 
-剩余边界必须保持明确：Windows CMS 只加密 `.env.windows`，其余数据库、对象、索引、队列和 TLS 卷归档仍依赖 BitLocker、restricted NTFS ACL 与加密外部介质；SHA-256 只校验完整性，不认证制作者身份；Redis/OpenSearch 原始卷只支持相同 image reference/image ID、单节点同拓扑；`-ForceRestore` rollback 是尽力恢复，异常时受限 ACL 归档会保留并报告路径。2026-08-03 扫描复核把 MinIO Server/Client Critical 唯一 ID 允许集收紧为 16/9，其中两个 MinIO 自身 Critical 在固定社区镜像中没有 patched version；当前配置关闭 OIDC/LDAP/Console 只属于可达性缓解。正式 `v0.4.0` tag/Release 在受支持修复镜像或可审计补丁镜像替换、SBOM/Grype 重扫和真实 MinIO/备份恢复兼容性验证前保持阻塞，详见 `docs/minio-security-risk.md`。
+剩余边界必须保持明确：Windows CMS 只加密 `.env.windows`，其余数据库、对象、索引、队列和 TLS 卷归档仍依赖 BitLocker、restricted NTFS ACL 与加密外部介质；SHA-256 只校验完整性，不认证制作者身份；Redis/OpenSearch 原始卷只支持相同 image reference/image ID、单节点同拓扑；`-ForceRestore` rollback 是尽力恢复，异常时受限 ACL 归档会保留并报告路径。2026-08-03 扫描复核把 MinIO Server/Client Critical 唯一 ID 允许集收紧为 16/9，其中两个 MinIO 自身 Critical 在固定社区镜像中没有 patched version；当前配置关闭 OIDC/LDAP/Console 只属于可达性缓解。当时规划的 `v0.4.0` 未发布；同一修复镜像、SBOM/Grype 重扫和真实 MinIO/备份恢复兼容性门禁现继续阻塞 `v1.0.0`，详见 `docs/minio-security-risk.md`。
 
 2026-07-01 代码审计发现的实现边界问题已完成首轮整改：浏览器认证改为 BFF + HttpOnly Cookie Session，移除 JWT/refresh token 兼容路径；对象存储默认实现已移除 `boto3/botocore` 并改用 MinIO Python SDK；Redis 固定窗口限流已改为 Lua 原子脚本。容量校准草稿已从 `stash@{0}: paused quota reconciliation draft` 恢复并整理为 `quota.reconcile_space_usage` 维护任务，worker 默认按批次和 cursor 扫完整个租户，修复模式会在已有账户上使用数据库行锁重算差额并限制返回明细体量；blob/object 垃圾回收已整理为 `file.cleanup_unreferenced_blobs` 维护任务；孤儿最终对象扫描已整理为 `file.cleanup_orphaned_objects` 维护任务，默认 dry-run，按对象存储游标扫描受控 `objects/{tenant_id}/{hash_prefix}/{sha256}` key，以 DB blob 元数据为事实来源清理对象复制成功但 DB 最终化失败后的无引用最终对象，并写入审计和 `orphan_object_cleanup_total` 指标。真实 MinIO 集成测试已接入 `backend-ci`，覆盖对象读写、copy、delete、list 游标、预签名下载、multipart 私有方法封装、预签名分片 PUT、complete 后 hash 校验和孤儿最终对象扫描。Sprint 4 权限系统已开始，`space_members` 用户成员基础表、创建空间 owner 成员写入、空间级 `PermissionService` 角色检查和 owner/admin 空间成员管理 API 已落地，节点 ACL 已支持用户、部门和用户组三类主体并接入文件列表、文件夹创建、上传初始化、multipart complete 和下载入口，文件列表已返回基于批量权限评估的子节点常用动作权限，空间成员和节点 ACL 变更已写入 `permission.changed` 事件，`permission.invalidate_cache` 已消费该事件并失效 Redis 权限缓存；搜索 ACL 已具备 token builder、独立 outbox event 和 search 队列入口，上传完成、重命名、移动、删除、恢复和彻底删除后的文件索引同步已接入 OpenSearch 适配，ACL 变更后可按 space 或 node 子树保守重建索引 token，`GET /api/v1/search` 已接入查询层 allow/deny token 过滤、签名 cursor 分页、HTML 编码 highlight、搜索限流和应用层 `read_meta` 二次权限校验。搜索全文抽取入口已落地，当前支持安全的小型 UTF-8 文本类文件、基于成熟开源库 `pypdf` 的 PDF 可复制正文抽取、基于成熟开源库 `python-docx` 的 DOCX 段落/表格抽取、基于成熟开源库 `python-pptx` 的 PPTX 文本框/表格抽取和基于成熟开源库 `openpyxl` 的 XLSX 单元格抽取，并刷新索引 `content`；分享模块已完成基础数据模型、迁移、服务层、创建/详情/撤销 HTTP API、外链访问入口和外链下载入口；预览基础链路已新增 `preview.render_requested` outbox event、`preview` 队列 worker、`preview_artifacts` 私有产物表和 `GET /api/v1/files/{node_id}/preview` 权限控制入口，当前使用 Pillow 生成图片 WebP 预览产物，通过 Poppler `pdftoppm` 生成 PDF 首页 WebP 预览，并通过 LibreOffice headless 将 Office 文档转换为 PDF 后复用 PDF/图片链路；`preview.dispatch_outbox` 已配置 Celery 软/硬超时、速率限制、结构化失败日志和 `preview_failures_total` 指标，`/metrics` 已暴露 Prometheus 文本指标，`docs/deployment-preview-worker.md` 已补充预览 Worker CPU、内存和临时磁盘配额说明。上传/下载链路下一步优先补齐企业级治理缺口：MinIO SDK multipart 私有方法的替换评估或稳定封装、真实对象存储异常恢复和升级兼容测试、用户/租户/策略化配额、维护任务调度告警和清理指标、高密级下载代理与 Range/审计/水印/DLP、同 hash 首次上传竞争测试；同时继续补充真实 LibreOffice 环境联调和图片 OCR 等搜索复杂格式抽取的成熟开源工具适配。

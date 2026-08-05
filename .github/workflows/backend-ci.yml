@@ -52,6 +52,9 @@ jobs:
       - name: Validate CI scope router
         run: python -X utf8 .github/scripts/test_ci_scope.py
 
+      - name: Validate release artifact manifest tooling
+        run: python -X utf8 .github/scripts/test_release_manifest.py
+
       - name: Resolve changed CI scope
         id: scope
         env:
@@ -630,6 +633,13 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Setup Python for release manifest
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
 
       - name: Restore Cargo registry and git cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -760,6 +770,90 @@ jobs:
           args: --target x86_64-pc-windows-msvc
           uploadWorkflowArtifacts: false
 
+      - name: Build previous-version rollback installer
+        if: github.event_name == 'push'
+        shell: pwsh
+        timeout-minutes: 30
+        run: |
+          $ErrorActionPreference = "Stop"
+          $rollbackCommit = $null
+          $rollbackVersion = $null
+          $versionPattern = (
+            '(?ms)^\[workspace\.package\]\s*.*?' +
+            '^version\s*=\s*"([^"]+)"'
+          )
+          $history = & git rev-list HEAD^ -- desktop/Cargo.toml
+          foreach ($commit in $history) {
+            $manifest = (& git show "${commit}:desktop/Cargo.toml") -join "`n"
+            $match = [regex]::Match($manifest, $versionPattern)
+            if (
+              $match.Success -and
+              $match.Groups[1].Value -ne $env:DRIVE_DESKTOP_VERSION
+            ) {
+              $rollbackCommit = $commit
+              $rollbackVersion = $match.Groups[1].Value
+              break
+            }
+          }
+          if (
+            [string]::IsNullOrWhiteSpace($rollbackCommit) -or
+            [string]::IsNullOrWhiteSpace($rollbackVersion)
+          ) {
+            throw "A previous desktop version could not be resolved from Git history."
+          }
+
+          $rollbackRoot = Join-Path $env:RUNNER_TEMP "enterprise-drive-rollback-source"
+          if (Test-Path -LiteralPath $rollbackRoot) {
+            throw "Rollback worktree path already exists: $rollbackRoot"
+          }
+          & git worktree add --detach $rollbackRoot $rollbackCommit
+          if ($LASTEXITCODE -ne 0) {
+            throw "Rollback source worktree creation failed."
+          }
+          $rollbackManifest = Join-Path $rollbackRoot "desktop/Cargo.toml"
+          cargo fetch `
+            --locked `
+            --manifest-path $rollbackManifest `
+            --target x86_64-pc-windows-msvc
+          if ($LASTEXITCODE -ne 0) {
+            throw "Rollback desktop dependency prefetch failed."
+          }
+          $tauri = (Get-Command tauri.cmd -ErrorAction Stop).Source
+          $rollbackProject = Join-Path $rollbackRoot "desktop/apps/drive-desktop"
+          Push-Location $rollbackProject
+          try {
+            $env:CARGO_NET_OFFLINE = "true"
+            & $tauri build --target x86_64-pc-windows-msvc
+            if ($LASTEXITCODE -ne 0) {
+              throw "Rollback Windows installer build failed."
+            }
+          } finally {
+            Remove-Item Env:CARGO_NET_OFFLINE -ErrorAction SilentlyContinue
+            Pop-Location
+          }
+          $rollbackInstaller = Get-ChildItem `
+            -Path (Join-Path $rollbackRoot "desktop/target") `
+            -Recurse `
+            -File `
+            -Filter "*-setup.exe" |
+            Where-Object { $_.FullName -match "[\\/]bundle[\\/]nsis[\\/]" } |
+            Sort-Object LastWriteTimeUtc -Descending |
+            Select-Object -First 1
+          if ($null -eq $rollbackInstaller) {
+            throw "Rollback Tauri NSIS installer was not found."
+          }
+          $utf8 = [System.Text.UTF8Encoding]::new($false)
+          [System.IO.File]::AppendAllText(
+            $env:GITHUB_ENV,
+            "DRIVE_ROLLBACK_VERSION=$rollbackVersion`n",
+            $utf8
+          )
+          [System.IO.File]::AppendAllText(
+            $env:GITHUB_ENV,
+            "DRIVE_ROLLBACK_INSTALLER=$($rollbackInstaller.FullName)`n",
+            $utf8
+          )
+
       - name: Build update signing tools after desktop release build
         if: github.event_name == 'push'
         env:
@@ -814,60 +908,78 @@ jobs:
           } else {
             $signtool.FullName
           }
-          & $signtoolPath sign `
-            /fd SHA256 `
-            /f $env:DRIVE_SIGNING_PFX_PATH `
-            /p $env:DRIVE_WINDOWS_SIGNING_PFX_PASSWORD `
-            $installer.FullName
-          if ($LASTEXITCODE -ne 0) {
-            throw "Authenticode signing failed."
+          $rollbackInstaller = Get-Item -LiteralPath $env:DRIVE_ROLLBACK_INSTALLER
+          if ($rollbackInstaller.Name -eq $installer.Name) {
+            throw "Update and rollback installer names must be distinct."
           }
-          $signature = Get-AuthenticodeSignature -LiteralPath $installer.FullName
-          if (
-            $signature.SignatureType -ne "Authenticode" -or
-            $null -eq $signature.SignerCertificate
-          ) {
-            throw "Authenticode signature or signer certificate is missing."
-          }
-          if ($signature.Status -ne "Valid") {
-            $expectedUntrustedStatus = (
-              $signature.Status -eq "NotTrusted" -or
-              (
-                $signature.Status -eq "UnknownError" -and
-                $signature.StatusMessage -match (
-                  "0x800B0109|root certificate|not trusted"
-                )
-              )
-            )
-            if (-not $expectedUntrustedStatus) {
+          foreach ($candidate in @($installer, $rollbackInstaller)) {
+            & $signtoolPath sign `
+              /fd SHA256 `
+              /f $env:DRIVE_SIGNING_PFX_PATH `
+              /p $env:DRIVE_WINDOWS_SIGNING_PFX_PASSWORD `
+              $candidate.FullName
+            if ($LASTEXITCODE -ne 0) {
+              throw "Authenticode signing failed: $($candidate.FullName)"
+            }
+            $signature = Get-AuthenticodeSignature -LiteralPath $candidate.FullName
+            if (
+              $signature.SignatureType -ne "Authenticode" -or
+              $null -eq $signature.SignerCertificate
+            ) {
               throw (
-                "Authenticode integrity verification failed: " +
-                "$($signature.Status) $($signature.StatusMessage)"
+                "Authenticode signature or signer certificate is missing: " +
+                $candidate.FullName
               )
             }
-          }
-          $signerSha256 = [Convert]::ToHexString(
-            [Security.Cryptography.SHA256]::HashData(
-              $signature.SignerCertificate.Export(
-                [Security.Cryptography.X509Certificates.X509ContentType]::Cert
+            if ($signature.Status -ne "Valid") {
+              $expectedUntrustedStatus = (
+                $signature.Status -eq "NotTrusted" -or
+                (
+                  $signature.Status -eq "UnknownError" -and
+                  $signature.StatusMessage -match (
+                    "0x800B0109|root certificate|not trusted"
+                  )
+                )
               )
+              if (-not $expectedUntrustedStatus) {
+                throw (
+                  "Authenticode integrity verification failed: " +
+                  "$($signature.Status) $($signature.StatusMessage)"
+                )
+              }
+            }
+            $signerSha256 = [Convert]::ToHexString(
+              [Security.Cryptography.SHA256]::HashData(
+                $signature.SignerCertificate.Export(
+                  [Security.Cryptography.X509Certificates.X509ContentType]::Cert
+                )
+              )
+            ).ToLowerInvariant()
+            if ($signerSha256 -ne $env:DRIVE_SIGNING_CERT_SHA256) {
+              throw "Signed installer certificate fingerprint mismatch."
+            }
+            Write-Host (
+              "Authenticode integrity and pinned signer fingerprint verified: " +
+              $candidate.Name
             )
-          ).ToLowerInvariant()
-          if ($signerSha256 -ne $env:DRIVE_SIGNING_CERT_SHA256) {
-            throw "Signed installer certificate fingerprint mismatch."
           }
-          Write-Host (
-            "Authenticode integrity and pinned signer fingerprint verified " +
-            "(system trust is intentionally not required for the self-signed CI certificate)."
-          )
 
           $artifactDir = Join-Path $PWD "desktop/dist/windows"
           New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
           $signedInstaller = Join-Path $artifactDir $installer.Name
           Copy-Item -LiteralPath $installer.FullName -Destination $signedInstaller -Force
+          $signedRollbackInstaller = Join-Path $artifactDir $rollbackInstaller.Name
+          Copy-Item `
+            -LiteralPath $rollbackInstaller.FullName `
+            -Destination $signedRollbackInstaller `
+            -Force
           $packageUrl = (
             "https://github.com/${{ github.repository }}/releases/download/" +
             "v$env:DRIVE_DESKTOP_VERSION/$($installer.Name)"
+          )
+          $rollbackPackageUrl = (
+            "https://github.com/${{ github.repository }}/releases/download/" +
+            "v$env:DRIVE_DESKTOP_VERSION/$($rollbackInstaller.Name)"
           )
           $manifestPath = Join-Path $artifactDir "latest.json"
           $updateToolDir = Join-Path `
@@ -886,6 +998,10 @@ jobs:
             --target x86_64-pc-windows-msvc `
             --url $packageUrl `
             --certificate-sha256 $env:DRIVE_SIGNING_CERT_SHA256 `
+            --rollback-package $signedRollbackInstaller `
+            --rollback-version $env:DRIVE_ROLLBACK_VERSION `
+            --rollback-url $rollbackPackageUrl `
+            --rollback-certificate-sha256 $env:DRIVE_SIGNING_CERT_SHA256 `
             --output $manifestPath
           if ($LASTEXITCODE -ne 0) {
             throw "Update manifest signing failed."
@@ -893,6 +1009,7 @@ jobs:
           & $verifyUpdate `
             --manifest $manifestPath `
             --package $signedInstaller `
+            --rollback-package $signedRollbackInstaller `
             --public-key desktop/update-public-key.txt
           if ($LASTEXITCODE -ne 0) {
             throw "Update manifest verification failed."
@@ -903,6 +1020,31 @@ jobs:
           Copy-Item `
             -LiteralPath desktop/update-public-key.txt `
             -Destination $artifactDir
+          Copy-Item `
+            -LiteralPath frontend/openapi/openapi.json `
+            -Destination (Join-Path $artifactDir "openapi.json")
+          Copy-Item `
+            -LiteralPath docs/release-v1.0.0.md `
+            -Destination (Join-Path $artifactDir "RELEASE_NOTES.md")
+          python -X utf8 .github/scripts/release_manifest.py build `
+            --input-dir $artifactDir `
+            --version $env:DRIVE_DESKTOP_VERSION `
+            --git-commit "${{ github.sha }}" `
+            --require "windows_installer=$($installer.Name)" `
+            --require "rollback_installer=$($rollbackInstaller.Name)" `
+            --require "update_manifest=latest.json" `
+            --require "openapi=openapi.json" `
+            --require "release_notes=RELEASE_NOTES.md" `
+            --require "update_key=update-public-key.txt" `
+            --require "signing_certificate=desktop-code-signing.pem"
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release artifact manifest generation failed."
+          }
+          python -X utf8 .github/scripts/release_manifest.py verify `
+            --input-dir $artifactDir
+          if ($LASTEXITCODE -ne 0) {
+            throw "Release artifact manifest verification failed."
+          }
 
       - name: Upload signed Windows desktop artifacts
         if: github.event_name == 'push'

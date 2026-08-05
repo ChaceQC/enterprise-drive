@@ -1010,7 +1010,7 @@ dependencies = [
 
 [[package]]
 name = "drive-api-client"
-version = "0.9.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "parking_lot",
@@ -1024,7 +1024,7 @@ dependencies = [
 
 [[package]]
 name = "drive-desktop"
-version = "0.9.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "drive-api-client",
@@ -1045,7 +1045,7 @@ dependencies = [
 
 [[package]]
 name = "drive-device-session"
-version = "0.9.0"
+version = "1.0.0"
 dependencies = [
  "drive-api-client",
  "drive-platform",
@@ -1055,7 +1055,7 @@ dependencies = [
 
 [[package]]
 name = "drive-diagnostics"
-version = "0.9.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "drive-local-index",
@@ -1068,7 +1068,7 @@ dependencies = [
 
 [[package]]
 name = "drive-local-index"
-version = "0.9.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "parking_lot",
@@ -1082,7 +1082,7 @@ dependencies = [
 
 [[package]]
 name = "drive-platform"
-version = "0.9.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "directories",
@@ -1099,7 +1099,7 @@ dependencies = [
 
 [[package]]
 name = "drive-sync-engine"
-version = "0.9.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "drive-api-client",
@@ -1120,7 +1120,7 @@ dependencies = [
 
 [[package]]
 name = "drive-transfer"
-version = "0.9.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "drive-api-client",
@@ -1140,7 +1140,7 @@ dependencies = [
 
 [[package]]
 name = "drive-update"
-version = "0.9.0"
+version = "1.0.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -1154,6 +1154,7 @@ dependencies = [
  "sha2 0.11.0",
  "thiserror 2.0.19",
  "tokio",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

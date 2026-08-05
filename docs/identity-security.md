@@ -1,6 +1,6 @@
 # Sprint 11 身份与账号安全
 
-> 功能引入版本：`v0.8.0`；当前项目基线：`v0.9.0`
+> 功能引入版本：`v0.8.0`；当前项目基线：`v1.0.0` 候选发布
 >
 > migration head：`20260804_0024`
 
@@ -238,7 +238,7 @@ external ID 应使用 `entryUUID`、`objectGUID` 等稳定属性。映射建立�
 - 用户名、email、部门路径或组 slug 与未绑定本地对象冲突时记录 conflict。
 - 不自动猜测或接管本地对象。
 - LDAP 创建的用户关闭本地密码，使用随机不可用密码哈希，默认不是超级管理员。
-- 当前 v0.9.0 继续把 LDAP Source 创建的绑定标记为 `authoritative=true`；full 缺失处理按当前 Source 的绑定集合执行。
+- 当前 v1.0.0 继续把 LDAP Source 创建的绑定标记为 `authoritative=true`；full 缺失处理按当前 Source 的绑定集合执行。
 
 冲突类型包括：
 

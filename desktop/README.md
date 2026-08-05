@@ -1,6 +1,6 @@
 # 企业网盘 Rust 桌面端
 
-`desktop/` 是 Sprint 7 与 Sprint 8 交付的 Windows 11 Rust/Tauri 工程，当前随 Sprint 12 项目基线统一为 `0.9.0`。桌面端与 `frontend/` Web 客户端共同消费当前 116 paths / 148 operations / 178 schemas 的服务端 OpenAPI 基线；同步事实、传输状态、本地索引、凭据、更新校验和诊断均位于 Rust 层，Tauri 页面只展示状态并发送命令。Sprint 12 新增治理 API 主要由 Web 管理后台消费，不改变现有桌面同步状态机。
+`desktop/` 是 Sprint 7 与 Sprint 8 交付的 Windows 11 Rust/Tauri 工程，当前随 Sprint 13 候选发布基线统一为 `1.0.0`。桌面端与 `frontend/` Web 客户端共同消费当前 116 paths / 148 operations / 178 schemas 的服务端 OpenAPI 基线；同步事实、传输状态、本地索引、凭据、更新校验和诊断均位于 Rust 层，Tauri 页面只展示状态并发送命令。Sprint 12 新增治理 API 主要由 Web 管理后台消费，不改变现有桌面同步状态机。
 
 ## Workspace
 
@@ -12,7 +12,7 @@
 - `crates/drive-transfer`：预签名 HTTPS 上传下载队列、暂停/继续/取消、multipart/Range、SHA-256、限速并发和 `.drivepart` 原子发布。
 - `crates/drive-platform`：Windows Credential Manager、路径规范化、保留名/长路径/链接边界、冲突命名和原子替换。
 - `crates/drive-diagnostics`：脱敏诊断 JSON 导出。
-- `crates/drive-update`：Ed25519 更新清单与包验签、SHA-256、暂存安装、健康标记和 watchdog 回退。
+- `crates/drive-update`：当前/回滚安装包的 Ed25519、SHA-256、目标版本和 Windows Authenticode 固定签名者校验，暂存安装、延迟健康标记和 watchdog 自动回退。
 
 ## 双向同步边界
 
@@ -31,7 +31,7 @@ Sprint 11 账号安全继续复用这一停机边界：
 ## 签名更新
 
 - `update-public-key.txt` 是客户端固定的 Ed25519 公钥；`signing/desktop-code-signing.pem` 是公开代码签名证书，私钥不进入仓库。
-- GitHub Actions 从 Secrets 注入更新签名密钥和 Windows PFX，校验 Authenticode 证书 DER SHA-256、更新清单签名、包签名与包 SHA-256，再上传签名安装包和更新工件。
+- GitHub Actions 从 Secrets 注入更新签名密钥和 Windows PFX，从 Git 历史构建当前客户端对应的上一版安装包；当前包和回滚包均校验 Authenticode 证书 DER SHA-256、更新清单签名、包签名与包 SHA-256，再与 OpenAPI、发布说明、`release-manifest.json` 和 `SHA256SUMS` 一起上传。客户端在下载后使用 `WinVerifyTrust` 重做 Authenticode 完整性和固定签名者校验，缺少合格回滚包时不会启动安装。
 - CI 的变更路由按实际依赖选择门禁：Rust crate 源码/测试只运行 format、workspace tests 和 Clippy；Tauri UI、配置、图标、公开密钥或签名材料只运行安装包 job；Tauri `src-tauri` Rust 入口同时运行两者。CI workflow/router 与 README 变更不启动任何 Rust/NSIS 重 job。Rust job 先执行 workspace tests，再用 `cargo clippy --workspace --all-targets --no-deps` 检查本地 crate；安装包 job 只在 Tauri/打包相关路径变化或手工完整运行时启动，并共享 Cargo registry/git cache 与锁定 workspace `cargo fetch`。
 - 当前公开证书 DER SHA-256：`765e82aba7bd3276f18eeadddd7b33257a68b7a1ddcdac6d4fc7f7bc639a3ca5`。
 

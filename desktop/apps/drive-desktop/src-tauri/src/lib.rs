@@ -393,9 +393,16 @@ pub fn run() {
     let _ = sessions.restore();
     let transfers = TransferManager::new(api.clone(), index.clone());
     let sync = SyncEngine::with_transfers(api.clone(), index.clone(), transfers.clone());
-    let _ = index.recover_interrupted_operations();
-    let _ = transfers.recover_automatic();
-    let _ = sync.start_saved_watchers();
+    let operation_recovery_ready = startup_step_succeeded(
+        "interrupted operation recovery",
+        index.recover_interrupted_operations(),
+    );
+    let transfer_recovery_ready =
+        startup_step_succeeded("automatic transfer recovery", transfers.recover_automatic());
+    let watcher_start_ready =
+        startup_step_succeeded("saved watcher startup", sync.start_saved_watchers());
+    let update_startup_ready =
+        operation_recovery_ready && transfer_recovery_ready && watcher_start_ready;
     let update_manifest_url = std::env::var("DRIVE_DESKTOP_UPDATE_MANIFEST_URL")
         .unwrap_or_else(|_| DEFAULT_UPDATE_MANIFEST_URL.to_string());
     let updates = UpdateManager::new(
@@ -406,7 +413,7 @@ pub fn run() {
         UPDATE_PUBLIC_KEY,
     )
     .expect("desktop update verifier must initialize");
-    let _ = updates.mark_current_healthy();
+    let startup_updates = updates.clone();
     let background_sync = sync.clone();
     let background_api = api.clone();
     let state = AppState {
@@ -437,6 +444,12 @@ pub fn run() {
                     tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 }
             });
+            if update_startup_ready {
+                tauri::async_runtime::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                    let _ = startup_updates.mark_current_healthy();
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -466,4 +479,17 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("Tauri application failed");
+}
+
+fn startup_step_succeeded<T, E>(label: &str, result: Result<T, E>) -> bool
+where
+    E: std::fmt::Display,
+{
+    match result {
+        Ok(_) => true,
+        Err(error) => {
+            eprintln!("desktop startup step failed ({label}): {error}");
+            false
+        }
+    }
 }

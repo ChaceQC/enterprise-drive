@@ -60,7 +60,7 @@
 - 初始仓库优先创建为私有仓库，确认可公开后再调整可见性。
 - 每次完成可验证改动后必须 commit。
 - 每次 commit 后必须 push 到 GitHub。
-- 正式 tag/Release 必须满足对应版本的生产证书、依赖/镜像风险和恢复门禁；当前 MinIO blocker 未解除前不得创建 `v0.4.0` tag 或 GitHub Release。
+- 正式 tag/Release 必须满足对应版本的生产证书、依赖/镜像风险和恢复门禁；当前 MinIO blocker 未解除前不得创建 `v1.0.0` tag 或 GitHub Release。
 - 提交前必须检查 `git status`，避免混入无关改动。
 - 提交前必须先检查本次改动是否影响 `README.md`、`PROJECT_PLAN.md`、`PROJECT_PROGRESS.md`、`AGENT.md`、《企业网盘开发者技术计划书.md》或子目录 README；受影响文档未同步时，不得先提交代码。
 - 必须维护 `.gitignore`，禁止提交 `.env`、密钥、证书私钥、依赖目录、构建产物、上传文件、对象存储数据目录、数据库数据目录、OpenSearch 数据目录、日志和备份文件。

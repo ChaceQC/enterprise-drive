@@ -11,7 +11,11 @@ from pathlib import Path
 from typing import Any
 
 from performance.fixture import BenchmarkFixture
-from performance.profiles import TARGET_MIN_RPS_BY_SCENARIO, TARGET_P95_MS
+from performance.profiles import (
+    TARGET_MIN_RPS_BY_SCENARIO,
+    TARGET_P95_MS,
+    TARGET_REQUIRED_METRICS_BY_SCENARIO,
+)
 
 
 def read_stats(path: Path) -> list[dict[str, Any]]:
@@ -74,7 +78,9 @@ def write_report(
         profile=profile,
         scenario=scenario,
     )
-    present_metrics = {str(result["name"]) for result in results}
+    present_metrics = {
+        str(result["name"]) for result in results if int(result["request_count"]) > 0
+    }
     missing_required_metrics = sorted(required_metrics - present_metrics)
     total_requests = sum(int(result["request_count"]) for result in results)
     total_failures = sum(int(result["failure_count"]) for result in results)
@@ -188,7 +194,7 @@ def _apply_target_throughput_requirements(
             result["passed"] = bool(result["passed"]) and (
                 float(result["requests_per_second"]) >= minimum_rps
             )
-    return set(targets)
+    return set(TARGET_REQUIRED_METRICS_BY_SCENARIO.get(scenario, ())) | set(targets)
 
 
 def _git_commit() -> str:

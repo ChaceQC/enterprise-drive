@@ -1,6 +1,6 @@
 # 后端工程
 
-> 适用项目版本：`v0.9.0`
+> 适用项目版本：`v1.0.0` 候选发布
 
 本目录承载企业网盘后端，使用 Python 3.12+、uv、FastAPI、SQLAlchemy、PostgreSQL、Redis、S3 兼容对象存储、OpenSearch 和 Celery。Sprint 11 已加入 Authlib/httpx OIDC 适配、ldap3 目录读取、账号安全、身份源管理和异步 LDAP 同步；Sprint 12 已加入大目录权限重算、统一生命周期、审计分区/归档/外部投递、Outbox dead-letter 和治理 API。
 
@@ -61,7 +61,7 @@ Copy-Item .env.windows.example .env.windows
 
 ### 备份、校验与隔离恢复
 
-`v0.9.0` 通过根目录 `deploy/windows/manage.ps1` 提供 `backup`、`backup-verify`、`restore`、`backup-retention`、`backup-offline-rotate`、`restore-drill` 和 `data-migration-*`。备份目录必须是仓库外的绝对专用目录，不得是卷根、仓库目录或仓库祖先；若既有目录非空，则必须已经使用本项目 restricted ACL，脚本不会直接重写任意宽范围目录 ACL。正式备份默认使用当前 Windows 用户证书存储中的 CMS 文档加密证书保护 `.env.windows`；manifest v2 可另外生成 detached CMS 来源签名，也可把全部数据 payload 加密认证后发布。托管/离线轮换会先验证目录名、manifest、签名和 checksum，再按保留天数与最少份数处理；恢复演练使用随机隔离 Compose project，完成后删除 target 容器/卷并写 restricted ACL JSON 记录。建议为配置加密、manifest 签名和完整包加密使用职责分离的可导出私钥证书，并把 PFX 单独保存在加密离线介质中：
+`v1.0.0` 候选版本通过根目录 `deploy/windows/manage.ps1` 提供 `backup`、`backup-verify`、`restore`、`backup-retention`、`backup-offline-rotate`、`restore-drill` 和 `data-migration-*`。备份目录必须是仓库外的绝对专用目录，不得是卷根、仓库目录或仓库祖先；若既有目录非空，则必须已经使用本项目 restricted ACL，脚本不会直接重写任意宽范围目录 ACL。正式备份默认使用当前 Windows 用户证书存储中的 CMS 文档加密证书保护 `.env.windows`；manifest v2 可另外生成 detached CMS 来源签名，也可把全部数据 payload 加密认证后发布。托管/离线轮换会先验证目录名、manifest、签名和 checksum，再按保留天数与最少份数处理；恢复演练使用随机隔离 Compose project，完成后删除 target 容器/卷并写 restricted ACL JSON 记录。建议为配置加密、manifest 签名和完整包加密使用职责分离的可导出私钥证书，并把 PFX 单独保存在加密离线介质中：
 
 备份、校验和恢复的临时容器统一使用 `--pull never`，默认限制为 `0.50 CPU`、`512m` 内存、无额外 swap 和 `128` 个 PID；卷归档与 `pg_dump` 默认使用压缩等级 `1`，避免 gzip 高压缩长时间占满 CPU。对应变量为 `DRIVE_BACKUP_HELPER_CPU_LIMIT`、`DRIVE_BACKUP_HELPER_MEMORY_LIMIT`、`DRIVE_BACKUP_HELPER_PIDS_LIMIT`、`DRIVE_BACKUP_GZIP_LEVEL` 和 `DRIVE_BACKUP_PG_DUMP_COMPRESSION_LEVEL`。
 
@@ -119,7 +119,7 @@ Copy-Item .env.windows .env.restore.windows
 
 `-RestoreEnvironmentOutput` 只把备份中的 CMS 环境文件解密到仓库和备份目录外的绝对、尚不存在文件路径，不会替换当前 target 的 `-EnvFile`；父目录必须预先存在且不得经过 reparse point。CMS 明文先保存在内存中，只在本次恢复模式的数据、Alembic revision 和镜像门禁全部成功后的最后一步，通过同目录 restricted ACL 临时文件原子发布；未使用 `-NoStartAfterRestore` 时还会先完成全栈健康和实际容器 image ID 对账。若原子发布时目标路径已被其他进程创建，失败清理会保留该 foreign file。备份根目录、staging/正式备份、rollback archive 和最终 CMS 输出会自动关闭 ACL 继承，并只允许当前用户、SYSTEM、Administrators 完全控制。
 
-未传入完整包加密证书时，Windows CMS 仍只加密 `.env.windows`，其余 payload 依赖 BitLocker、restricted NTFS ACL 与加密外部介质；传入证书时使用 AES-256-CBC、HMAC-SHA256 和 RSA-OAEP-SHA256 保护完整 payload。`manifest.p7s` 提供来源签名，但证书信任链、吊销和双人保管仍由组织 PKI 流程负责。Redis/OpenSearch 同版本原始卷恢复只支持相同 image reference、相同 image ID、单节点同拓扑；跨版本升级使用 Redis RDB 与 OpenSearch settings/mappings/bulk 可移植导出，导入前保存 rollback export，失败自动回退。当前 MinIO Server/Client 仍有 16/9 个 Critical 唯一 ID 基线，正式 `v0.4.0` tag/Release 在受支持修复镜像或可审计补丁镜像完成替换与重扫前保持阻塞。完整操作见 `../docs/ops-sprint12-backup-portability.md` 和 `../docs/deployment-windows-docker.md`，风险登记见 `../docs/minio-security-risk.md`。
+未传入完整包加密证书时，Windows CMS 仍只加密 `.env.windows`，其余 payload 依赖 BitLocker、restricted NTFS ACL 与加密外部介质；传入证书时使用 AES-256-CBC、HMAC-SHA256 和 RSA-OAEP-SHA256 保护完整 payload。`manifest.p7s` 提供来源签名，但证书信任链、吊销和双人保管仍由组织 PKI 流程负责。Redis/OpenSearch 同版本原始卷恢复只支持相同 image reference、相同 image ID、单节点同拓扑；跨版本升级使用 Redis RDB 与 OpenSearch settings/mappings/bulk 可移植导出，导入前保存 rollback export，失败自动回退。当前 MinIO Server/Client 仍有 16/9 个 Critical 唯一 ID 基线，正式 `v1.0.0` tag/Release 在受支持修复镜像或可审计补丁镜像完成替换与重扫前保持阻塞。完整操作见 `../docs/ops-sprint12-backup-portability.md` 和 `../docs/deployment-windows-docker.md`，风险登记见 `../docs/minio-security-risk.md`。
 
 ## 常用验证
 

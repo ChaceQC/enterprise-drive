@@ -1,6 +1,6 @@
 # Windows 11 Docker 正式部署说明
 
-> 适用项目版本：`v0.9.0`
+> 适用项目版本：`v1.0.0` 候选发布
 >
 > 当前代码基线：Windows 本机 HTTP `18080/19000`、公网 ACME/TLS `80/443`、可选 monitoring profile、备份签名/完整包保护/离线轮换、Redis/OpenSearch 可移植迁移、隔离恢复、账号安全、OIDC/PKCE、LDAP 同步和 Sprint 12 治理均已落地；真实受信证书、企业 OIDC provider、LDAPS 目录和生产密钥保管验收仍需要生产 DNS/网络环境。
 
@@ -740,7 +740,7 @@ Copy-Item .env.windows .env.restore.windows
 - Redis/OpenSearch 同版本恢复仍可使用停止状态原始卷，并要求相同 image reference、image ID 和单节点拓扑。跨版本升级必须使用 `data-migration-export/apply/rollback`：Redis 导出 RDB，OpenSearch 导出 settings/mappings/bulk NDJSON；应用前创建 rollback export，拒绝导入到更低 major 版本，失败时自动回退。
 - `-ForceRestore` rollback archive 是失败时的尽力恢复机制；底层卷驱动、磁盘或 Docker 故障仍可能需要人工处理，因此发现回滚异常后不得删除脚本报告的受限 ACL 归档。
 - PostgreSQL 是核心事实来源；Redis 主要保存缓存、限流和队列状态，OpenSearch 索引可由 PostgreSQL 与对象存储重建，但仍应记录重建步骤和耗时。
-- 当前固定 MinIO Server/Client 镜像仍有 16/9 个 Critical 唯一 ID 基线。供应链门禁只阻断允许集之外的新 Critical；正式 `v0.4.0` tag/Release 在受支持修复镜像或可审计补丁镜像完成替换与重扫前保持阻塞，详见 `docs/minio-security-risk.md`。
+- 当前固定 MinIO Server/Client 镜像仍有 16/9 个 Critical 唯一 ID 基线。供应链门禁只阻断允许集之外的新 Critical；正式 `v1.0.0` tag/Release 在受支持修复镜像或可审计补丁镜像完成替换与重扫前保持阻塞，详见 `docs/minio-security-risk.md`。
 
 完整的 Sprint 12 证书创建、签名备份、完整包保护、离线轮换和跨版本迁移示例见 `docs/ops-sprint12-backup-portability.md`。
 
