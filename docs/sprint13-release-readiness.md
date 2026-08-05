@@ -57,12 +57,17 @@
 
 - `target/mixed` 必须同时出现并有样本：
   `file_list_permission_batch`、`upload_init`、`search`、`admin_audit`。
+- `target/mixed`、`target/search` 和 `target/audit` 必须显式提供
+  `--target-state`；mixed 的 state 目标值、完成值和运行环境实际快照必须同时达到
+  100 万 OpenSearch 文档与 1,000 万条专属审计日志。
+- 正式 target 负载不得缩小：fixture 子目录至少 10,000 个、并发用户至少 50、
+  Locust `--run-time` 至少 300 秒，且所有用户启动后至少 warm-up 5 秒再重置统计。
 - `target/upload_complete` 必须同时出现
   `upload_complete_api_without_storage_merge` 与 `upload_complete_end_to_end`。
 - 既有 P95 阈值继续以 `backend/performance/profiles.py` 为事实来源；最小吞吐继续
   对 `upload_init` 和 `upload_complete` 生效。
 - `report.json` 必须满足：Locust 退出码为 0、环境快照完整、无缺失必需指标、
-  全部指标通过且失败数为 0。
+  `target_data_errors` 与 `target_workload_errors` 为空、全部指标通过且失败数为 0。
 - 长期 soak 必须单独记录持续时间、稳态负载、资源曲线、错误率、任务积压、
   数据库连接池、Redis、OpenSearch、SeaweedFS 与 Worker 恢复情况；既有 300 秒 target
   结果不替代 soak。

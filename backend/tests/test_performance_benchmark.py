@@ -4,13 +4,16 @@ import csv
 import json
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
 import pytest
+from locust.event import EventHook
 
-from performance import multipart
+from performance import locustfile, multipart
 from performance.complete_queue import (
     COMPLETE_QUEUE_SCHEMA,
     PreparedCompleteItem,
@@ -36,6 +39,9 @@ from performance.runner import (
     _run_locust,
     _write_report,
 )
+from performance.runner import (
+    main as run_benchmark,
+)
 
 
 def _fixture() -> BenchmarkFixture:
@@ -53,7 +59,18 @@ def _fixture() -> BenchmarkFixture:
     )
 
 
+def _target_fixture() -> BenchmarkFixture:
+    return replace(
+        _fixture(),
+        folder_ids=[f"node-{index}" for index in range(10_000)],
+    )
+
+
 def _write_performance_stat(path: Path, row: dict[str, str]) -> None:
+    _write_performance_stats(path, [row])
+
+
+def _write_performance_stats(path: Path, rows: list[dict[str, str]]) -> None:
     with path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(
             handle,
@@ -72,7 +89,54 @@ def _write_performance_stat(path: Path, row: dict[str, str]) -> None:
             ],
         )
         writer.writeheader()
-        writer.writerow(row)
+        writer.writerows(rows)
+
+
+def _passing_target_mixed_stats() -> list[dict[str, str]]:
+    return [
+        {
+            "Type": request_type,
+            "Name": name,
+            "Request Count": "100",
+            "Failure Count": "0",
+            "Median Response Time": "100",
+            "Average Response Time": "120",
+            "Min Response Time": "50",
+            "Max Response Time": "700",
+            "Requests/s": "20",
+            "95%": str(p95),
+            "99%": "700",
+        }
+        for request_type, name, p95 in (
+            ("GET", "file_list_permission_batch", 300),
+            ("POST", "upload_init", 250),
+            ("GET", "search", 500),
+            ("GET", "admin_audit", 700),
+        )
+    ]
+
+
+def _target_environment_snapshot(
+    *,
+    opensearch_target: int,
+    opensearch_completed: int,
+    opensearch_observed: int,
+    audit_target: int,
+    audit_completed: int,
+    audit_observed: int,
+) -> dict[str, Any]:
+    return {
+        "complete": True,
+        "target_data": {
+            "status": "ready",
+            "opensearch_target": opensearch_target,
+            "opensearch_completed": opensearch_completed,
+            "audit_target": audit_target,
+            "audit_completed": audit_completed,
+        },
+        "opensearch": {"documents": opensearch_observed},
+        "database": {"target_audit_count": audit_observed},
+    }
 
 
 def test_profiles_keep_smoke_below_target_resource_budget() -> None:
@@ -97,6 +161,33 @@ def test_server_timing_parser_extracts_upload_complete_phases() -> None:
         "db_finalize": 20.0,
         "temp_delete": 2.0,
     }
+
+
+def test_stats_reset_waits_for_spawning_complete(monkeypatch: pytest.MonkeyPatch) -> None:
+    scheduled: list[tuple[float, Any]] = []
+    reset_calls: list[str] = []
+    environment = SimpleNamespace(
+        events=SimpleNamespace(spawning_complete=EventHook()),
+        stats=SimpleNamespace(reset_all=lambda: reset_calls.append("reset")),
+    )
+    monkeypatch.setenv("PERF_WARMUP_SECONDS", "5")
+    monkeypatch.setattr(locustfile, "_STATS_RESET_SCHEDULED", False)
+    monkeypatch.setattr(
+        locustfile,
+        "spawn_later",
+        lambda seconds, callback: scheduled.append((seconds, callback)),
+    )
+
+    locustfile._register_stats_reset_after_spawning(environment)
+
+    assert scheduled == []
+    environment.events.spawning_complete.fire(user_count=50)
+    assert len(scheduled) == 1
+    assert scheduled[0][0] == 5.0
+    assert reset_calls == []
+
+    scheduled[0][1]()
+    assert reset_calls == ["reset"]
 
 
 def test_upload_complete_timing_records_each_server_phase(
@@ -415,6 +506,131 @@ def test_target_mixed_requires_each_gate_metric(tmp_path: Path) -> None:
         "file_list_permission_batch",
         "search",
         "upload_init",
+    ]
+    assert report["passed"] is False
+
+
+def test_target_mixed_requires_target_state(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit, match="必须提供 --target-state"):
+        run_benchmark(
+            [
+                "--password",
+                "fixture-password",
+                "--profile",
+                "target",
+                "--scenario",
+                "mixed",
+                "--docker-compose-project",
+                "fixture-project",
+                "--output-dir",
+                str(tmp_path),
+            ]
+        )
+
+
+def test_target_mixed_rejects_incomplete_target_data(tmp_path: Path) -> None:
+    _write_performance_stats(
+        tmp_path / "stats_stats.csv",
+        _passing_target_mixed_stats(),
+    )
+
+    report = _write_report(
+        output_dir=tmp_path,
+        profile="target",
+        scenario="mixed",
+        fixture=_fixture(),
+        users=50,
+        spawn_rate=5.0,
+        run_time="300s",
+        locust_exit_code=0,
+        environment_snapshot=_target_environment_snapshot(
+            opensearch_target=10_000,
+            opensearch_completed=10_000,
+            opensearch_observed=10_000,
+            audit_target=0,
+            audit_completed=0,
+            audit_observed=0,
+        ),
+    )
+
+    assert report["summary"]["missing_required_metrics"] == []
+    assert report["summary"]["target_data_errors"] == [
+        "target_state_opensearch_target_below_minimum",
+        "target_state_opensearch_completed_below_minimum",
+        "observed_opensearch_documents_below_minimum",
+        "target_state_audit_target_below_minimum",
+        "target_state_audit_completed_below_minimum",
+        "observed_audit_rows_below_minimum",
+    ]
+    assert report["passed"] is False
+
+
+def test_target_mixed_accepts_complete_target_data(tmp_path: Path) -> None:
+    _write_performance_stats(
+        tmp_path / "stats_stats.csv",
+        _passing_target_mixed_stats(),
+    )
+
+    report = _write_report(
+        output_dir=tmp_path,
+        profile="target",
+        scenario="mixed",
+        fixture=_target_fixture(),
+        users=50,
+        spawn_rate=5.0,
+        run_time="300s",
+        locust_exit_code=0,
+        warmup_seconds=5.0,
+        environment_snapshot=_target_environment_snapshot(
+            opensearch_target=1_000_000,
+            opensearch_completed=1_000_000,
+            opensearch_observed=1_000_000,
+            audit_target=10_000_000,
+            audit_completed=10_000_000,
+            audit_observed=10_000_000,
+        ),
+    )
+
+    assert report["summary"]["missing_required_metrics"] == []
+    assert report["summary"]["target_data_errors"] == []
+    assert report["summary"]["target_workload_errors"] == []
+    assert report["workload"]["target_data_validation"]["passed"] is True
+    assert report["workload"]["target_workload_validation"]["passed"] is True
+    assert report["passed"] is True
+
+
+def test_target_mixed_rejects_reduced_workload(tmp_path: Path) -> None:
+    _write_performance_stats(
+        tmp_path / "stats_stats.csv",
+        _passing_target_mixed_stats(),
+    )
+
+    report = _write_report(
+        output_dir=tmp_path,
+        profile="target",
+        scenario="mixed",
+        fixture=_fixture(),
+        users=10,
+        spawn_rate=2.0,
+        run_time="60s",
+        locust_exit_code=0,
+        warmup_seconds=0.0,
+        environment_snapshot=_target_environment_snapshot(
+            opensearch_target=1_000_000,
+            opensearch_completed=1_000_000,
+            opensearch_observed=1_000_000,
+            audit_target=10_000_000,
+            audit_completed=10_000_000,
+            audit_observed=10_000_000,
+        ),
+    )
+
+    assert report["summary"]["target_data_errors"] == []
+    assert report["summary"]["target_workload_errors"] == [
+        "fixture_folder_count_below_target",
+        "users_below_target",
+        "run_time_below_target",
+        "warmup_seconds_below_target",
     ]
     assert report["passed"] is False
 

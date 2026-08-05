@@ -14,7 +14,7 @@ from urllib.parse import urlsplit
 import requests
 from gevent import spawn_later  # type: ignore[import-untyped]
 from gevent.lock import Semaphore as GeventSemaphore  # type: ignore[import-untyped]
-from locust import HttpUser, between, task
+from locust import HttpUser, between, events, task
 from locust.exception import StopUser
 
 from performance.complete_queue import (
@@ -83,7 +83,6 @@ class BenchmarkUser(HttpUser):
             )
             if self.scenario != "login" and not self._use_prepared_session() and not self._login():
                 raise StopUser()
-            _schedule_stats_reset(self.environment)
         except (KeyError, OSError, ValueError, RuntimeError) as exc:
             raise StopUser() from exc
 
@@ -444,6 +443,15 @@ class BenchmarkUser(HttpUser):
         ) as response:
             if response.status_code != 200:
                 response.failure(f"audit status={response.status_code}")
+
+
+@events.init.add_listener
+def _register_stats_reset_after_spawning(environment: Any, **_kwargs: Any) -> None:
+    def on_spawning_complete(*, user_count: int, **_event_kwargs: Any) -> None:
+        del user_count
+        _schedule_stats_reset(environment)
+
+    environment.events.spawning_complete.add_listener(on_spawning_complete)
 
 
 def _schedule_stats_reset(environment: Any) -> None:

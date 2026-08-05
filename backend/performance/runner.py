@@ -26,7 +26,7 @@ from performance.fixture import (
     read_fixture,
     write_fixture,
 )
-from performance.profiles import get_profile
+from performance.profiles import TARGET_DATA_REQUIREMENTS_BY_SCENARIO, get_profile
 from performance.report import write_report
 
 
@@ -182,8 +182,12 @@ def main(argv: list[str] | None = None) -> int:
     scenario = args.scenario or profile.default_scenario
     if args.profile == "target" and not args.docker_compose_project:
         raise SystemExit("--profile target 必须提供 --docker-compose-project")
-    if args.profile == "target" and scenario in {"search", "audit"} and args.target_state is None:
-        raise SystemExit("target 搜索/审计场景必须提供 --target-state")
+    if (
+        args.profile == "target"
+        and scenario in TARGET_DATA_REQUIREMENTS_BY_SCENARIO
+        and args.target_state is None
+    ):
+        raise SystemExit("target mixed/搜索/审计场景必须提供 --target-state")
     if args.warmup_seconds < 0:
         raise SystemExit("--warmup-seconds 不能为负数")
     users = args.users or profile.users

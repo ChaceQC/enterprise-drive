@@ -26,13 +26,13 @@
 | `baseline` | 1,000 | 10 | 60s | 单机基准 |
 | `target` | 10,000 | 50 | 300s | 显式目标规模演练，默认不执行 |
 
-`target` 表示 API fixture 规模档位；搜索和审计门禁还必须同时加载并在报告中确认 100 万 OpenSearch 文档与 1,000 万审计日志。2026-08-03 的最终报告已满足这三个数据条件。后续重跑仍需确认 Docker Desktop 资源、数据库容量、SeaweedFS/OpenSearch 磁盘和清理窗口。
+`target` 表示 API fixture 规模档位；搜索和审计门禁还必须同时加载并在报告中确认 100 万 OpenSearch 文档与 1,000 万审计日志。target 报告同时 fail-closed 校验至少 10,000 个 fixture 子目录、50 个用户、300 秒 Locust `--run-time` 和 5 秒 warm-up，不能用缩小负载生成形式上的通过报告。2026-08-03 的最终报告已满足三个数据条件；后续重跑仍需确认 Docker Desktop 资源、数据库容量、SeaweedFS/OpenSearch 磁盘和清理窗口。
 
 ## 目标规模数据生成器
 
 `performance.target_data` 负责准备、检查和清理 BE-029 的大规模基准数据，不会构建、拉取或启动任何服务。它把 OpenSearch 文档和审计日志分成独立阶段，使用确定性 ID、专属 `be029-*` index、专属审计 action、批量 checkpoint 和原子 state JSON，进程中断后可从上一个批次继续。
 
-`performance.runner --scenario upload_complete` 会真实执行初始化、part presign、无 Cookie 的预签名 S3 PUT、complete 和节点清理。测试环境请求带 `X-Drive-Benchmark: BE-029` 时，complete 响应增加 `Server-Timing` 的 `storage_complete`、`hash_validation` 和 `final_object` 分段；报告中的 `upload_complete_api_without_storage_merge` 为端到端响应时间扣除对象存储合并段后的指标。预签名数据面使用 `trust_env=false`，并把每个用户的首个连接 warm-up 单独记录。runner 的 `--warmup-seconds` 会在所有用户启动后等待指定时间并重置 Locust 统计；最终 target 使用 `--warmup-seconds 5`，避免把连接和 worker 冷启动误算为稳态样本。SeaweedFS 替换后的长期 soak/target 仍需按 Sprint 13 清单重新执行。
+`performance.runner --scenario upload_complete` 会真实执行初始化、part presign、无 Cookie 的预签名 S3 PUT、complete 和节点清理。测试环境请求带 `X-Drive-Benchmark: BE-029` 时，complete 响应增加 `Server-Timing` 的 `pre_storage`、`storage_complete`、`hash_validation`、`final_object`、`db_finalize` 和 `temp_delete` 分段；报告还计算未归因时间，`upload_complete_api_without_storage_merge` 为端到端响应时间扣除对象存储合并段后的指标。预签名数据面使用 `trust_env=false`，并把每个用户的首个连接 warm-up 单独记录。runner 的 `--warmup-seconds` 会在所有用户启动后等待指定时间并重置 Locust 统计；最终 target 使用 `--warmup-seconds 5`，避免把连接和 worker 冷启动误算为稳态样本。SeaweedFS 替换后的长期 soak/target 仍需按 Sprint 13 清单重新执行。
 
 先用小批次验证连接和清理路径：
 
@@ -64,7 +64,7 @@ uv run python -X utf8 -m performance.target_data `
   prepare
 ```
 
-state 不保存数据库密码；清理只接受 state 中完全匹配的 `run_id`，只删除其专属 OpenSearch index 和带有精确 benchmark action 的审计行。数据准备、API target profile 和真实 multipart complete 必须分别留有通过工件；仅有 state ready 仍不构成完整性能验收。
+state 不保存数据库密码；清理只接受 state 中完全匹配的 `run_id`，只删除其专属 OpenSearch index 和带有精确 benchmark action 的审计行。`target/mixed`、`target/search` 和 `target/audit` 强制提供 state；报告会同时核对 state 目标/完成值和 OpenSearch、PostgreSQL 的实际数量，mixed 任一项低于 100 万/1,000 万都会失败。数据准备、API target profile 和真实 multipart complete 必须分别留有通过工件；仅有 state ready 仍不构成完整性能验收。
 
 2026-08-01 已使用本地固定镜像和两个受限临时容器完成 `1,000/1,000` 小规模闭环：默认参数先生成 `100/100` 并保存 checkpoint，显式 `--max-batches 0` 后恢复到 `1,000/1,000`；清理后审计 action 真实剩余 `0`，专属 OpenSearch index 返回 `404`，本轮容器剩余 `0`。PostgreSQL 限制为 `0.75 CPU / 768 MiB / 128 PIDs`，OpenSearch 限制为 `1 CPU / 1536 MiB / 256 PIDs`，运行阶段均使用 `--pull never`。这只验证生成器的恢复和清理闭环，不代表目标规模性能验收。
 

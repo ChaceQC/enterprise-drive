@@ -54,6 +54,13 @@ TARGET_MIN_RPS_BY_SCENARIO: dict[str, dict[str, float]] = {
     "upload_complete": {"upload_complete_end_to_end": 50.0},
 }
 
+TARGET_DATA_REQUIREMENTS_BY_SCENARIO: dict[str, tuple[int, int]] = {
+    "mixed": (1_000_000, 10_000_000),
+    "search": (1_000_000, 0),
+    "audit": (0, 10_000_000),
+}
+TARGET_MIN_WARMUP_SECONDS = 5.0
+
 TARGET_REQUIRED_METRICS_BY_SCENARIO: dict[str, frozenset[str]] = {
     "mixed": frozenset(
         {

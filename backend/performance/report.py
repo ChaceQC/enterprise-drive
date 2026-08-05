@@ -5,6 +5,7 @@ import importlib.metadata
 import json
 import os
 import platform
+import re
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,9 +13,12 @@ from typing import Any
 
 from performance.fixture import BenchmarkFixture
 from performance.profiles import (
+    TARGET_DATA_REQUIREMENTS_BY_SCENARIO,
     TARGET_MIN_RPS_BY_SCENARIO,
+    TARGET_MIN_WARMUP_SECONDS,
     TARGET_P95_MS,
     TARGET_REQUIRED_METRICS_BY_SCENARIO,
+    get_profile,
 )
 
 
@@ -90,6 +94,18 @@ def write_report(
     derived_metrics = total_requests - http_requests
     snapshot = environment_snapshot or {}
     environment_complete = bool(snapshot.get("complete", True))
+    target_data_validation = _validate_target_data(
+        profile=profile,
+        scenario=scenario,
+        snapshot=snapshot,
+    )
+    target_workload_validation = _validate_target_workload(
+        profile=profile,
+        fixture_folder_count=len(fixture.folder_ids),
+        users=users,
+        run_time=run_time,
+        warmup_seconds=warmup_seconds,
+    )
     report = {
         "schema_version": "BE-029/2",
         "profile": profile,
@@ -108,6 +124,8 @@ def write_report(
             "failure_count": total_failures,
             "failure_rate": (round(total_failures / total_requests, 6) if total_requests else 0.0),
             "missing_required_metrics": missing_required_metrics,
+            "target_data_errors": target_data_validation["errors"],
+            "target_workload_errors": target_workload_validation["errors"],
         },
         "workload": {
             "fixture_folder_count": len(fixture.folder_ids),
@@ -131,6 +149,8 @@ def write_report(
                 complete_ready_count if scenario == "upload_complete" else None
             ),
             "warmup_seconds": warmup_seconds,
+            "target_data_validation": target_data_validation,
+            "target_workload_validation": target_workload_validation,
             "complete_quit_grace_seconds": (
                 float(os.getenv("PERF_COMPLETE_QUIT_GRACE_SECONDS", "0.2"))
                 if scenario == "upload_complete"
@@ -152,6 +172,8 @@ def write_report(
         and locust_exit_code == 0
         and environment_complete
         and not missing_required_metrics
+        and target_data_validation["passed"]
+        and target_workload_validation["passed"]
         and all(bool(result["passed"]) for result in results),
         "artifacts": {
             "stats_csv": "stats_stats.csv",
@@ -176,6 +198,163 @@ def write_report(
         encoding="utf-8",
     )
     return report
+
+
+def _validate_target_workload(
+    *,
+    profile: str,
+    fixture_folder_count: int,
+    users: int,
+    run_time: str,
+    warmup_seconds: float,
+) -> dict[str, Any]:
+    target_profile = get_profile("target")
+    required = profile == "target"
+    run_time_seconds = _duration_seconds(run_time)
+    validation = {
+        "required": required,
+        "required_fixture_folder_count": target_profile.fixture_folders,
+        "required_users": target_profile.users,
+        "required_run_time_seconds": _duration_seconds(target_profile.run_time),
+        "required_warmup_seconds": TARGET_MIN_WARMUP_SECONDS,
+        "fixture_folder_count": fixture_folder_count,
+        "users": users,
+        "run_time": run_time,
+        "run_time_seconds": run_time_seconds,
+        "warmup_seconds": warmup_seconds,
+        "errors": [],
+        "passed": True,
+    }
+    if not required:
+        return validation
+
+    errors: list[str] = validation["errors"]
+    if fixture_folder_count < target_profile.fixture_folders:
+        errors.append("fixture_folder_count_below_target")
+    if users < target_profile.users:
+        errors.append("users_below_target")
+    required_run_time_seconds = validation["required_run_time_seconds"]
+    if (
+        run_time_seconds is None
+        or required_run_time_seconds is None
+        or run_time_seconds < required_run_time_seconds
+    ):
+        errors.append("run_time_below_target")
+    if warmup_seconds < TARGET_MIN_WARMUP_SECONDS:
+        errors.append("warmup_seconds_below_target")
+    validation["passed"] = not errors
+    return validation
+
+
+def _duration_seconds(value: str) -> float | None:
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([smh]?)\s*", value)
+    if match is None:
+        return None
+    amount = float(match.group(1))
+    multiplier = {"": 1.0, "s": 1.0, "m": 60.0, "h": 3600.0}[match.group(2)]
+    return amount * multiplier
+
+
+def _validate_target_data(
+    *,
+    profile: str,
+    scenario: str,
+    snapshot: dict[str, Any],
+) -> dict[str, Any]:
+    minimums = TARGET_DATA_REQUIREMENTS_BY_SCENARIO.get(scenario)
+    required = profile == "target" and minimums is not None
+    required_opensearch_documents, required_audit_rows = minimums or (0, 0)
+    target_data = snapshot.get("target_data")
+    opensearch = snapshot.get("opensearch")
+    database = snapshot.get("database")
+    state = target_data if isinstance(target_data, dict) else {}
+    opensearch_snapshot = opensearch if isinstance(opensearch, dict) else {}
+    database_snapshot = database if isinstance(database, dict) else {}
+    validation = {
+        "required": required,
+        "required_opensearch_documents": required_opensearch_documents,
+        "required_audit_rows": required_audit_rows,
+        "state_status": state.get("status"),
+        "state_opensearch_target": _optional_int(state.get("opensearch_target")),
+        "state_opensearch_completed": _optional_int(state.get("opensearch_completed")),
+        "observed_opensearch_documents": _optional_int(opensearch_snapshot.get("documents")),
+        "state_audit_target": _optional_int(state.get("audit_target")),
+        "state_audit_completed": _optional_int(state.get("audit_completed")),
+        "observed_audit_rows": _optional_int(database_snapshot.get("target_audit_count")),
+        "errors": [],
+        "passed": True,
+    }
+    if not required:
+        return validation
+
+    errors: list[str] = validation["errors"]
+    if not state:
+        errors.append("target_state_missing")
+    elif state.get("status") != "ready":
+        errors.append("target_state_not_ready")
+
+    if required_opensearch_documents:
+        _require_minimum(
+            errors=errors,
+            value=validation["state_opensearch_target"],
+            minimum=required_opensearch_documents,
+            error="target_state_opensearch_target_below_minimum",
+        )
+        _require_minimum(
+            errors=errors,
+            value=validation["state_opensearch_completed"],
+            minimum=required_opensearch_documents,
+            error="target_state_opensearch_completed_below_minimum",
+        )
+        _require_minimum(
+            errors=errors,
+            value=validation["observed_opensearch_documents"],
+            minimum=required_opensearch_documents,
+            error="observed_opensearch_documents_below_minimum",
+        )
+
+    if required_audit_rows:
+        _require_minimum(
+            errors=errors,
+            value=validation["state_audit_target"],
+            minimum=required_audit_rows,
+            error="target_state_audit_target_below_minimum",
+        )
+        _require_minimum(
+            errors=errors,
+            value=validation["state_audit_completed"],
+            minimum=required_audit_rows,
+            error="target_state_audit_completed_below_minimum",
+        )
+        _require_minimum(
+            errors=errors,
+            value=validation["observed_audit_rows"],
+            minimum=required_audit_rows,
+            error="observed_audit_rows_below_minimum",
+        )
+
+    validation["passed"] = not errors
+    return validation
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _require_minimum(
+    *,
+    errors: list[str],
+    value: int | None,
+    minimum: int,
+    error: str,
+) -> None:
+    if value is None or value < minimum:
+        errors.append(error)
 
 
 def _apply_target_throughput_requirements(
