@@ -15,8 +15,8 @@
 | 项目 | 当前实际状态 |
 |---|---|
 | 分支 | `dev` |
-| HEAD | `a2ac96a7c84d`（Sprint 13 候选改动尚未提交） |
-| 工作区 | Sprint 13 候选版本、桌面更新、发布门禁和文档改动待统一提交 |
+| 候选代码 HEAD | `8c54c96e12f`（同 SHA CI 与 Windows artifact 已验证） |
+| 工作区 | 候选代码和远端门禁已冻结；生产环境验收项保持未完成 |
 | 后端、前端、Rust、Tauri 版本 | `1.0.0` 候选 |
 | 运行时 OpenAPI | 116 个路径、148 个操作、178 个 Schema |
 | 数据库迁移 head | `20260804_0026` |
@@ -49,14 +49,14 @@
 
 | 子阶段 | 目标 | 当前状态 | 代码/工件依据 | 仍需完成 |
 |---|---|---|---|---|
-| Sprint 13.1：发布基线冻结 | 固定版本、OpenAPI、迁移、依赖、配置和兼容窗口 | 代码完成，待远端门禁 | 后端、Web、OpenAPI client、Rust workspace、Tauri 和锁文件已统一为 `1.0.0`；migration head 保持 `20260804_0026` | 推送后完成同提交 CI 与候选工件核对 |
+| Sprint 13.1：发布基线冻结 | 固定版本、OpenAPI、迁移、依赖、配置和兼容窗口 | 代码与远端门禁完成 | 候选代码 `8c54c96e12f` 已统一后端、Web、OpenAPI client、Rust workspace、Tauri 和锁文件为 `1.0.0`；migration head 保持 `20260804_0026`；同 SHA CI 全绿 | 保持候选冻结，生产前置关闭前不追加未经验证的代码 |
 | Sprint 13.2：生产环境前置条件 | DNS、HTTPS、证书、Secret、OIDC/LDAP、MinIO 镜像和监控接收端 | 待生产环境 | Compose、TLS、OIDC、LDAP、监控和 Secret 注入代码已存在 | 真实 DNS/受信证书、真实身份源、受支持 MinIO 修复镜像、真实告警接收 |
 | Sprint 13.3：完整 UAT | 用户端、管理端、公开分享、权限、上传下载、身份、桌面同步全流程 | 清单冻结，待候选环境签字 | `docs/sprint13-release-readiness.md` 已按普通用户、空间角色、管理员、身份、外部分享、桌面和运维角色固定真实 UAT | 执行真实 gateway/API 流程、关闭缺陷并签字 |
 | Sprint 13.4：性能与稳定性 | 目标规模、长时间运行、并发、依赖故障、恢复和资源边界 | 自动门禁已补强，候选运行待执行 | target 各场景已强制必需指标和非零样本；既有 10,000 节点/100 万索引/1,000 万审计证据保留 | 对 `1.0.0` 执行 target、长期 soak、升级恢复耗时与 RPO/RTO 实测 |
-| Sprint 13.5：安全与供应链 | 代码、依赖、镜像、签名、SBOM、密钥和发布风险 | 代码门禁已补强，外部风险仍阻塞 | OpenAPI 已检测 type/format/enum 收窄；桌面运行时校验 Authenticode 固定签名者；现有 Bandit、pip-audit、Grype、SBOM 门禁保留 | 处理 MinIO Critical、最终扫描、风险接受和密钥轮换签字 |
+| Sprint 13.5：安全与供应链 | 代码、依赖、镜像、签名、SBOM、密钥和发布风险 | 代码门禁已补强，外部风险仍阻塞 | OpenAPI 已检测 type/format/enum 收窄；桌面运行时校验 Authenticode 固定签名者；现有 Bandit、pip-audit、Grype、SBOM 门禁保留 | 关闭 MinIO Critical；完成最终扫描、其他非阻断风险接受和密钥轮换签字 |
 | Sprint 13.6：升级、备份与回滚 | 版本升级、跨版本迁移、失败恢复、备份恢复、桌面更新回退 | 桌面主链路修复完成，演练待执行 | 更新清单强制携带当前客户端对应的上一版安装包；缺包阻止安装；关键恢复失败不写健康标记；watchdog 错误 fail-closed；CI 从 Git 历史构建并签名 `0.9.0` 回滚包 | 用候选工件执行服务端和桌面完整升级/回滚、形成 RPO/RTO 证据 |
-| Sprint 13.7：发布工件 | 镜像、Web 包、Windows 安装包、更新包、OpenAPI、SBOM、校验和 | 候选工件流水线已补齐，待 CI 产出 | 新增发布说明、工件清单工具与校验和；Windows artifact 将包含当前/回滚安装包、`latest.json`、OpenAPI、发布说明、公钥和证书 | 推送后核对 artifact；正式镜像 digest/SBOM 与全套 Release 工件仍待生产门禁 |
-| Sprint 13.8：正式发布收口 | 合并主分支、创建 tag/Release、部署、监控和试点交接 | 尚未开始 | 当前仓库仍无 Git tag，未发现 `v1.0.0` 发布工件 | `dev` 合并 `main`、创建 `v1.0.0`、发布 Release、完成试点交接和上线复盘 |
+| Sprint 13.7：发布工件 | 镜像、Web 包、Windows 安装包、更新包、OpenAPI、SBOM、校验和 | Windows 候选工件已产出并复验 | Artifact `8937081786` 包含当前/回滚安装包、`latest.json`、OpenAPI、发布说明、公钥、证书、`release-manifest.json` 和 `SHA256SUMS`；清单 commit/version/7 个角色与 ZIP SHA-256 已复验 | 正式后端/Web/Preview 镜像 digest、SBOM、最终扫描与完整 Release 工件仍待生产门禁 |
+| Sprint 13.8：正式发布收口 | 合并主分支、创建 tag/Release、部署、监控和试点交接 | 尚未开始 | 当前仓库仍无 Git tag 或正式 GitHub Release；现有 Actions candidate artifact 不等于正式发布 | `dev` 合并 `main`、创建 `v1.0.0`、发布 Release、完成试点交接和上线复盘 |
 
 ## 5. 当前验证状态
 
@@ -70,15 +70,16 @@
 | 发布清单工具 | `6 tests OK`；覆盖工件/校验和篡改、缺件、绝对路径、UNC 和大小写重复路径 |
 | 后端受影响 Ruff lint/format | 通过 |
 | Rust 定向门禁 | `drive-update` GNU check、3 tests、Clippy，`drive-desktop` GNU check/Clippy，workspace fmt 和 metadata 通过；9 个 package 均为 `1.0.0` |
-| CI 配置 | actionlint 通过；scope router `20 tests OK`；本次预计触发 backend/frontend/desktop/installer/rust-policy |
+| CI 配置 | actionlint 通过；scope router `20 tests OK` |
 | Git 差异检查 | `git diff --check` 通过 |
 | 未重复范围 | 未运行历史性能 target、全量 Playwright、全量 pytest、MinIO/备份恢复和无关桌面集合 |
-| 远端候选门禁 | 待本次提交推送后生成 |
+| 远端候选门禁 | `backend-ci` run `31019866714` 成功；changes/backend/frontend/rust-desktop/rust-policy/installer 成功，未受影响 Windows 部署与 MinIO jobs 按 scope 跳过 |
+| Windows 候选工件 | Artifact `8937081786`，ZIP SHA-256 `3cf32a39505014ec5b2affa7b9a170260f688f3a0060d9263684bfb36184b7aa`；当前包 `76a2dd8d...3e786`，回滚包 `2e848d8a...96ecc`；清单复验通过 |
 
 ## 6. 目前真正剩余的工作
 
 1. 处理受支持的 MinIO 修复镜像和最终供应链风险。
 2. 在真实网络完成 DNS、受信证书、OIDC/LDAPS 和监控通知验收。
-3. 推送当前 `1.0.0` 候选改动，确认本次 CI 和 Windows 候选工件全绿。
-4. 按 Sprint 13.3—13.6 执行真实候选环境的 UAT、soak、安全、升级、恢复、回滚和 RPO/RTO 签字。
-5. 外部阻塞全部关闭后，执行 `dev -> main`、创建 `v1.0.0` tag/Release，并完成试点交接。
+3. 使用已冻结的 `8c54c96e12f` 和 artifact `8937081786`，按 Sprint 13.3—13.6
+   执行真实候选环境的 UAT、soak、安全、升级、恢复、回滚和 RPO/RTO 签字。
+4. 外部阻塞全部关闭后，执行 `dev -> main`、创建 `v1.0.0` tag/Release，并完成试点交接。

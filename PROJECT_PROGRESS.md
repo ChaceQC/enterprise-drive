@@ -4,7 +4,9 @@
 
 ### 当前状态
 
-- 分支：`dev`；基线 HEAD 为 `a2ac96a`，当前 Sprint 13 候选改动待统一提交和推送。
+- 分支：`dev`；Sprint 13 候选代码提交
+  `8c54c96e12f925fe7e0a07bf3a6444e63f600044` 已推送到 `origin/dev`，同 SHA
+  远端 CI 与 Windows 候选工件均已验证。
 - 后端、Web、OpenAPI client、Rust workspace、Tauri、桌面契约及依赖锁文件已统一为
   `1.0.0`；migration head 保持 `20260804_0026`，OpenAPI 保持
   116 paths / 148 operations / 178 schemas。
@@ -30,7 +32,7 @@
   15 秒写入；本地操作恢复、传输恢复或已保存 watcher 启动失败时不写健康标记。
   watchdog 参数、回滚包或回滚启动失败会使 helper 进程以错误退出，不再吞错后启动
   普通桌面应用。
-- Windows CI 使用完整 Git 历史解析上一版本，本次候选将从 `899ee09` 构建
+- Windows CI 使用完整 Git 历史解析上一版本，本次候选已从 `899ee09` 构建
   `0.9.0` 回滚安装包；当前包和回滚包均执行 Authenticode、Ed25519、SHA-256 和
   固定签名者验证。
 - 新增 `.github/scripts/release_manifest.py`，生成并复验
@@ -52,8 +54,25 @@
   通过；`drive-desktop` GNU check/Clippy 通过；`cargo fmt --all --check` 通过。
 - 后端直接受影响 Ruff lint/format 通过；actionlint、CI scope 20 个用例和
   `git diff --check` 通过。
-- 本机 MSVC shell 仍缺少 `link.exe`，未重复执行已知会在链接阶段停止的 workspace
-  全集；MSVC、NSIS、真实 Authenticode 和回滚安装包由本次 Windows CI 验证。
+- [`backend-ci` run `31019866714`](https://github.com/ChaceQC/enterprise-drive/actions/runs/31019866714)
+  全绿：`changes`、`backend`、`frontend`、
+  `rust-desktop`、`rust-dependency-policy`、`windows-desktop-installer` 成功；
+  `windows-deployment`、`minio-image-policy`、`minio-supply-chain` 按 scope 跳过。
+  后端为 `458 passed, 2 warnings`；前端单元测试 `14 passed`，Playwright
+  `28 passed, 2 skipped`。
+- 本机 MSVC shell 仍缺少 `link.exe`，因此未重复执行已知会在链接阶段停止的
+  workspace 全集；远端 Windows runner 已完成 MSVC WinTrust 路径、当前/回滚 NSIS、
+  Authenticode、Ed25519、SHA-256 和固定签名者验证。
+- Windows artifact
+  [`8937081786`](https://github.com/ChaceQC/enterprise-drive/actions/runs/31019866714/artifacts/8937081786)：
+  `enterprise-drive-windows-8c54c96e12f925fe7e0a07bf3a6444e63f600044`，
+  ZIP SHA-256
+  `3cf32a39505014ec5b2affa7b9a170260f688f3a0060d9263684bfb36184b7aa`。
+  `release_manifest.py verify` 通过；manifest 为 `REL-005/1`、`1.0.0`、候选 commit，
+  7 个受管角色完整。当前安装包 SHA-256 为
+  `76a2dd8d8f8b7819f1ef8c5f8ab000118f43ee88b451795726dabb9a2ce3e786`，
+  `0.9.0` 回滚包 SHA-256 为
+  `2e848d8abdf15a0abd6eeabb6931946a05ddef4d3431c4116690dee4abf96ecc`。
 
 ### 阻塞与风险
 
@@ -65,11 +84,12 @@
 
 ### 下一步
 
-1. 统一审查并提交当前 Sprint 13 候选改动，推送 `dev`。
-2. 监控本次 `backend-ci`；只针对真实失败 job 定向修复，不重复无关测试。
-3. 下载并核对 Windows artifact 的当前/回滚安装包、更新清单、
-   `release-manifest.json` 和 `SHA256SUMS`。
-4. 在外部阻塞关闭并完成候选环境签字后，再合并 `main`、创建 `v1.0.0` tag 和
+1. 使用已冻结候选 commit 和 Windows artifact 执行角色 UAT、长期 soak、
+   `0.9.0 -> 1.0.0` 升级/回滚、恢复耗时与 RPO/RTO 实测。
+2. 采用受支持修复发行版或可审计补丁镜像关闭 MinIO Critical，并只运行其直接相关的
+   S3、备份恢复、SBOM/Grype 和迁移门禁。
+3. 在真实网络完成 DNS、受信证书、OIDC/LDAPS、告警接收与密钥责任签字。
+4. 外部阻塞关闭并完成候选环境签字后，再合并 `main`、创建 `v1.0.0` tag 和
    GitHub Release。
 
 ### 涉及文件

@@ -3,6 +3,9 @@
 发布日期：待正式发布门禁完成后确定
 候选版本：`1.0.0`
 候选分支：`dev`
+候选代码 commit：`8c54c96e12f925fe7e0a07bf3a6444e63f600044`
+候选 CI：[`backend-ci` run `31019866714`](https://github.com/ChaceQC/enterprise-drive/actions/runs/31019866714)（成功）
+Windows artifact：[`8937081786`](https://github.com/ChaceQC/enterprise-drive/actions/runs/31019866714/artifacts/8937081786)
 数据库 migration head：`20260804_0026`
 OpenAPI：116 paths / 148 operations / 178 schemas
 
