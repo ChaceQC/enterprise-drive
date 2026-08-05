@@ -4,18 +4,36 @@ import asyncio
 from datetime import datetime
 
 from opensearchpy import OpenSearch
-from opensearchpy.exceptions import NotFoundError
+from opensearchpy.exceptions import NotFoundError, RequestError
 
 from app.core.config import Settings
 from app.infrastructure.search.base import FileSearchDocument, SearchHit, SearchQuery, SearchResult
+
+_KEYWORD_FIELDS = (
+    "tenant_id",
+    "space_id",
+    "node_id",
+    "parent_id",
+    "owner_id",
+    "version_id",
+    "blob_id",
+    "mime_type",
+    "hash_algo",
+    "content_hash",
+    "acl_tokens",
+    "deny_acl_tokens",
+)
 
 
 class OpenSearchIndexAdapter:
     def __init__(self, *, settings: Settings) -> None:
         self.index_name = settings.opensearch_index_name
         self.client = OpenSearch(hosts=[settings.opensearch_url])
+        self._index_ready = False
+        self._index_lock = asyncio.Lock()
 
     async def upsert_file_document(self, document: FileSearchDocument) -> None:
+        await self._ensure_index()
         await asyncio.to_thread(
             self.client.index,
             index=self.index_name,
@@ -23,6 +41,19 @@ class OpenSearchIndexAdapter:
             body=document.to_opensearch(),
             refresh=False,
         )
+
+    async def _ensure_index(self) -> None:
+        if self._index_ready:
+            return
+        async with self._index_lock:
+            if self._index_ready:
+                return
+            await asyncio.to_thread(
+                _create_or_validate_index,
+                self.client,
+                self.index_name,
+            )
+            self._index_ready = True
 
     async def delete_file_document(self, *, tenant_id: str, node_id: str) -> None:
         await asyncio.to_thread(
@@ -51,6 +82,67 @@ class OpenSearchIndexAdapter:
             total=total_value,
             hits=[_parse_hit(hit) for hit in hits.get("hits", [])],
         )
+
+
+def _create_or_validate_index(client: OpenSearch, index_name: str) -> None:
+    try:
+        client.indices.create(
+            index=index_name,
+            body=_file_index_definition(),
+        )
+        return
+    except RequestError as exc:
+        if not _is_index_already_exists(exc):
+            raise
+
+    mapping = client.indices.get_mapping(index=index_name)
+    if not _has_compatible_mapping(mapping=mapping, index_name=index_name):
+        raise RuntimeError(f"OpenSearch 索引 mapping 不兼容，需要重建索引: {index_name}")
+
+
+def _file_index_definition() -> dict[str, object]:
+    return {
+        "mappings": {
+            "properties": {
+                **{field: {"type": "keyword"} for field in _KEYWORD_FIELDS},
+                "name": {"type": "text"},
+                "normalized_name": {"type": "text"},
+                "size_bytes": {"type": "long"},
+                "created_at": {"type": "date"},
+                "updated_at": {"type": "date"},
+                "is_deleted": {"type": "boolean"},
+                "content": {"type": "text"},
+            }
+        }
+    }
+
+
+def _is_index_already_exists(exc: RequestError) -> bool:
+    if exc.error == "resource_already_exists_exception":
+        return True
+    if not isinstance(exc.info, dict):
+        return False
+    error = exc.info.get("error")
+    return isinstance(error, dict) and error.get("type") == "resource_already_exists_exception"
+
+
+def _has_compatible_mapping(*, mapping: object, index_name: str) -> bool:
+    if not isinstance(mapping, dict):
+        return False
+    index_mapping = mapping.get(index_name)
+    if not isinstance(index_mapping, dict):
+        return False
+    mappings = index_mapping.get("mappings")
+    if not isinstance(mappings, dict):
+        return False
+    properties = mappings.get("properties")
+    if not isinstance(properties, dict):
+        return False
+    for field in _KEYWORD_FIELDS:
+        field_mapping = properties.get(field)
+        if not isinstance(field_mapping, dict) or field_mapping.get("type") != "keyword":
+            return False
+    return True
 
 
 def _is_index_not_found(exc: NotFoundError) -> bool:
