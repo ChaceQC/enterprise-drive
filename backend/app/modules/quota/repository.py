@@ -381,6 +381,9 @@ class QuotaRepository:
         self.session.add(ledger)
         return ledger
 
+    async def flush(self) -> None:
+        await self.session.flush()
+
     async def get_account_by_id_for_update(
         self,
         *,

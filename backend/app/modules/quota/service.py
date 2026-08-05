@@ -134,31 +134,37 @@ class QuotaService:
         if policy is not None:
             dimensions.append(("policy", policy.id, policy.limit_bytes))
 
-        # 维度顺序固定，所有扣减使用数据库原子 UPDATE，避免并发超配额。
+        prepared_dimensions: list[tuple[str, UUID, UUID]] = []
         for owner_type, owner_id, limit_bytes in dimensions:
-            await self.repository.ensure_account(
+            account = await self.repository.ensure_account(
                 tenant_id=tenant_id,
                 owner_type=owner_type,
                 owner_id=owner_id,
                 limit_bytes=limit_bytes,
             )
-            reserved_account_id = await self.repository.try_add_usage(
-                tenant_id=tenant_id,
-                owner_type=owner_type,
-                owner_id=owner_id,
-                delta_bytes=size_bytes,
-            )
-            if reserved_account_id is None:
-                raise quota_exceeded_error(owner_type)
+            prepared_dimensions.append((owner_type, owner_id, account.id))
             await self.repository.add_ledger(
                 tenant_id=tenant_id,
-                account_id=reserved_account_id,
+                account_id=account.id,
                 account_type=owner_type,
                 delta_bytes=size_bytes,
                 reason="file_version_created",
                 ref_type="file_version",
                 ref_id=version_id,
             )
+
+        # 先 flush 可回滚的 ledger，再按固定维度顺序执行原子 UPDATE。
+        # 配额不足时整个事务仍回滚；成功路径只在紧邻 commit 时持有共享账户行锁。
+        await self.repository.flush()
+        for owner_type, owner_id, account_id in prepared_dimensions:
+            reserved_account_id = await self.repository.try_add_usage(
+                tenant_id=tenant_id,
+                owner_type=owner_type,
+                owner_id=owner_id,
+                delta_bytes=size_bytes,
+            )
+            if reserved_account_id != account_id:
+                raise quota_exceeded_error(owner_type)
 
     async def release_file_usage(
         self,
