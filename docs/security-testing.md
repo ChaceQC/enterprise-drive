@@ -14,7 +14,7 @@
 - 审计分区/归档/外部 HMAC 投递、Outbox 错误分类、dead-letter 查询和幂等重放。
 - 备份 detached CMS 来源签名、完整包加密、离线副本和 Redis/OpenSearch 可移植迁移。
 - 用户上传内容的预览、正文抽取和对象存储处理。
-- PostgreSQL、Redis、OpenSearch、MinIO、Worker 与 gateway 的网络边界。
+- PostgreSQL、Redis、OpenSearch、SeaweedFS、Worker 与 gateway 的网络边界。
 - Python 依赖、静态代码模式、镜像和既有供应链门禁。
 
 ## 自动化门禁
@@ -31,7 +31,39 @@ uv run pip-audit --local --progress-spinner off
 - Bandit 阻断中危和高危结果。测试断言使用仓库测试规则检查，因此扫描跳过 `B101`。
 - Worker metrics 的 `0.0.0.0:9100` 只监听 Compose 内部网络，正式编排不发布宿主端口；代码只对这一行精确标注 `# nosec B104`。
 - `pip-audit` 审计当前项目虚拟环境中的实际锁定包，发现已知漏洞时返回非零状态。
-- MinIO Server/Client 继续使用现有 SBOM、Grype 和 Critical 基线门禁；其既有 Critical 基线没有因 Python 审计而消失。
+- SeaweedFS 使用固定 image/digest、SPDX SBOM 和 Grype 门禁；Critical 非零即阻断。
+  旧 MinIO `16/9` Critical 已通过正式运行时替换关闭，但历史报告仍保留用于解释迁移
+  决策。
+
+## 2026-08-05 SeaweedFS 对象存储替换
+
+正式 Compose 当前使用：
+
+```text
+chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602
+OCI revision: 875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa
+```
+
+当前安全边界：
+
+- `seaweedfs` 和一次性 `storage-init` 只加入 Compose 网络，不发布宿主端口。
+- `storage-init` 已验证签名 PUT/GET/DELETE、删除后 404、匿名 bucket/object 请求
+  拒绝，以及 CORS allow/deny；任一失败会阻止 API/Worker 启动。该一次性容器现只
+  注入 7 个 S3/TZ 变量，不继承数据库、Redis、Celery、管理员或审计密钥；最小环境
+  下的真实复测仍为 8 项全部通过。
+- 既有真实 S3 集成集合在 SeaweedFS 上为 `3 passed`。
+- 一次真实 MinIO→SeaweedFS 单对象迁移保持 size、SHA-256、Content-Type、用户
+  metadata 和 tags。
+- 新数据卷是 `seaweedfs-data`。旧 `minio-data` 只能由旧提交和固定 MinIO 镜像读取，
+  再通过 S3 迁移；禁止直接挂载给 SeaweedFS。
+- Windows backup/restore smoke `27 passed`；真实完整恢复已核对
+  `seaweedfs-data`、发布前校验、隔离 target 四依赖/全栈健康和对象恢复点，gateway
+  Host 探针缺陷已定向修复并验证。
+
+本地 Grype `v0.115.0` 扫描为 `0 Critical / 1 High`。High 为
+`GHSA-hrxh-6v49-42gf`，报告修复版本是 gRPC `1.82.1`；正式发布前须修复或由外部
+风险责任人签字接受。当前直接证据不包含新的远端 CI、全量数据迁移、升级/RPO-RTO、
+soak 或生产网络验收。
 
 ## 2026-07-31 首轮结果
 
@@ -82,7 +114,7 @@ DRIVE_LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
 
 该校验由 FastAPI、Celery Worker/beat、Alembic migration 和管理员 seed 的共同 `get_settings()` 路径触发。单元测试覆盖本机与公网正例、默认/示例 secret、无密码 URL、Wildcard、带凭据/路径端点、HTTP 公网 origin、非 443 S3、SameSite=None 和 secret 不回显。
 
-真实 Docker 负例确认弱 production 配置在联网前以退出码 1 阻断且不回显传入 secret；正例分别通过独立 PostgreSQL/认证 Redis/API/Worker 可观测性 smoke，以及根 Compose migration、seed、minio-init 和 API healthy 依赖链。两次隔离验证结束后相关容器、网络和卷均为 0。
+该阶段的真实 Docker 负例确认弱 production 配置在联网前以退出码 1 阻断且不回显传入 secret；正例分别通过独立 PostgreSQL/认证 Redis/API/Worker 可观测性 smoke，以及当时根 Compose 的 migration、seed、`minio-init` 和 API healthy 依赖链。两次隔离验证结束后相关容器、网络和卷均为 0；当前正式一次性服务已改为 `storage-init`。
 
 提交 `a52b4ce` 对应 GitHub Actions run `30661668693`，backend、Windows 部署、镜像策略和两个 MinIO supply-chain job 全部成功；CI 实际执行 188 个后端测试、新增安全扫描、observability Docker smoke 以及 runtime/preview 镜像构建。
 
@@ -143,7 +175,7 @@ DRIVE_LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
 - OIDC 只接受 Authorization Code + PKCE，state/nonce 一次消费，provider metadata issuer 必须匹配，ID token 只允许 RS256/ES256 并校验 issuer/audience/exp/iat/azp；回调返回路径来自 allowlist。
 - OIDC/LDAP secret 只通过 `env:VARIABLE_NAME` 解析，数据库和管理响应不保存或回显明文；空值、缺失值和未知引用按凭据不可用处理。
 - LDAP dry-run 不写核心用户/组织/绑定/cursor；full 缺失只影响当前 Source 的 LDAP 绑定，名称冲突进入冲突记录，目录 claim 消失不会删除仍由管理员手工保留的成员边。
-- gateway 是唯一宿主端口入口；API、Worker、PostgreSQL、Redis、OpenSearch 和 MinIO 不发布宿主端口。
+- gateway 是唯一宿主端口入口；API、Worker、PostgreSQL、Redis、OpenSearch 和 SeaweedFS 不发布宿主端口。
 - 文件、下载、上传完成、分享、预览和授权入口均重新读取 PostgreSQL 权限事实。
 - 用户可见 500 响应不返回内部异常、SQL、对象 key 或栈信息。
 
@@ -152,7 +184,9 @@ DRIVE_LOGIN_RATE_LIMIT_WINDOW_SECONDS=60
 - 内部 Range 代理、水印和关键字 DLP 已完成；外链代理、legal hold、高级内容分类和复杂 DLP 继续归远期 `GOV-001`。
 - Sprint 11 代码侧安全治理与本地 route matrix、OpenAPI/client、前端 E2E、migration 门禁已通过；最终提交为 `e6b4f6d`，`backend-ci` run `30922718148` 成功。frontend 已在 run `30919983108` 成功，Rust/MinIO/Windows/安装包已在 run `30917345858` 成功。
 - 正式试点前使用真实企业 OIDC provider 和 LDAPS 目录执行 discovery/JWKS 轮换、错误回调、RP logout、目录分页/超时/证书链、冲突和离职演练；本地 fake adapter 测试不能替代该外部证据。
-- 正式上线前处理 MinIO Server/Client 既有 Critical 基线，并完成真实公网 DNS、受信 TLS、外部扫描和恢复演练。
+- 正式上线前完成 SeaweedFS `GHSA-hrxh-6v49-42gf` 的修复或外部风险接受、最终
+  SPDX/Grype、MinIO→SeaweedFS 全量 S3 迁移，以及真实公网 DNS、受信 TLS、外部
+  扫描和正式升级/RPO-RTO 演练。
 
 ## 2026-08-04 Sprint 12 治理与保管链
 

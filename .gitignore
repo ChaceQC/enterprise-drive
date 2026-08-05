@@ -42,6 +42,7 @@ desktop/apps/drive-desktop/src-tauri/gen/
 /storage/
 /uploads/
 /minio-data/
+/seaweedfs-data/
 /postgres-data/
 /redis-data/
 /opensearch-data/
@@ -49,6 +50,7 @@ backend/data/
 backend/storage/
 backend/uploads/
 backend/minio-data/
+backend/seaweedfs-data/
 backend/postgres-data/
 backend/redis-data/
 backend/opensearch-data/

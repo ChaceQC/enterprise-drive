@@ -29,19 +29,31 @@ services:
       timeout: 5s
       retries: 5
 
-  minio:
-    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
-    command: server /data --console-address ":9001"
+  seaweedfs:
+    image: chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602
+    command:
+      - mini
+      - -dir=/data
+      - -s3.port=9000
+      - -s3.allowedOrigins=http://localhost:15173
+      - -s3.iam=false
+      - -s3.allowDeleteBucketNotEmpty=false
+      - -s3.port.iceberg=0
+      - -admin.ui=false
+      - -webdav=false
+      - -filer.exposeDirectoryData=false
+      - -filer.disableDirListing=true
+      - -master.telemetry=false
     environment:
-      MINIO_ROOT_USER: drive-dev
-      MINIO_ROOT_PASSWORD: drive-dev-password
+      AWS_ACCESS_KEY_ID: drive-dev
+      AWS_SECRET_ACCESS_KEY: drive-dev-password
+      S3_BUCKET: enterprise-drive
     ports:
       - "127.0.0.1:19000:9000"
-      - "127.0.0.1:19001:9001"
     volumes:
-      - minio-data:/data
+      - seaweedfs-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD", "curl", "-f", "http://localhost:9333/cluster/healthz"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -67,5 +79,5 @@ services:
 volumes:
   postgres-data:
   redis-data:
-  minio-data:
+  seaweedfs-data:
   opensearch-data:

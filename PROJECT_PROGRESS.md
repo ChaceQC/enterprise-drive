@@ -1,5 +1,110 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-05 Sprint 13 对象存储运行时替换
+
+### 当前状态
+
+- 分支：`dev`；正式对象存储替换已完成实现与本地直接验证，最终 commit、push 和受影响
+  远端 CI 由本轮收尾统一确认。
+- 正式 `compose.windows.yml` 使用
+  `chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602`
+  （OCI revision `875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa`）、`seaweedfs`、
+  一次性 `storage-init` 和新的 `seaweedfs-data`。
+- 旧 MinIO Server/Client `16/9` Critical 已在正式运行时替换层面关闭；旧
+  `minio-data` 仍是 legacy 原始卷，不能直接挂载给 SeaweedFS。
+
+### 已完成
+
+- 正式和本地依赖 Compose 已切换到 SeaweedFS；S3 内部端点为
+  `http://seaweedfs:9000`，外部预签名端点仍由 gateway 提供。
+- `storage-init` 使用 `scripts.object_storage_admin init` 创建或确认 bucket，并
+  fail-closed 验证签名 PUT/GET/DELETE、删除后 404、匿名 bucket/object 拒绝及
+  CORS allow/deny；API/Worker 依赖该一次性服务成功。该一次性容器只注入 7 个
+  S3/TZ 变量，不再继承数据库、Redis、Celery、管理员或审计密钥。
+- 对象存储 CI scope、immutable image policy、SPDX SBOM/Grype job 和真实 S3 测试
+  命名已从 MinIO 专用边界改为通用 object-storage/SeaweedFS 边界。
+- Windows 备份脚本和清单逻辑卷名称已切换为 `seaweedfs-data`，目标归档名为
+  `volumes/seaweedfs-data.tar.gz`；真实 source→backup→verify→隔离 target
+  `-FullStackRestore` 已完成 PostgreSQL、Redis、OpenSearch、SeaweedFS、API、5 个
+  Worker、beat 和 gateway 健康及恢复点对账。
+- 新增 `backend/scripts/object_storage_admin.py`，支持 storage init、inventory、
+  probe 和 MinIO→SeaweedFS S3 级迁移；apply 前必须完整检测且不存在未完成
+  multipart，并逐对象校验 size、SHA-256、Content-Type、用户 metadata 和 tags。
+- 新增 `docs/object-storage-seaweedfs-migration.md`，固定“旧提交/旧镜像读取
+  `minio-data`、新 `seaweedfs-data`、跨实现只走 S3”的迁移与回退边界。
+
+### 验证
+
+- 既有真实 S3 集成集合：`3 passed`。
+- 正式 server 的 `storage-init` 全部检查通过。
+- 固定 `4.40` 镜像的实际 `/entrypoint.sh server` 会注入
+  `-dir=/data -volume.max=0 -master.volumeSizeLimitMB=1024`；容器进程、日志和卷内容均
+  确认 master/filer/volume 数据写入挂载的 `/data`，容量不受默认 8 卷上限约束。
+- 真实 MinIO→SeaweedFS 单对象迁移通过，size、SHA-256、Content-Type、用户
+  metadata 和 tags 均保持一致。
+- Windows backup/restore smoke 为 `27 passed`。真实完整恢复已确认
+  `seaweedfs-data` 归档、发布前 `backup-verify`、恢复后的 `storage-init` 8 项检查
+  和原 bucket/object 保持；末尾 gateway 请求因 IP Host 命中 Nginx `444`，现已显式
+  传入 `Host=$env:DRIVE_SERVER_NAME`，并用真实模板定向验证 `healthz/readyz=200`。
+- 最小环境收口后的真实 `storage-init` 再验证为 8 项全部通过、
+  `bucket_created=true`；测试 project 的容器和卷清理后均为 0。备份恢复集成同时
+  固定并恢复 `DRIVE_S3_ENDPOINT_URL=http://seaweedfs:9000` 与
+  `DRIVE_S3_REGION=us-east-1`，不受调用进程中的迁移端点污染。
+- 本地 Grype `v0.115.0`：`0 Critical / 1 High`。High 为
+  `GHSA-hrxh-6v49-42gf`，报告修复版本为 gRPC `1.82.1`。
+- 本轮遵循“不重复测试”：没有重跑已通过的全量 pytest、Playwright、历史性能
+  target 或无关 Rust/桌面集合；完整备份恢复主流程只执行一次，最后失败项仅做
+  gateway Host 探针的定向修复和复测。
+
+### 尚未验证或签字
+
+- 旧 MinIO 全量对象的 dry-run/apply/inventory 对账。
+- 本轮对象存储替换提交对应的远端 CI、供应链 artifact 和 push 结果。
+- 真实 DNS/受信 TLS、OIDC/LDAPS、生产告警接收和密钥保管。
+- 角色 UAT、长期 soak、完整升级/回滚、恢复耗时和 RPO/RTO。
+
+### 风险
+
+- `GHSA-hrxh-6v49-42gf` 必须在正式发布前修复，或由外部风险责任人记录可达性、
+  补偿控制、责任人、到期日和升级计划后签字接受。
+- 单对象迁移证明代表性路径可工作，不替代全量对象、未完成 multipart 和长期运行
+  验证；本次恢复兼容演练也不替代生产 RPO/RTO 与升级回滚签字。
+- 旧 `minio-data` 与新 `seaweedfs-data` 的原始格式不可互换；直接挂载、改名或原地
+  复用会绕过 S3 语义与 inventory 对账。
+
+### 下一步
+
+1. 只运行对象存储替换直接影响的最终 SBOM/Grype/Compose/CI 门禁；失败后只重跑
+   实际失败项。
+2. 按 `docs/object-storage-seaweedfs-migration.md` 对代表性及最终全量旧数据执行
+   S3 级迁移和 inventory 对账。
+3. 完成 SeaweedFS High 风险处理、UAT、soak、升级/回滚、RPO/RTO 和外部环境签字。
+4. 全部门禁通过后才执行 `dev -> main -> v1.0.0 tag/Release`。
+
+### 涉及文件
+
+- `compose.windows.yml`
+- `.env.windows.example`
+- `backend/docker-compose.yml`
+- `backend/scripts/object_storage_admin.py`
+- `backend/tests/test_storage_s3_integration.py`
+- `backend/tests/test_object_storage_admin.py`
+- `.github/workflows/backend-ci.yml`
+- `.github/scripts/ci_scope.py`
+- `deploy/windows/`
+- `docs/object-storage-seaweedfs-migration.md`
+- `docs/minio-security-risk.md`
+- `docs/deployment-windows-docker.md`
+- `docs/sprint13-release-readiness.md`
+- `docs/release-v1.0.0.md`
+- `docs/security-testing.md`
+- `AGENT.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_STAGE_STATUS.md`
+- `README.md`
+- `backend/README.md`
+- `企业网盘开发者技术计划书.md`
+
 ## 2026-08-05 Sprint 13 v1.0.0 候选发布收口
 
 ### 当前状态

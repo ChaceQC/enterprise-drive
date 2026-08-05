@@ -855,13 +855,13 @@ function Assert-TlsConfiguration {
                 ForEach-Object { [string]$_ } |
                 Sort-Object -Unique
         )
-        [string[]]$MinioCorsOrigins = @(
-            (Get-ConfigValue -Name "MINIO_CORS_ALLOWED_ORIGIN").Split(",") |
+        [string[]]$StorageCorsOrigins = @(
+            (Get-ConfigValue -Name "DRIVE_S3_CORS_ALLOWED_ORIGINS").Split(",") |
                 ForEach-Object { $_.Trim() } |
                 Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
                 Sort-Object -Unique
         )
-        foreach ($Origin in $MinioCorsOrigins) {
+        foreach ($Origin in $StorageCorsOrigins) {
             $OriginUri = $null
             if (
                 $Origin -eq "*" -or
@@ -876,15 +876,15 @@ function Assert-TlsConfiguration {
                 -not [string]::IsNullOrEmpty($OriginUri.Query) -or
                 -not [string]::IsNullOrEmpty($OriginUri.Fragment)
             ) {
-                throw "Every MINIO_CORS_ALLOWED_ORIGIN entry must be an explicit HTTPS origin."
+                throw "Every DRIVE_S3_CORS_ALLOWED_ORIGINS entry must be an explicit HTTPS origin."
             }
         }
-        if ($MinioCorsOrigins.Count -ne $CorsOriginTexts.Count) {
-            throw "MINIO_CORS_ALLOWED_ORIGIN must exactly match DRIVE_CORS_ORIGINS as a comma-separated origin list."
+        if ($StorageCorsOrigins.Count -ne $CorsOriginTexts.Count) {
+            throw "DRIVE_S3_CORS_ALLOWED_ORIGINS must exactly match DRIVE_CORS_ORIGINS as a comma-separated origin list."
         }
         foreach ($Origin in $CorsOriginTexts) {
-            if ($Origin -notin $MinioCorsOrigins) {
-                throw "MINIO_CORS_ALLOWED_ORIGIN must exactly match DRIVE_CORS_ORIGINS as a comma-separated origin list."
+            if ($Origin -notin $StorageCorsOrigins) {
+                throw "DRIVE_S3_CORS_ALLOWED_ORIGINS must exactly match DRIVE_CORS_ORIGINS as a comma-separated origin list."
             }
         }
 
@@ -892,7 +892,7 @@ function Assert-TlsConfiguration {
             DRIVE_SECRET_KEY = 32
             POSTGRES_PASSWORD = 16
             REDIS_PASSWORD = 16
-            MINIO_ROOT_PASSWORD = 16
+            DRIVE_S3_SECRET_ACCESS_KEY = 16
             OPENSEARCH_INITIAL_ADMIN_PASSWORD = 16
             DRIVE_ADMIN_PASSWORD = 16
         }
@@ -1639,7 +1639,7 @@ try {
                     "--wait",
                     "--wait-timeout", "180",
                     "api",
-                    "minio"
+                    "seaweedfs"
                 )
                 Enable-TlsComposeMode
                 Invoke-Compose -Arguments @(

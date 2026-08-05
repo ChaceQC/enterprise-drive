@@ -26,13 +26,13 @@
 | `baseline` | 1,000 | 10 | 60s | 单机基准 |
 | `target` | 10,000 | 50 | 300s | 显式目标规模演练，默认不执行 |
 
-`target` 表示 API fixture 规模档位；搜索和审计门禁还必须同时加载并在报告中确认 100 万 OpenSearch 文档与 1,000 万审计日志。2026-08-03 的最终报告已满足这三个数据条件。后续重跑仍需确认 Docker Desktop 资源、数据库容量、MinIO/OpenSearch 磁盘和清理窗口。
+`target` 表示 API fixture 规模档位；搜索和审计门禁还必须同时加载并在报告中确认 100 万 OpenSearch 文档与 1,000 万审计日志。2026-08-03 的最终报告已满足这三个数据条件。后续重跑仍需确认 Docker Desktop 资源、数据库容量、SeaweedFS/OpenSearch 磁盘和清理窗口。
 
 ## 目标规模数据生成器
 
 `performance.target_data` 负责准备、检查和清理 BE-029 的大规模基准数据，不会构建、拉取或启动任何服务。它把 OpenSearch 文档和审计日志分成独立阶段，使用确定性 ID、专属 `be029-*` index、专属审计 action、批量 checkpoint 和原子 state JSON，进程中断后可从上一个批次继续。
 
-`performance.runner --scenario upload_complete` 会真实执行初始化、part presign、无 Cookie 的预签名 MinIO PUT、complete 和节点清理。测试环境请求带 `X-Drive-Benchmark: BE-029` 时，complete 响应增加 `Server-Timing` 的 `storage_complete`、`hash_validation` 和 `final_object` 分段；报告中的 `upload_complete_api_without_storage_merge` 为端到端响应时间扣除对象存储合并段后的指标。预签名数据面使用 `trust_env=false`，并把每个用户的首个连接 warm-up 单独记录。runner 的 `--warmup-seconds` 会在所有用户启动后等待指定时间并重置 Locust 统计；最终 target 使用 `--warmup-seconds 5`，避免把连接和 worker 冷启动误算为稳态样本。
+`performance.runner --scenario upload_complete` 会真实执行初始化、part presign、无 Cookie 的预签名 S3 PUT、complete 和节点清理。测试环境请求带 `X-Drive-Benchmark: BE-029` 时，complete 响应增加 `Server-Timing` 的 `storage_complete`、`hash_validation` 和 `final_object` 分段；报告中的 `upload_complete_api_without_storage_merge` 为端到端响应时间扣除对象存储合并段后的指标。预签名数据面使用 `trust_env=false`，并把每个用户的首个连接 warm-up 单独记录。runner 的 `--warmup-seconds` 会在所有用户启动后等待指定时间并重置 Locust 统计；最终 target 使用 `--warmup-seconds 5`，避免把连接和 worker 冷启动误算为稳态样本。SeaweedFS 替换后的长期 soak/target 仍需按 Sprint 13 清单重新执行。
 
 先用小批次验证连接和清理路径：
 

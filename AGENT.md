@@ -8,7 +8,7 @@
 - 开发和正式部署宿主机统一以 Windows 11 为基线。
 - 正式部署使用 Docker Desktop 的 WSL2 后端和 Linux containers，仓库根目录 `compose.windows.yml` 是唯一正式编排入口；`backend/docker-compose.yml` 仅保留为本地依赖开发清单。
 - `deploy/windows/manage.ps1 up` 默认只能使用已经存在的本地镜像，必须带 `--no-build --pull never`；镜像拉取和项目镜像构建要作为独立、显式、可观察的步骤执行，只有用户明确执行 `up -Build` 时才允许构建，禁止把构建、下载、全栈启动和备份恢复测试串成一个黑盒命令。
-- 正式部署的 Nginx gateway 运行在 `compose.windows.yml` 中，并且是唯一允许发布宿主端口的服务；默认本机入口由 gateway 发布 API `18080` 和 S3 外部端点 `19000`。公网模式使用 `manage.ps1 -Tls`、ACME HTTP-01 bootstrap、Certbot 证书卷和 TLS Nginx 模板映射 `80/443`；启用前必须配置真实 DNS、受信证书邮箱、HTTPS 外部端点、CORS、Trusted Hosts 和 Secure Cookie，并完成双域名实测。API、Worker、PostgreSQL、Redis、OpenSearch、MinIO API/Console 等内部服务只加入 Compose 网络。
+- 正式部署的 Nginx gateway 运行在 `compose.windows.yml` 中，并且是唯一允许发布宿主端口的服务；默认本机入口由 gateway 发布 API `18080` 和 S3 外部端点 `19000`。公网模式使用 `manage.ps1 -Tls`、ACME HTTP-01 bootstrap、Certbot 证书卷和 TLS Nginx 模板映射 `80/443`；启用前必须配置真实 DNS、受信证书邮箱、HTTPS 外部端点、CORS、Trusted Hosts 和 Secure Cookie，并完成双域名实测。API、Worker、PostgreSQL、Redis、OpenSearch 和 SeaweedFS S3 等内部服务只加入 Compose 网络。
 - 可选监控统一使用根 Compose 的 `monitoring` profile；Prometheus、Alertmanager、Grafana 不发布宿主端口，Grafana 只能由 gateway `/grafana/` 代理。正式 `up -Monitoring` 必须拒绝示例 Grafana 密码、仓库内示例 webhook 和 localhost webhook。
 - 后端技术基线：Python 3.12+、uv、FastAPI、SQLAlchemy 2.x、PostgreSQL 16+、Redis、S3 兼容对象存储、OpenSearch、Celery。
 - 二期桌面客户端技术基线：Rust stable、Cargo workspace、Tauri 2；Windows 11 优先交付，再评估 macOS 和 Linux。同步引擎、传输队列、本地索引、文件系统监听、凭据存储和更新签名校验必须由 Rust 实现，界面层不得成为同步状态的事实来源。
@@ -19,7 +19,7 @@
 - 代码实现必须服务于《企业网盘开发者技术计划书.md》的架构设计、数据模型、接口契约、安全策略和开发里程碑。
 - 一期目标是可试点上线的企业网盘后端，不要为了演示效果牺牲权限、审计、上传下载一致性和部署安全。
 - Rust 桌面客户端在一期后端与 Sprint 6 上线治理闭环后进入实现，默认目录为 `desktop/`。桌面端开工前必须先固定设备会话、增量变更游标、删除 tombstone、版本前置条件和冲突处理等后端契约，不得通过高频全量扫描模拟同步协议。
-- 项目正式文件传输契约使用 `Drive Transfer Protocol v1`（线协议标识 `DTP/1`）：控制面使用版本化 HTTPS API，数据面使用短期预签名 HTTPS 直达 MinIO/S3，上传复用秒传、multipart、断点状态、幂等 complete/abort 和服务端 SHA-256，下载使用短期签名与 HTTP Range；禁止自研 TCP/UDP、TLS、QUIC、私有加密或可靠传输层。协议规范以 `docs/drive-transfer-protocol-v1.md` 为准。
+- 项目正式文件传输契约使用 `Drive Transfer Protocol v1`（线协议标识 `DTP/1`）：控制面使用版本化 HTTPS API，数据面使用短期预签名 HTTPS 直达 S3 兼容对象存储，上传复用秒传、multipart、断点状态、幂等 complete/abort 和服务端 SHA-256，下载使用短期签名与 HTTP Range；禁止自研 TCP/UDP、TLS、QUIC、私有加密或可靠传输层。协议规范以 `docs/drive-transfer-protocol-v1.md` 为准。
 - Windows 备份、校验和恢复使用的临时 Docker 容器必须统一设置 CPU、memory、memory-swap 和 PID 上限，默认使用低压缩等级并禁止隐式拉取镜像；真实集成测试必须先执行本地镜像 preflight，默认只启动恢复后的数据服务，完整 target 全栈恢复只能通过显式开关执行。
 - Windows 备份轮换只处理目录名、manifest ID 和 checksum 均通过的托管备份，必须同时保留配置的最少份数和保留期内备份；周期恢复演练使用随机隔离 Compose project，结束后必须确认 target 容器/卷为零，并把成功或失败 JSON 写到仓库外 restricted ACL 目录。
 - Web 页面必须使用生成的 TypeScript API client、服务端权限枚举和统一错误码；前端路由守卫、按钮隐藏、浏览器缓存和本地状态只用于体验，不得复制权限、容量、分享、版本或生命周期业务规则。
@@ -35,7 +35,7 @@
 - 如果暂时采用轻量自研实现，必须在 `PROJECT_PROGRESS.md` 或相关 README 中标明原因、适用范围、已知限制和替换为成熟库或开源方案的触发条件。
 - 运行后端应在 `backend` 目录内使用 `uv run ...`；如果项目尚未创建 `backend` 目录，应先按计划书建立工程结构。
 - 端口、域名、数据库连接、Redis、对象存储、OpenSearch、CORS、Trusted Host、上传策略、API 地址等环境相关配置必须放在独立配置文件或环境变量中，不得硬编码在业务代码或启动脚本里。
-- 公网部署是目标形态。当前代码同时保留 gateway 本机 HTTP `18080/19000` 基线，并提供 ACME bootstrap、证书持久卷、TLS server block、HTTP 到 HTTPS 跳转、`80/443` Host 分流和续期热重载命令；真实公网环境仍必须完成受信证书签发、续期任务注册和 API/存储双域名 HTTPS 验收。不能为 PostgreSQL、Redis、OpenSearch、MinIO API/Console、FastAPI 调试端口或私有上传目录配置宿主端口映射。
+- 公网部署是目标形态。当前代码同时保留 gateway 本机 HTTP `18080/19000` 基线，并提供 ACME bootstrap、证书持久卷、TLS server block、HTTP 到 HTTPS 跳转、`80/443` Host 分流和续期热重载命令；真实公网环境仍必须完成受信证书签发、续期任务注册和 API/存储双域名 HTTPS 验收。不能为 PostgreSQL、Redis、OpenSearch、SeaweedFS S3、FastAPI 调试端口或私有上传目录配置宿主端口映射。
 - 不要把临时方案伪装成最终方案；临时实现必须在进度记录中标明原因、影响范围和后续处理。
 - 实现过程中必须实时更新受影响文档，至少包括 `README.md`、`PROJECT_PLAN.md`、`PROJECT_PROGRESS.md`、`AGENT.md`、`docs/deployment-windows-docker.md` 和相关子目录 README；项目计划以《企业网盘开发者技术计划书.md》为准，可在 `PROJECT_PLAN.md` 中维护执行版摘要。
 
@@ -60,7 +60,7 @@
 - 初始仓库优先创建为私有仓库，确认可公开后再调整可见性。
 - 每次完成可验证改动后必须 commit。
 - 每次 commit 后必须 push 到 GitHub。
-- 正式 tag/Release 必须满足对应版本的生产证书、依赖/镜像风险和恢复门禁；当前 MinIO blocker 未解除前不得创建 `v1.0.0` tag 或 GitHub Release。
+- 正式 tag/Release 必须满足对应版本的生产证书、依赖/镜像风险和恢复门禁。旧 MinIO `16/9` Critical 已由 SeaweedFS 正式运行时替换关闭，Windows 备份恢复兼容也已通过；但 SeaweedFS 的剩余 High 风险接受、最终 SBOM/Grype、全量迁移、UAT、soak、升级/RPO-RTO 和生产签字未完成前仍不得创建 `v1.0.0` tag 或 GitHub Release。
 - 提交前必须检查 `git status`，避免混入无关改动。
 - 提交前必须先检查本次改动是否影响 `README.md`、`PROJECT_PLAN.md`、`PROJECT_PROGRESS.md`、`AGENT.md`、《企业网盘开发者技术计划书.md》或子目录 README；受影响文档未同步时，不得先提交代码。
 - 必须维护 `.gitignore`，禁止提交 `.env`、密钥、证书私钥、依赖目录、构建产物、上传文件、对象存储数据目录、数据库数据目录、OpenSearch 数据目录、日志和备份文件。
@@ -226,7 +226,7 @@ uv run mypy app
 - 文件名来自元数据 `node.name`，不能来自对象存储 key。
 - S3 multipart ETag 不是文件 MD5，不能把它当内容完整性哈希。
 - 对象存储适配必须通过 `StorageAdapter` 或等价协议隔离，业务模块不得直接绑定具体 SDK。
-- 默认对象存储适配使用非云厂商专有的开源 S3 兼容客户端，例如 MinIO Python SDK；业务模块只能依赖 `StorageAdapter` 协议，不得直接 import 具体 SDK。
+- 正式服务端使用固定 digest 的 SeaweedFS `4.40` 提供 S3 兼容数据面；后端当前继续使用 MinIO Python SDK 作为通用 S3 客户端。业务模块只能依赖 `StorageAdapter` 协议，不得直接 import 或绑定具体服务端实现。
 - 若对象存储 SDK 缺少公开 multipart API，只允许在 `infrastructure` 适配层集中封装必要的客户端细节，并在审计或进度文档中记录适用范围、风险和替换触发条件。
 
 ## 11. 上传下载规则
@@ -331,8 +331,8 @@ uv run mypy app
 - 登录失败、初始化上传、分片签名、下载、外链访问和搜索必须有限流策略。
 - CORS、Trusted Host、Cookie、CSRF、限流必须按公网部署设计。
 - `Settings` 必须在 `DRIVE_ENVIRONMENT=production` 时自行拒绝 debug、关闭限流、示例或过短 secret、无强密码连接 URL、Wildcard Trusted Hosts、带凭据/路径的公共端点，以及非回环 HTTP CORS/S3 端点或未启用 Secure Cookie 的公网配置；该应用内门禁不能只依赖宿主 `manage.ps1`。
-- 公网 TLS 管理入口必须拒绝回环或非 IPv4 bind、示例密钥、过短或 `${...}` 间接插值的关键 secret/连接 URL、数据库/Redis URL 与独立密码不一致、Wildcard Trusted Hosts、HTTP API CORS origin、与 API CORS 不一致或非 HTTPS 的 MinIO CORS、带凭据/非 443 的 S3 外部端点和示例 Certbot 邮箱，不能仅因证书配置存在就允许绑定 `0.0.0.0:80/443`。
-- 正式环境只允许 Compose 内的 Nginx gateway 发布宿主端口；默认本机为 HTTP `18080/19000`，公网模式通过已实现的 TLS 配置映射 `80/443`，但必须先完成真实 DNS、证书和 Host 分流验证。应用容器、数据库、Redis、OpenSearch、MinIO API/Console 等服务只监听 Compose 内部网络。
+- 公网 TLS 管理入口必须拒绝回环或非 IPv4 bind、示例密钥、过短或 `${...}` 间接插值的关键 secret/连接 URL、数据库/Redis URL 与独立密码不一致、Wildcard Trusted Hosts、HTTP API CORS origin、与 API CORS 不一致或非 HTTPS 的 `DRIVE_S3_CORS_ALLOWED_ORIGINS`、带凭据/非 443 的 S3 外部端点和示例 Certbot 邮箱，不能仅因证书配置存在就允许绑定 `0.0.0.0:80/443`。
+- 正式环境只允许 Compose 内的 Nginx gateway 发布宿主端口；默认本机为 HTTP `18080/19000`，公网模式通过已实现的 TLS 配置映射 `80/443`，但必须先完成真实 DNS、证书和 Host 分流验证。应用容器、数据库、Redis、OpenSearch 和 SeaweedFS S3 等服务只监听 Compose 内部网络。
 
 ## 17. 容量与配额
 
@@ -386,7 +386,7 @@ uv run mypy app
 - 后端类型：`uv run mypy app`。
 - 后端测试：`uv run pytest` 或相关模块测试。
 - 数据库：检查 Alembic migration 可执行，必要时从空库升级到 head。
-- 集成：使用 testcontainers 或 Docker Compose 拉起 PostgreSQL、Redis、MinIO、OpenSearch。
+- 集成：使用 testcontainers 或 Docker Compose 拉起 PostgreSQL、Redis、SeaweedFS S3、OpenSearch。
 - 上传下载：验证秒传、multipart、断点续传、幂等 complete、Range 下载。
 - 权限：验证继承、拒绝优先、空间角色、目录 ACL、越权下载失败。
 - 审计：验证成功和失败操作都写入 audit log，outbox 投递失败可重试。
@@ -404,7 +404,7 @@ CI 基线：
 
 ```text
 checkout
-  -> changes（按变更路径选择 backend / desktop / installer / windows / MinIO / Rust policy；
+  -> changes（按变更路径选择 backend / desktop / installer / windows / object storage / Rust policy；
               CI workflow/router 或文档变更只保留 changes 轻量校验）
   -> backend：
        setup uv -> uv sync --frozen --all-extras --dev
@@ -412,7 +412,7 @@ checkout
        -> bandit（中危/高危代码模式）
        -> pip-audit（已锁定 Python 依赖）
        -> mypy app
-       -> PostgreSQL/MinIO -> Alembic -> pytest
+       -> PostgreSQL/SeaweedFS -> Alembic -> pytest
        -> Compose/TLS/监控/Nginx 校验 -> Docker smoke/image build
   -> desktop：
        cargo fmt -> cargo test -> cargo clippy --no-deps
@@ -424,14 +424,14 @@ checkout
        -> push 或安装包相关变更时构建 Tauri/NSIS 并验证签名更新工件
   -> windows：
        PowerShell 5.1 parser + TLS/backup-restore/governance guard checks
-  -> MinIO：
-       immutable image policy -> 一次 SBOM/Grype runner 扫描 Server + Client
+  -> object storage：
+       immutable SeaweedFS image policy -> SPDX SBOM -> Grype Critical 阻断
   -> Rust policy：
        cargo-deny advisories/licenses/bans/sources
 ```
 
 - `push` 与 `pull_request` 使用同一并发组，新提交会取消同分支旧运行，避免重复消耗 runner。
-- MinIO/Rust 依赖供应链门禁还会在每周定时任务执行；`workflow_dispatch` 运行完整 scope。
+- SeaweedFS/Rust 依赖供应链门禁还会在每周定时任务执行；`workflow_dispatch` 运行完整 scope。
 - 变更路由器本身位于 `.github/scripts/ci_scope.py`，必须有回归测试；只修改文档、CI workflow/router 或桌面 README 时只保留路由 job，不启动耗时门禁。
 
 Dockerfile 要求：
@@ -447,14 +447,14 @@ Dockerfile 要求：
 Windows Docker Compose 要求：
 
 - 仓库根目录 `compose.windows.yml` 是 Windows 11 正式部署的唯一编排入口；`backend/docker-compose.yml` 只用于开发机单独拉起依赖。
-- 正式编排至少包含 `gateway`、`api`、一次性 `migration`、一次性 `seed`、一次性 `minio-init`、按职责隔离的 Celery Worker、运行 Celery beat 的 `beat` 服务、PostgreSQL、Redis、MinIO 和 OpenSearch。
+- 正式编排至少包含 `gateway`、`api`、一次性 `migration`、一次性 `seed`、一次性 `storage-init`、按职责隔离的 Celery Worker、运行 Celery beat 的 `beat` 服务、PostgreSQL、Redis、SeaweedFS 和 OpenSearch。
 - `gateway` 是唯一发布宿主端口的服务；默认本机发布 HTTP `18080/19000`，公网模式由 `manage.ps1 -Tls` 切换为 `80/443` 并使用 ACME bootstrap/TLS 模板，bind 必须是 `0.0.0.0` 或其他非回环 IPv4 地址。其他常驻服务禁止配置 `ports`，Certbot 只通过 gateway 共享的 webroot 完成 HTTP-01，服务间通过 Compose 网络和服务名访问。
 - `.env.windows.example` 是正式环境变量模板，真实 `.env.windows` 不得提交。数据库、Redis、OpenSearch、Celery broker/result backend 使用内部服务 DNS。
 - API 使用可配置的 SQLAlchemy QueuePool；Celery Worker 因同步任务入口会通过 `asyncio.run()` 建立独立事件循环，必须在 Compose 中使用 `DRIVE_DATABASE_POOL_MODE=null`，禁止跨任务事件循环复用 asyncpg 连接池。
-- S3 必须区分容器内访问端点和浏览器可访问的外部端点：内部端点用于 API/Worker 访问 `http://minio:9000`；默认外部端点为 gateway 提供的 `http://localhost:19000`，公网 TLS 模式使用 `https://storage.example.com` 等独立 Host。外部端点不得使用 `/s3` 等 base path，也不能把内部服务名返回给浏览器；公网模式的 `MINIO_CORS_ALLOWED_ORIGIN` 必须与 `DRIVE_CORS_ORIGINS` 精确一致且只包含 HTTPS origin，禁止通配符和遗留 origin。
-- PostgreSQL、Redis、MinIO 和 OpenSearch 使用 named volumes；备份输出使用明确的 Windows 宿主目录或专用备份卷。Celery beat 当前把可重建 schedule 文件放在容器临时目录，不能把它当作任务事实来源。
+- S3 必须区分容器内访问端点和浏览器可访问的外部端点：内部端点用于 API/Worker 访问 `http://seaweedfs:9000`；默认外部端点为 gateway 提供的 `http://localhost:19000`，公网 TLS 模式使用 `https://storage.example.com` 等独立 Host。外部端点不得使用 `/s3` 等 base path，也不能把内部服务名返回给浏览器；公网模式的 `DRIVE_S3_CORS_ALLOWED_ORIGINS` 必须与 `DRIVE_CORS_ORIGINS` 精确一致且只包含 HTTPS origin，禁止通配符和遗留 origin。
+- PostgreSQL、Redis、SeaweedFS 和 OpenSearch 使用 named volumes；SeaweedFS 的逻辑卷固定为新的 `seaweedfs-data`。旧 `minio-data` 只能由创建它的旧提交和固定 MinIO 镜像读取，再通过 `scripts.object_storage_admin` 做 S3 级迁移；禁止把旧原始卷直接挂载给 SeaweedFS。备份输出使用明确的 Windows 宿主目录或专用备份卷。Celery beat 当前把可重建 schedule 文件放在容器临时目录，不能把它当作任务事实来源。
 - `deploy/windows/manage.ps1` 是宿主机管理入口，提供 `config`、`up`、`down`、`status`、`logs`、`backup`、`backup-verify`、`restore`、备份轮换/离线副本、隔离恢复演练、Redis/OpenSearch 可移植迁移、对应计划任务、`tls-init`、`tls-renew`、`tls-certificates`、TLS 续期计划任务和 `tls-validate-public`；生命周期命令可用 `-Monitoring` 启用监控 profile。构建使用 `up -Build`，公网操作使用 `-Tls`，删除卷必须显式使用 `down -Volumes`，并同步删除 TLS 续期、备份轮换和恢复演练计划任务。`tls-init` 必须保留已有 gateway 容器，用同一 service 的临时 one-off bootstrap 容器完成签发；签发失败时恢复原 gateway，不得把已有公网入口停在 bootstrap 或 stopped 状态。`tls-renew` 和计划任务注册必须确认 `DRIVE_TLS_CERT_NAME` 对应的 Certbot renewal lineage 存在，手工挂载或自签名证书不得伪装成可自动续期证书。`tls-validate-public` 必须拒绝非公网 DNS 结果，验证 HTTP `308`、HTTPS readiness、系统信任链和证书剩余天数，并保存记录。
-- `backup` 的输出根目录必须是仓库外的绝对专用目录，不得是卷根、仓库目录或仓库祖先；既有非空目录必须已经使用本项目 restricted ACL，脚本不得直接重写任意宽范围目录 ACL。正式备份默认要求 `Cert:\CurrentUser\My` 中的 Windows CMS 文档加密证书。脚本从 Compose JSON 读取真实 project、network、service image 和 physical volume name，记录 16 个无 profile 默认服务的实际容器 image ID，静默 gateway、API、beat、Worker 及相关依赖写入面，使用 PostgreSQL custom-format `pg_dump`，并归档停止状态的 MinIO、Redis、OpenSearch 和 TLS 证书卷；失败后必须恢复 source project 原运行、退出与健康状态，通过校验的 `.partial-*` staging 才能原子发布为正式备份目录。
+- `backup` 的输出根目录必须是仓库外的绝对专用目录，不得是卷根、仓库目录或仓库祖先；既有非空目录必须已经使用本项目 restricted ACL，脚本不得直接重写任意宽范围目录 ACL。正式备份默认要求 `Cert:\CurrentUser\My` 中的 Windows CMS 文档加密证书。脚本从 Compose JSON 读取真实 project、network、service image 和 physical volume name，记录 16 个无 profile 默认服务的实际容器 image ID，静默 gateway、API、beat、Worker 及相关依赖写入面，使用 PostgreSQL custom-format `pg_dump`，并归档停止状态的 SeaweedFS、Redis、OpenSearch 和 TLS 证书卷；失败后必须恢复 source project 原运行、退出与健康状态，通过校验的 `.partial-*` staging 才能原子发布为正式备份目录。
 - `backup` 和 `restore` 必须持有与 `up`、`down`、TLS 写操作相同的 project 级 Windows named mutex，并按每个 source/target physical volume name 获取独立 mutex，避免不同 Compose project 通过同一物理卷并发维护。备份根目录、staging/正式备份、`-ForceRestore` rollback archive 和恢复后的 CMS 明文文件必须自动应用受保护的 restricted ACL，只允许当前用户、SYSTEM 和 Administrators 完全控制，并关闭继承。
 - `backup-verify` 必须校验 `manifest.sha256`、全部工件大小和 SHA-256、PostgreSQL dump 列表、路径边界、16 个默认服务的 image reference/实际 image ID，以及当前 `compose.windows.yml` 的精确 SHA-256、Git commit、项目版本、S3 bucket、OpenSearch index 和 `DRIVE_TLS_CERT_NAME` lineage 名称。manifest v2 带 `manifest.p7s` 时还必须校验 detached CMS 签名、预期 thumbprint 和 manifest 签名元数据。卷 tar 在用于恢复前必须先放入无网络、只读根文件系统、只读备份挂载、drop all capabilities 和 `no-new-privileges` 的临时容器/临时卷中预解包扫描，拒绝绝对路径、父目录穿越、硬链接、特殊文件、悬空链接和指向临时卷外的符号链接。
 - `restore` 必须使用与 source 不同的 Compose project，并拒绝运行中的 target、source/target physical volume 重叠、错误卷标签和 foreign container attachment；默认还要拒绝已有容器和非空目标卷。`-ForceRestore` 只允许清理已停止的目标容器或非空卷，不得绕过同 project、运行状态、路径、校验和镜像门禁；清空任何原非空卷前必须先创建 restricted rollback archive，恢复失败时还原原非空卷、清空原空卷、删除本轮新卷并停止 target 服务，回滚异常时保留并报告 rollback archive 路径。恢复一旦提交，后续 rollback archive 清理失败只能报告维护错误并保留归档，不得反向清空或回滚已经恢复的数据。`-NoStartAfterRestore` 用于恢复后保持服务停止。
@@ -464,14 +464,14 @@ Windows Docker Compose 要求：
 - 离线副本必须原子发布，复制前后逐文件对账并记录 canonical inventory digest；操作系统不能证明介质已物理下线，完成后仍需卸载、断开或移交。
 - Redis/OpenSearch 同版本原始卷恢复只支持相同 image reference、相同 image ID、单节点同拓扑；跨版本必须使用 Redis RDB 与 OpenSearch settings/mappings/bulk 可移植导出。应用前创建 rollback export，拒绝导入到更低 major 版本，失败时自动回退并保存 JSON 证据。
 - `-ForceRestore` rollback archive 是失败时的尽力恢复机制；发生卷驱动、磁盘或 Docker 故障时仍可能需要人工处理，脚本必须保留受限 ACL 归档并报告绝对路径。
-- 当前固定 MinIO Server/Client 镜像仍有 16/9 个 Critical 唯一 ID 基线，其中两个 MinIO 自身 Critical 在固定社区镜像中没有 patched version；CI 阻断允许集之外的新 Critical 并不消除现有风险。正式发布前必须采用受支持修复镜像或完成可审计补丁镜像、SBOM/Grype 重扫、真实 MinIO 和备份恢复兼容验证，风险登记以 `docs/minio-security-risk.md` 为准。
+- 正式运行时已改为固定 `chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602`，因此旧 MinIO Server/Client `16/9` 个 Critical 不再位于正式运行时。SeaweedFS 本地 Grype `v0.115.0` 为 `0 Critical / 1 High`，`GHSA-hrxh-6v49-42gf` 的报告修复版本为 gRPC `1.82.1`；Windows 备份恢复兼容已通过，正式发布仍需最终 SBOM/Grype、该 High 的外部风险接受或修复、全量迁移和升级/RPO-RTO 证据，风险登记以 `docs/minio-security-risk.md` 为准。
 - 周期维护任务由独立 `beat` 容器运行 Celery beat，至少覆盖审计分区/归档、过期上传/分享/回收站、预览产物、大目录任务、权限重算、无引用 blob、孤儿最终对象、容量校准和导出清理；调度不得与 API 进程混跑。
 - Nginx gateway 必须处理 WebSocket、Range、上传大小限制、超时、真实客户端 IP、安全响应头，以及 API 与外部 S3 端点的分流；公网模板还必须保持证书只读挂载、TLS 1.2/1.3、HTTP 到 HTTPS 跳转、ACME challenge 路径、未知 Host 拒绝和 HSTS。正式发布前必须完成受信证书与双域名 HTTPS 实测。
 
 发布顺序：
 
 - 合并代码前运行 ruff、mypy、pytest、OpenAPI diff、Compose config 校验和镜像构建。
-- 更新前创建 PostgreSQL、MinIO 对象和关键配置/证书备份，并记录当前镜像 tag、migration 版本和环境模板版本。
+- 更新前创建 PostgreSQL、S3 对象和关键配置/证书备份，并记录当前镜像 reference/digest、migration 版本和环境模板版本。
 - 执行一次性 migration 服务，只允许向前兼容 migration。
 - 启动 API，等待 `/readyz` 真实数据库探针通过后再让 gateway 接流量。
 - 启动 Worker 和 `beat`，按队列逐类检查，避免任务中断扩大。

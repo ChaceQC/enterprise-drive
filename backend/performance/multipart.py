@@ -70,13 +70,19 @@ def warm_storage_connection(
     parsed = urlsplit(upload_url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         raise ValueError("预签名上传 URL 缺少有效 origin")
-    health_url = f"{parsed.scheme}://{parsed.netloc}/minio/health/live"
+    probe_url = f"{parsed.scheme}://{parsed.netloc}/"
     started = time.perf_counter()
     response: requests.Response | None = None
     error: Exception | None = None
     try:
-        response = client.get(health_url, timeout=timeout_seconds)
-        response.raise_for_status()
+        response = client.get(
+            probe_url,
+            timeout=timeout_seconds,
+            allow_redirects=False,
+        )
+        if response.status_code not in {200, 403}:
+            response.raise_for_status()
+            raise RuntimeError(f"对象存储预热探针返回非预期 HTTP {response.status_code}")
     except Exception as exc:
         error = exc
         raise

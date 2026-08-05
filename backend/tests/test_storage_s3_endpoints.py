@@ -96,7 +96,7 @@ async def test_storage_uses_internal_client_and_presign_uses_public_client(
     settings = Settings(
         environment="test",
         secret_key="test-secret",
-        s3_endpoint_url="http://minio:9000",
+        s3_endpoint_url="http://seaweedfs:9000",
         s3_public_endpoint_url="https://files.example.test:9443",
         s3_access_key_id="access-key",
         s3_secret_access_key="secret-key",
@@ -107,7 +107,7 @@ async def test_storage_uses_internal_client_and_presign_uses_public_client(
     assert len(RecordingMinio.instances) == 2
     internal_client, public_client = RecordingMinio.instances
     assert (internal_client.endpoint, internal_client.secure, internal_client.region) == (
-        "minio:9000",
+        "seaweedfs:9000",
         False,
         "ap-northeast-1",
     )
@@ -210,7 +210,7 @@ async def test_real_minio_presigned_urls_use_public_host_scheme_and_region() -> 
     settings = Settings(
         environment="test",
         secret_key="test-secret",
-        s3_endpoint_url="http://minio:9000",
+        s3_endpoint_url="http://seaweedfs:9000",
         s3_public_endpoint_url="https://files.example.test:9443",
         s3_access_key_id="access-key",
         s3_secret_access_key="secret-key",

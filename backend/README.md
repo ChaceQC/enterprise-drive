@@ -14,7 +14,7 @@
 uv python install 3.12
 uv sync --all-extras --dev
 Copy-Item .env.example .env
-docker compose up -d postgres redis minio opensearch
+docker compose up -d postgres redis seaweedfs opensearch
 uv run alembic upgrade head
 uv run python -m scripts.seed_admin
 uv run fastapi dev app/main.py --host 127.0.0.1 --port 18080
@@ -35,7 +35,7 @@ Copy-Item .env.windows.example .env.windows
 
 `up -Build` 是显式构建入口；普通 `up` 固定使用 `--no-build --pull never`，不会在后台补构建或拉取缺失镜像。第三方镜像应先单独 `docker pull`，项目 runtime/preview 镜像应先单独构建或明确执行一次 `up -Build`，随后再运行部署、备份或恢复门禁。
 
-正式环境中 API/Worker 使用 `http://minio:9000` 等 Compose 内部服务端点；默认浏览器预签名地址为 gateway 提供的 `http://localhost:19000`，`http://localhost:18080` 同时提供 Web 页面与 API。公网模式把真实 `.env.windows` 中的 API/存储域名、`DRIVE_S3_PUBLIC_ENDPOINT_URL`、`DRIVE_CORS_ORIGINS`、`MINIO_CORS_ALLOWED_ORIGIN`、Trusted Hosts、Secure Cookie 和 Certbot 邮箱改为生产值后，可使用以下命令完成 ACME bootstrap、证书签发和 TLS gateway 启动：
+正式环境中 API/Worker 使用 `http://seaweedfs:9000` 等 Compose 内部服务端点；默认浏览器预签名地址为 gateway 提供的 `http://localhost:19000`，`http://localhost:18080` 同时提供 Web 页面与 API。公网模式把真实 `.env.windows` 中的 API/存储域名、`DRIVE_S3_PUBLIC_ENDPOINT_URL`、`DRIVE_CORS_ORIGINS`、`DRIVE_S3_CORS_ALLOWED_ORIGINS`、Trusted Hosts、Secure Cookie 和 Certbot 邮箱改为生产值后，可使用以下命令完成 ACME bootstrap、证书签发和 TLS gateway 启动：
 
 ```powershell
 .\deploy\windows\manage.ps1 config -Tls -Quiet
@@ -46,6 +46,15 @@ Copy-Item .env.windows.example .env.windows
 ```
 
 公网入口使用 `https://drive.example.com` 和 `https://storage.example.com`，gateway 在 `80/443` 按 Host 分流并把 HTTP 重定向到 HTTPS。外部 S3 端点不能使用 `/s3` 等路径前缀。生产证书签发和续期要求两个域名解析到当前 Windows 宿主、外部 TCP 80/443 可达，并且 Docker Desktop 运行；`tls-renew` 和计划任务注册只接受 `tls-init` 建立的 Certbot renewal lineage，单独挂载的手工证书不具备该续期状态。Preview Worker 的 CPU、内存和临时磁盘配额请参考 `../docs/deployment-preview-worker.md`。
+
+正式对象存储固定为
+`chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602`
+（OCI revision `875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa`）。`storage-init`
+会创建 bucket，并对签名 PUT/GET/DELETE、匿名访问拒绝、CORS allow/deny 和删除后
+状态做 fail-closed 校验；API 与 Worker 只有在该一次性服务成功后才启动。正式数据
+卷为新的 `seaweedfs-data`。旧 `minio-data` 只能由旧提交和旧固定 MinIO 镜像读取，
+再使用 `scripts.object_storage_admin` 走 S3 级迁移，步骤见
+`../docs/object-storage-seaweedfs-migration.md`。
 
 正式 Compose 中 API 使用受控 SQLAlchemy QueuePool；各 Celery Worker 会覆盖 `DRIVE_DATABASE_POOL_MODE=null`。这是因为当前同步 Celery task 使用 `asyncio.run()` 执行异步服务，不能跨任务事件循环复用 asyncpg 连接池。
 
@@ -119,7 +128,7 @@ Copy-Item .env.windows .env.restore.windows
 
 `-RestoreEnvironmentOutput` 只把备份中的 CMS 环境文件解密到仓库和备份目录外的绝对、尚不存在文件路径，不会替换当前 target 的 `-EnvFile`；父目录必须预先存在且不得经过 reparse point。CMS 明文先保存在内存中，只在本次恢复模式的数据、Alembic revision 和镜像门禁全部成功后的最后一步，通过同目录 restricted ACL 临时文件原子发布；未使用 `-NoStartAfterRestore` 时还会先完成全栈健康和实际容器 image ID 对账。若原子发布时目标路径已被其他进程创建，失败清理会保留该 foreign file。备份根目录、staging/正式备份、rollback archive 和最终 CMS 输出会自动关闭 ACL 继承，并只允许当前用户、SYSTEM、Administrators 完全控制。
 
-未传入完整包加密证书时，Windows CMS 仍只加密 `.env.windows`，其余 payload 依赖 BitLocker、restricted NTFS ACL 与加密外部介质；传入证书时使用 AES-256-CBC、HMAC-SHA256 和 RSA-OAEP-SHA256 保护完整 payload。`manifest.p7s` 提供来源签名，但证书信任链、吊销和双人保管仍由组织 PKI 流程负责。Redis/OpenSearch 同版本原始卷恢复只支持相同 image reference、相同 image ID、单节点同拓扑；跨版本升级使用 Redis RDB 与 OpenSearch settings/mappings/bulk 可移植导出，导入前保存 rollback export，失败自动回退。当前 MinIO Server/Client 仍有 16/9 个 Critical 唯一 ID 基线，正式 `v1.0.0` tag/Release 在受支持修复镜像或可审计补丁镜像完成替换与重扫前保持阻塞。完整操作见 `../docs/ops-sprint12-backup-portability.md` 和 `../docs/deployment-windows-docker.md`，风险登记见 `../docs/minio-security-risk.md`。
+未传入完整包加密证书时，Windows CMS 仍只加密 `.env.windows`，其余 payload 依赖 BitLocker、restricted NTFS ACL 与加密外部介质；传入证书时使用 AES-256-CBC、HMAC-SHA256 和 RSA-OAEP-SHA256 保护完整 payload。`manifest.p7s` 提供来源签名，但证书信任链、吊销和双人保管仍由组织 PKI 流程负责。Redis/OpenSearch 同版本原始卷恢复只支持相同 image reference、相同 image ID、单节点同拓扑；跨版本升级使用 Redis RDB 与 OpenSearch settings/mappings/bulk 可移植导出，导入前保存 rollback export，失败自动回退。旧 MinIO `16/9` Critical 已通过 SeaweedFS 正式运行时替换退出当前部署，SeaweedFS Windows 备份恢复兼容已通过；本地扫描的 `GHSA-hrxh-6v49-42gf` High、最终 SBOM/Grype、全量迁移、升级/RPO-RTO 和外部风险签字仍阻塞正式 `v1.0.0`。完整操作见 `../docs/ops-sprint12-backup-portability.md`、`../docs/deployment-windows-docker.md` 和 `../docs/object-storage-seaweedfs-migration.md`，风险登记见 `../docs/minio-security-risk.md`。
 
 ## 常用验证
 
@@ -174,22 +183,28 @@ uv run python scripts/smoke_observability_docker.py `
 - 只有全部公共 Host 都是 localhost/回环地址时才允许本机 HTTP 与非 Secure Cookie；出现任何非回环生产 Host 后，CORS 和 S3 公共端点必须使用 HTTPS、Cookie 必须启用 Secure，S3 外部端点只能使用 443。
 - Pydantic 隐藏校验输入，启动失败日志不会把传入 secret 回显到异常文本。
 
-本机 HTTP 基线仍使用 `http://localhost:18080` 与 `http://localhost:19000`；公网配置继续先通过 `deploy/windows/manage.ps1 config -Tls` 校验 DNS 名称、MinIO CORS 对齐、HSTS、bind 和 Certbot 邮箱等宿主部署条件。
+本机 HTTP 基线仍使用 `http://localhost:18080` 与 `http://localhost:19000`；公网配置继续先通过 `deploy/windows/manage.ps1 config -Tls` 校验 DNS 名称、S3 CORS 对齐、HSTS、bind 和 Certbot 邮箱等宿主部署条件。
 
-真实 MinIO 集成测试默认跳过，避免普通单元测试依赖外部服务。需要验证对象存储真实行为时，先启动本地 MinIO，再显式设置环境变量：
+真实 S3 兼容集成测试默认跳过，避免普通单元测试依赖外部服务。需要验证对象存储真实行为时，先启动本地 SeaweedFS，再显式设置环境变量：
 
 ```powershell
-$env:DRIVE_RUN_MINIO_TESTS = "1"
-$env:DRIVE_TEST_MINIO_ENDPOINT = "http://127.0.0.1:19000"
-$env:DRIVE_TEST_MINIO_ACCESS_KEY = "drive-dev"
-$env:DRIVE_TEST_MINIO_SECRET_KEY = "drive-dev-password"
-$env:DRIVE_TEST_MINIO_BUCKET = "enterprise-drive-test"
-uv run pytest tests/test_storage_minio_integration.py -q
+$env:DRIVE_RUN_S3_TESTS = "1"
+$env:DRIVE_TEST_S3_ENDPOINT = "http://127.0.0.1:19000"
+$env:DRIVE_TEST_S3_ACCESS_KEY = "drive-dev"
+$env:DRIVE_TEST_S3_SECRET_KEY = "drive-dev-password"
+$env:DRIVE_TEST_S3_BUCKET = "enterprise-drive-test"
+uv run pytest tests/test_storage_s3_integration.py -q
 ```
 
-`backend-ci` 会在 GitHub Actions 中启动临时 MinIO 并运行该集成测试文件，覆盖基于 MinIO 公共 `get_presigned_url` 和标准 S3 HTTP POST/DELETE 的 multipart 控制面、预签名 PUT/GET、copy、delete、list、服务端 hash 校验和孤儿最终对象扫描。运行时依赖限制为 `minio>=7.2.20,<8`，升级到新的 7.x 版本时必须通过同一真实 MinIO 门禁；`DRIVE_S3_CONTROL_REQUEST_TIMEOUT_SECONDS` 和 `DRIVE_S3_CONTROL_PRESIGN_EXPIRES_SECONDS` 分别控制内部控制请求超时和控制 URL 有效期。
+该集成文件覆盖基于 MinIO Python SDK 公共 `get_presigned_url` 和标准 S3 HTTP
+POST/DELETE 的 multipart 控制面、预签名 PUT/GET、copy、delete、list、服务端 hash
+校验和孤儿最终对象扫描。2026-08-05 在 SeaweedFS 上直接执行的既有真实 S3 集合为
+`3 passed`。运行时客户端依赖限制为 `minio>=7.2.20,<8`；
+`DRIVE_S3_CONTROL_REQUEST_TIMEOUT_SECONDS` 和
+`DRIVE_S3_CONTROL_PRESIGN_EXPIRES_SECONDS` 分别控制内部控制请求超时和控制 URL
+有效期。本轮对象存储替换的远端 CI 结果仍待最终 push 后确认。
 
-CI 先按变更路径决定是否进入后端 job；后端源码、桌面 OpenAPI 契约、根 Compose、监控或 Nginx 模板变化才运行完整后端门禁。Ruff、Bandit、pip-audit 和 Mypy 会先执行，全部通过后才启动 PostgreSQL/MinIO、执行 migration、pytest、Docker smoke 与镜像构建，静态失败不再提前占用集成服务。
+CI 先按变更路径决定是否进入后端 job；后端源码、桌面 OpenAPI 契约、根 Compose、监控或 Nginx 模板变化才运行完整后端门禁。Ruff、Bandit、pip-audit 和 Mypy 会先执行，全部通过后才启动 PostgreSQL/SeaweedFS、执行 migration、pytest、Docker smoke 与镜像构建，静态失败不再提前占用集成服务。对象存储供应链 job 固定 SeaweedFS image/digest，生成 SPDX SBOM，并由 Grype 阻断任意 Critical。
 
 ### BE-029 性能基准
 
@@ -197,7 +212,7 @@ CI 先按变更路径决定是否进入后端 job；后端源码、桌面 OpenAP
 
 `uv run python -X utf8 -m performance.target_data` 独立准备 BE-029 target 数据：OpenSearch 使用专属 `be029-*` index，审计日志使用专属 action；两类数据均按批次写入、原子保存 checkpoint，可中断恢复。`--max-batches` 默认值为 `1`，显式传 `0` 才表示本次不限批次；大于 100,000 条的数据还必须传 `--confirm-large-target`。`status` 查询真实计数，`cleanup --confirm-run-id` 只清理当前 state 所属数据；该工具不会隐式构建、拉取、启动或删除其他资源。
 
-`performance.runner` 的 `upload_complete` 场景会真实执行 DTP/1 初始化、分片预签名、无 Cookie 的 MinIO 直传、complete 和清理，并通过测试环境 `Server-Timing` 分解对象存储合并与 API 其余耗时。真实 Compose 运行时传入 `--docker-compose-project <project>`，报告 `BE-029/2` 会记录 p50/p95/p99、错误率、硬件与磁盘、Docker server/容器限额和镜像 digest、PostgreSQL 索引/体量以及 OpenSearch refresh/store 状态。
+`performance.runner` 的 `upload_complete` 场景会真实执行 DTP/1 初始化、分片预签名、无 Cookie 的 S3 直传、complete 和清理，并通过测试环境 `Server-Timing` 分解对象存储合并与 API 其余耗时。真实 Compose 运行时传入 `--docker-compose-project <project>`，报告 `BE-029/2` 会记录 p50/p95/p99、错误率、硬件与磁盘、Docker server/容器限额和镜像 digest、PostgreSQL 索引/体量以及 OpenSearch refresh/store 状态。
 
 2026-08-03 已完成目标规模门禁：10,000 个 fixture 节点、100 万 OpenSearch 文档和 1,000 万审计日志均在报告环境中确认；target `upload_complete` 使用 `--warmup-seconds 5` 后统计重置，计入 1,936 个 complete 样本、0 失败，吞吐 `58.364 RPS`，不含对象存储合并的 API P95 为 `790 ms`，端到端 P95 为 `840 ms`，storage merge P95 为 `71 ms`，`report.json passed=true`。清理工件确认 2,000/2,000 个完成节点已 purge 且 errors 为空；search、audit、mixed 和 upload-init 沿用此前通过的 target 工件，没有重复执行。
 
@@ -252,7 +267,7 @@ CI 先按变更路径决定是否进入后端 job；后端源码、桌面 OpenAP
 - `upload_sessions`、`upload_parts` 基础表和迁移。
 - `quota_accounts`、`quota_ledger`、`quota_policies` 基础表和迁移，以及系统管理员配额账户/策略管理 API。
 - 空间创建时同步初始化默认空间容量账户。
-- MinIO Python SDK 对象存储适配器，业务层通过 `StorageAdapter` 协议隔离具体 SDK。
+- MinIO Python SDK 作为通用 S3 客户端，正式服务端为 SeaweedFS；业务层通过 `StorageAdapter` 协议隔离客户端和服务端实现。
 - 上传初始化、上传状态查询、分片预签名 URL、multipart complete 和 abort 接口。
 - 上传、文件下载和外链下载响应使用 `Drive Transfer Protocol v1`（`DTP/1`）标识；客户端可通过 `X-Drive-Transfer-Protocol: DTP/1` 显式协商，未知版本返回 HTTP 426。
 - 秒传分支：命中同租户同 hash、同大小 blob 时直接创建文件节点和版本，并增加 blob 引用计数。
@@ -267,7 +282,7 @@ CI 先按变更路径决定是否进入后端 job；后端源码、桌面 OpenAP
 - `quota.reconcile_space_usage` 维护任务，支持空间容量只读报告和修复模式。
 - `file.cleanup_unreferenced_blobs` 维护任务，清理 ref_count 为 0 且无版本引用的最终对象和 blob 元数据。
 - `file.cleanup_orphaned_objects` 维护任务，默认 dry-run，按对象存储游标扫描受控 `objects/{tenant_id}/{hash_prefix}/{sha256}` key，清理没有 DB blob 元数据引用的孤儿最终对象。
-- 真实 MinIO 集成测试，覆盖对象读写、copy、delete、list 游标、预签名下载、标准 S3 HTTP multipart 控制面、预签名分片 PUT、complete 后 hash 校验和孤儿最终对象扫描。
+- 真实 S3 兼容集成测试，覆盖对象读写、copy、delete、list 游标、预签名下载、标准 S3 HTTP multipart 控制面、预签名分片 PUT、complete 后 hash 校验和孤儿最终对象扫描；当前正式目标为 SeaweedFS。
 - 真实 PostgreSQL Docker 集成测试，覆盖完整 Alembic migration、`idx_nodes_trash_cleanup`、回收站保留期清理、删除批次去重、行锁、租户隔离、容量账本、blob 引用、审计和搜索 outbox。
 - `permission.invalidate_cache` 任务，消费 `permission.changed` outbox event 并失效 Redis 权限缓存 key；审计 dispatcher 只消费 `audit.*`，避免抢占权限事件。
 - 搜索 ACL token builder、`search.acl_rebuild_requested`、`search.index_requested`、`search.extract_requested` 和 `GET /api/v1/search` 已完成；抽取支持 UTF-8 文本、可复制正文 PDF、DOCX/PPTX/XLSX、图片 OCR、扫描 PDF OCR，以及经 LibreOffice 转换的旧 Office/ODF。Tesseract 使用 `eng+chi_sim`，并限制复杂源文件体量、PDF 页数、像素、渲染字节、正文字符数和命令超时；查询继续使用 allow/deny token、签名 cursor、HTML 编码高亮和 `read_meta` 二次权限校验。
@@ -539,7 +554,7 @@ Prometheus 规则位于 `../deploy/monitoring/maintenance-alerts.yml` 和 `../de
 - `GET /api/v1/files/{node_id}/watermarked-content`
 - `GET /api/v1/files/{node_id}/versions/{version_id}/download`
 
-下载接口基于 `nodes.current_version_id` 查询当前版本和 blob，返回 `download_url`、`expires_at`、`file_name`、`version_id`、`size_bytes`、`mime_type` 和额外 `headers`。S3/MinIO 适配器会使用 `ResponseContentDisposition` 设置下载文件名，并同时提供 ASCII `filename` 和 UTF-8 `filename*`。
+下载接口基于 `nodes.current_version_id` 查询当前版本和 blob，返回 `download_url`、`expires_at`、`file_name`、`version_id`、`size_bytes`、`mime_type` 和额外 `headers`。S3 适配器会使用 `ResponseContentDisposition` 设置下载文件名，并同时提供 ASCII `filename` 和 UTF-8 `filename*`。
 
 历史版本下载按 URL 中的 `version_id` 查询同一文件节点下的不可变版本，并复用 DTP/1、节点级 `download` 权限、预签名限流、active blob 和文件安全策略校验。版本列表使用 `read_meta` 权限和签名 cursor；版本回滚使用 `update` 权限，在锁定节点后校验可选 `expected_current_version_id`，创建新的 `file_versions` 记录并把 `nodes.current_version_id` 指向新版本，旧版本保持不变。
 

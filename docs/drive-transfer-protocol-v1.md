@@ -17,7 +17,7 @@ Drive Transfer Protocol v1（DTP/1）是企业网盘在 HTTPS 之上的应用层
 - 预签名下载和 HTTP Range 使用方式。
 - 协议版本协商、错误码和兼容性规则。
 
-DTP/1 不定义新的 TCP、UDP、TLS、QUIC、加密算法或可靠传输实现。控制面继续使用 FastAPI HTTPS API；普通文件正文通过短期预签名 HTTPS URL 直接访问 MinIO/S3，高密级或强审计场景由同一 HTTPS API 提供受控流式代理。
+DTP/1 不定义新的 TCP、UDP、TLS、QUIC、加密算法或可靠传输实现。控制面继续使用 FastAPI HTTPS API；普通文件正文通过短期预签名 HTTPS URL 直接访问 S3 兼容对象存储，高密级或强审计场景由同一 HTTPS API 提供受控流式代理。
 
 ## 2. 规范用语
 
@@ -176,7 +176,7 @@ init
 - 指数退避与抖动。
 - 文件在传输期间发生变化时停止 complete。
 
-首个 Rust 客户端应从保守并发开始，并依据真实 PostgreSQL、MinIO、磁盘、网关和网络基准调整；协议不把固定并发数写死。
+首个 Rust 客户端应从保守并发开始，并依据真实 PostgreSQL、S3 对象存储、磁盘、网关和网络基准调整；协议不把固定并发数写死。
 服务端通过 `max_parallelism` 返回当前并发上限提示，客户端可以使用更低值，但不得超过该提示。
 
 ## 8. Complete

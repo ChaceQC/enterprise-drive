@@ -59,11 +59,11 @@ $IntegrationRunningServices = @(
     "beat",
     "postgres",
     "redis",
-    "minio",
+    "seaweedfs",
     "opensearch"
 )
-$IntegrationExitedServices = @("migration", "minio-init", "seed")
-$DataValidationServices = @("postgres", "redis", "minio", "opensearch")
+$IntegrationExitedServices = @("migration", "storage-init", "seed")
+$DataValidationServices = @("postgres", "redis", "seaweedfs", "opensearch")
 
 $EnvironmentNames = @(
     "COMPOSE_PROJECT_NAME",
@@ -74,8 +74,7 @@ $EnvironmentNames = @(
     "CERTBOT_IMAGE",
     "POSTGRES_IMAGE",
     "REDIS_IMAGE",
-    "MINIO_IMAGE",
-    "MINIO_MC_IMAGE",
+    "SEAWEEDFS_IMAGE",
     "OPENSEARCH_IMAGE",
     "DRIVE_GATEWAY_BIND",
     "DRIVE_GATEWAY_PORT",
@@ -86,11 +85,13 @@ $EnvironmentNames = @(
     "DRIVE_GATEWAY_TEMPLATE_PATH",
     "DRIVE_SERVER_NAME",
     "DRIVE_STORAGE_SERVER_NAME",
+    "DRIVE_S3_ENDPOINT_URL",
     "DRIVE_S3_PUBLIC_ENDPOINT_URL",
+    "DRIVE_S3_REGION",
     "DRIVE_CORS_ORIGINS",
     "DRIVE_TRUSTED_HOSTS",
     "DRIVE_SESSION_COOKIE_SECURE",
-    "MINIO_CORS_ALLOWED_ORIGIN",
+    "DRIVE_S3_CORS_ALLOWED_ORIGINS",
     "DRIVE_SECRET_KEY",
     "POSTGRES_DB",
     "POSTGRES_USER",
@@ -100,8 +101,8 @@ $EnvironmentNames = @(
     "DRIVE_REDIS_URL",
     "DRIVE_CELERY_BROKER_URL",
     "DRIVE_CELERY_RESULT_BACKEND",
-    "MINIO_ROOT_PASSWORD",
-    "MINIO_ROOT_USER",
+    "DRIVE_S3_SECRET_ACCESS_KEY",
+    "DRIVE_S3_ACCESS_KEY_ID",
     "DRIVE_S3_BUCKET",
     "OPENSEARCH_INITIAL_ADMIN_PASSWORD",
     "DRIVE_ADMIN_PASSWORD",
@@ -143,15 +144,15 @@ $EnvironmentNames = @(
     "POSTGRES_MEMORY_LIMIT",
     "REDIS_CPU_LIMIT",
     "REDIS_MEMORY_LIMIT",
-    "MINIO_CPU_LIMIT",
-    "MINIO_MEMORY_LIMIT",
-    "MINIO_INIT_CPU_LIMIT",
+    "SEAWEEDFS_CPU_LIMIT",
+    "SEAWEEDFS_MEMORY_LIMIT",
+    "STORAGE_INIT_CPU_LIMIT",
     "DRIVE_BACKUP_HELPER_CPU_LIMIT",
     "DRIVE_BACKUP_HELPER_MEMORY_LIMIT",
     "DRIVE_BACKUP_HELPER_PIDS_LIMIT",
     "DRIVE_BACKUP_GZIP_LEVEL",
     "DRIVE_BACKUP_PG_DUMP_COMPRESSION_LEVEL",
-    "MINIO_INIT_MEMORY_LIMIT"
+    "STORAGE_INIT_MEMORY_LIMIT"
 )
 $OriginalEnvironment = @{}
 foreach ($Name in $EnvironmentNames) {
@@ -198,13 +199,9 @@ function Set-IntegrationEnvironment {
         CERTBOT_IMAGE = "certbot/certbot:v5.6.0"
         POSTGRES_IMAGE = "postgres:16-bookworm"
         REDIS_IMAGE = "redis:7.4-alpine"
-        MINIO_IMAGE = (
-            "minio/minio:RELEASE.2025-09-07T16-13-09Z@" +
-            "sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e"
-        )
-        MINIO_MC_IMAGE = (
-            "minio/mc:RELEASE.2025-08-13T08-35-41Z@" +
-            "sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727"
+        SEAWEEDFS_IMAGE = (
+            "chrislusf/seaweedfs:4.40@" +
+            "sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602"
         )
         OPENSEARCH_IMAGE = "opensearchproject/opensearch:2.17.1"
         DRIVE_GATEWAY_BIND = "127.0.0.1"
@@ -216,11 +213,13 @@ function Set-IntegrationEnvironment {
         DRIVE_GATEWAY_TEMPLATE_PATH = "./deploy/windows/nginx/default.conf.template"
         DRIVE_SERVER_NAME = "localhost"
         DRIVE_STORAGE_SERVER_NAME = "storage.localhost"
+        DRIVE_S3_ENDPOINT_URL = "http://seaweedfs:9000"
         DRIVE_S3_PUBLIC_ENDPOINT_URL = "http://localhost:$StoragePort"
+        DRIVE_S3_REGION = "us-east-1"
         DRIVE_CORS_ORIGINS = "[`"http://localhost:$ApiPort`"]"
         DRIVE_TRUSTED_HOSTS = "[`"localhost`",`"127.0.0.1`"]"
         DRIVE_SESSION_COOKIE_SECURE = "false"
-        MINIO_CORS_ALLOWED_ORIGIN = "http://localhost:$ApiPort"
+        DRIVE_S3_CORS_ALLOWED_ORIGINS = "http://localhost:$ApiPort"
         DRIVE_SECRET_KEY = "Integration-Secret-Key-2026-0123456789abcdef"
         POSTGRES_DB = "enterprise_drive"
         POSTGRES_USER = "drive"
@@ -235,8 +234,8 @@ function Set-IntegrationEnvironment {
         DRIVE_CELERY_RESULT_BACKEND = (
             "redis://:Integration-Redis-Secret-2026@redis:6379/2"
         )
-        MINIO_ROOT_USER = "drive"
-        MINIO_ROOT_PASSWORD = "Integration-Minio-Secret-2026"
+        DRIVE_S3_ACCESS_KEY_ID = "drive"
+        DRIVE_S3_SECRET_ACCESS_KEY = "Integration-Object-Storage-Secret-2026"
         DRIVE_S3_BUCKET = "enterprise-drive"
         OPENSEARCH_INITIAL_ADMIN_PASSWORD = "Integration-OpenSearch-Secret-2026!"
         DRIVE_ADMIN_PASSWORD = "Integration-Admin-Secret-2026"
@@ -278,10 +277,10 @@ function Set-IntegrationEnvironment {
         POSTGRES_MEMORY_LIMIT = "768m"
         REDIS_CPU_LIMIT = "0.25"
         REDIS_MEMORY_LIMIT = "256m"
-        MINIO_CPU_LIMIT = "0.50"
-        MINIO_MEMORY_LIMIT = "512m"
-        MINIO_INIT_CPU_LIMIT = "0.25"
-        MINIO_INIT_MEMORY_LIMIT = "128m"
+        SEAWEEDFS_CPU_LIMIT = "0.50"
+        SEAWEEDFS_MEMORY_LIMIT = "512m"
+        STORAGE_INIT_CPU_LIMIT = "0.25"
+        STORAGE_INIT_MEMORY_LIMIT = "128m"
         DRIVE_BACKUP_HELPER_CPU_LIMIT = "0.25"
         DRIVE_BACKUP_HELPER_MEMORY_LIMIT = "256m"
         DRIVE_BACKUP_HELPER_PIDS_LIMIT = "64"
@@ -539,18 +538,6 @@ function Wait-IntegrationServices {
     )
 }
 
-function Get-IntegrationHelperRunArguments {
-    return @(
-        "run",
-        "--rm",
-        "--pull", "never",
-        "--cpus", "0.25",
-        "--memory", "128m",
-        "--memory-swap", "128m",
-        "--pids-limit", "64"
-    )
-}
-
 function Invoke-Manage {
     param(
         [Parameter(Mandatory = $true)]
@@ -669,59 +656,37 @@ function Start-IntegrationProject {
         -TimeoutSeconds 360
 }
 
-function Set-MinioObject {
+function Set-ObjectStorageObject {
     param(
         [Parameter(Mandatory = $true)]
         [string]$Value
     )
 
-    $Script = @(
-        'mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null',
-        'printf "%s" "$PROBE_VALUE" | mc pipe "local/$MINIO_BUCKET/$PROBE_KEY" >/dev/null'
-    ) -join "; "
-    $ModelJson = (
-        Invoke-Compose -Arguments @("config", "--format", "json")
-    ) -join "`n"
-    $Model = $ModelJson | ConvertFrom-Json
-    $BackendNetwork = [string]$Model.networks.backend.name
-    $null = Invoke-Docker -Arguments @(
-        (Get-IntegrationHelperRunArguments) +
-        @(
-            "--network", $BackendNetwork,
-            "-e", "PROBE_VALUE=$Value",
-            "-e", "PROBE_KEY=$ObjectKey",
-            "-e", "MINIO_ROOT_USER=$env:MINIO_ROOT_USER",
-            "-e", "MINIO_ROOT_PASSWORD=$env:MINIO_ROOT_PASSWORD",
-            "-e", "MINIO_BUCKET=$env:DRIVE_S3_BUCKET",
-            "--entrypoint", "/bin/sh",
-            $env:MINIO_MC_IMAGE,
-            "-ec", $Script
-        )
+    $null = Invoke-Compose -Arguments @(
+        "run",
+        "--rm",
+        "--no-deps",
+        "-e", "DRIVE_S3_PROBE_VALUE=$Value",
+        "-e", "DRIVE_S3_PROBE_KEY=$ObjectKey",
+        "storage-init",
+        "python",
+        "-m",
+        "scripts.object_storage_admin",
+        "probe-put"
     )
 }
 
-function Get-MinioObject {
-    $Script = @(
-        'mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null',
-        'mc cat "local/$MINIO_BUCKET/$PROBE_KEY"'
-    ) -join "; "
-    $ModelJson = (
-        Invoke-Compose -Arguments @("config", "--format", "json")
-    ) -join "`n"
-    $Model = $ModelJson | ConvertFrom-Json
-    $BackendNetwork = [string]$Model.networks.backend.name
-    $Output = Invoke-Docker -Arguments @(
-        (Get-IntegrationHelperRunArguments) +
-        @(
-            "--network", $BackendNetwork,
-            "-e", "PROBE_KEY=$ObjectKey",
-            "-e", "MINIO_ROOT_USER=$env:MINIO_ROOT_USER",
-            "-e", "MINIO_ROOT_PASSWORD=$env:MINIO_ROOT_PASSWORD",
-            "-e", "MINIO_BUCKET=$env:DRIVE_S3_BUCKET",
-            "--entrypoint", "/bin/sh",
-            $env:MINIO_MC_IMAGE,
-            "-ec", $Script
-        )
+function Get-ObjectStorageObject {
+    $Output = Invoke-Compose -Arguments @(
+        "run",
+        "--rm",
+        "--no-deps",
+        "-e", "DRIVE_S3_PROBE_KEY=$ObjectKey",
+        "storage-init",
+        "python",
+        "-m",
+        "scripts.object_storage_admin",
+        "probe-get"
     )
     return [string](($Output -join "`n").Trim())
 }
@@ -781,9 +746,9 @@ function Write-IntegrationProjectDiagnostics {
         "opensearch",
         "postgres",
         "redis",
-        "minio",
+        "seaweedfs",
         "migration",
-        "minio-init",
+        "storage-init",
         "seed",
         "api"
     )) {
@@ -812,11 +777,15 @@ function Write-IntegrationProjectDiagnostics {
                     )
                 ) -join "`n"
             ) | ConvertFrom-Json
-            $Health = if ($null -eq $State.Health) {
+            $HealthProperty = $State.PSObject.Properties["Health"]
+            $Health = if (
+                $null -eq $HealthProperty -or
+                $null -eq $HealthProperty.Value
+            ) {
                 ""
             }
             else {
-                [string]$State.Health.Status
+                [string]$HealthProperty.Value.Status
             }
             if (
                 [string]$State.Status -eq "running" -and
@@ -904,7 +873,7 @@ try {
         "-c", $CreateProbeSql
     )
 
-    Set-MinioObject -Value $BeforeValue
+    Set-ObjectStorageObject -Value $BeforeValue
     $null = Invoke-Compose -Arguments @(
         "exec", "--no-TTY",
         "redis",
@@ -1034,7 +1003,7 @@ try {
         "-v", "ON_ERROR_STOP=1",
         "-c", $PostBackupSql
     )
-    Set-MinioObject -Value $AfterValue
+    Set-ObjectStorageObject -Value $AfterValue
     $null = Invoke-IntegrationStage -Label "source Compose stop" -Operation {
         Invoke-Compose -Arguments @("stop", "--timeout", "120")
     }
@@ -1109,9 +1078,9 @@ try {
         -Label "PostgreSQL restore point"
 
     Assert-Equal `
-        -Actual (Get-MinioObject) `
+        -Actual (Get-ObjectStorageObject) `
         -Expected $BeforeValue `
-        -Label "MinIO restore point"
+        -Label "object storage restore point"
 
     $RedisProbe = Invoke-Compose -Arguments @(
         "exec", "--no-TTY",
@@ -1175,13 +1144,18 @@ try {
     )
 
     if ($FullStackRestore) {
+        $ApiProbeHeaders = @{
+            Host = $env:DRIVE_SERVER_NAME
+        }
         $Health = Invoke-WebRequest `
             -UseBasicParsing `
             -Uri "http://127.0.0.1:$TargetApiPort/healthz" `
+            -Headers $ApiProbeHeaders `
             -TimeoutSec 30
         $Ready = Invoke-WebRequest `
             -UseBasicParsing `
             -Uri "http://127.0.0.1:$TargetApiPort/readyz" `
+            -Headers $ApiProbeHeaders `
             -TimeoutSec 30
         Assert-Equal `
             -Actual $Health.StatusCode `

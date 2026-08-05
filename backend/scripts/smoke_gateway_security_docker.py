@@ -159,7 +159,7 @@ def run_smoke(*, image: str, template_path: Path) -> dict[str, object]:
                 "--add-host",
                 "api:127.0.0.2",
                 "--add-host",
-                "minio:127.0.0.2",
+                "seaweedfs:127.0.0.2",
                 "--mount",
                 (
                     f"type=bind,source={resolved_template},"

@@ -16,7 +16,7 @@ def enabled(*keys: str) -> dict[str, bool]:
         "installer",
         "rust_policy",
         "windows",
-        "minio",
+        "object_storage",
     )}
 
 
@@ -99,13 +99,13 @@ class CiScopeTests(unittest.TestCase):
     def test_compose_change_routes_to_runtime_and_image_gates(self) -> None:
         self.assertEqual(
             scope_for_paths(["compose.windows.yml"]),
-            enabled("backend", "windows", "minio"),
+            enabled("backend", "windows", "object_storage"),
         )
 
     def test_dev_compose_image_change_only_runs_image_policy(self) -> None:
         self.assertEqual(
             scope_for_paths(["backend/docker-compose.yml"]),
-            enabled("minio"),
+            enabled("object_storage"),
         )
 
     def test_workflow_change_only_runs_scope_router(self) -> None:
@@ -124,7 +124,10 @@ class CiScopeTests(unittest.TestCase):
         self.assertEqual(scope_for_paths(["desktop/README.md"]), enabled())
 
     def test_schedule_keeps_supply_chain_coverage(self) -> None:
-        self.assertEqual(scope_for_event("schedule"), enabled("rust_policy", "minio"))
+        self.assertEqual(
+            scope_for_event("schedule"),
+            enabled("rust_policy", "object_storage"),
+        )
 
     def test_manual_run_keeps_all_gates(self) -> None:
         self.assertEqual(
@@ -136,7 +139,7 @@ class CiScopeTests(unittest.TestCase):
                 "installer",
                 "rust_policy",
                 "windows",
-                "minio",
+                "object_storage",
             ),
         )
 

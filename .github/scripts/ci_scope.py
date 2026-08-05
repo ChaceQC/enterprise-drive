@@ -21,7 +21,7 @@ SCOPE_KEYS = (
     "installer",
     "rust_policy",
     "windows",
-    "minio",
+    "object_storage",
 )
 
 WORKFLOW_PATH = ".github/workflows/backend-ci.yml"
@@ -48,7 +48,7 @@ def scope_for_event(event_name: str) -> dict[str, bool]:
 
     if event_name == "schedule":
         scope = _empty_scope()
-        scope["minio"] = True
+        scope["object_storage"] = True
         scope["rust_policy"] = True
         return scope
     if event_name == "workflow_dispatch":
@@ -99,11 +99,11 @@ def scope_for_paths(paths: Iterable[str]) -> dict[str, bool]:
             scope["windows"] = True
 
         if path == "backend/docker-compose.yml":
-            scope["minio"] = True
+            scope["object_storage"] = True
 
         if path in {"compose.windows.yml", ".env.windows.example"}:
             scope["windows"] = True
-            scope["minio"] = True
+            scope["object_storage"] = True
 
         if path.startswith("desktop/contracts/"):
             scope["backend"] = True

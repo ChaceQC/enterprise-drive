@@ -2,7 +2,7 @@
 
 > 适用项目版本：`v1.0.0` 候选发布
 >
-> 当前代码基线：Windows 本机 HTTP `18080/19000`、公网 ACME/TLS `80/443`、可选 monitoring profile、备份签名/完整包保护/离线轮换、Redis/OpenSearch 可移植迁移、隔离恢复、账号安全、OIDC/PKCE、LDAP 同步和 Sprint 12 治理均已落地；真实受信证书、企业 OIDC provider、LDAPS 目录和生产密钥保管验收仍需要生产 DNS/网络环境。
+> 当前代码基线：Windows 本机 HTTP `18080/19000`、公网 ACME/TLS `80/443`、可选 monitoring profile、备份签名/完整包保护/离线轮换、Redis/OpenSearch 可移植迁移、隔离恢复、账号安全、OIDC/PKCE、LDAP 同步和 Sprint 12 治理均已落地；正式对象存储已替换为 SeaweedFS `4.40`，Windows 备份恢复兼容演练已通过。真实受信证书、企业 OIDC provider、LDAPS 目录、生产密钥保管和完整候选升级/RPO-RTO 演练仍待验收。
 
 ## 1. 部署目标
 
@@ -17,6 +17,8 @@
 - `deploy/windows/backup-security.ps1`：manifest v2 来源签名和完整包加密/解密。
 - `deploy/windows/offline-backup.ps1`：离线副本复制、盘点和保留轮换。
 - `deploy/windows/data-migration.ps1`：Redis/OpenSearch 可移植导出、应用和回退。
+- `docs/object-storage-seaweedfs-migration.md`：旧 MinIO 到 SeaweedFS 的 S3 级迁移、
+  inventory 对账和回退边界。
 - `deploy/windows/nginx/default.conf.template`：本机 HTTP gateway。
 - `deploy/windows/nginx/acme-bootstrap.conf.template`：首次证书签发期间只开放健康检查和 HTTP-01 challenge。
 - `deploy/windows/nginx/tls.conf.template`：公网 TLS、HTTP 跳转和双域名 Host 分流。
@@ -67,8 +69,8 @@ docker info --format '{{.OSType}}'
 | `beat` | 独立运行 Celery beat，负责周期任务调度 | 不发布 |
 | `postgres` | PostgreSQL 事实库 | 不发布 |
 | `redis` | 缓存、限流、Celery broker/result backend | 不发布 |
-| `minio` | 私有 S3 兼容对象存储 | 不发布 |
-| `minio-init` | 一次性创建私有 bucket 并确认匿名访问关闭 | 不发布 |
+| `seaweedfs` | SeaweedFS `4.40` 私有 S3 兼容对象存储 | 不发布 |
+| `storage-init` | 一次性创建 bucket，并 fail-closed 验证签名读写删除、匿名拒绝和 CORS | 不发布 |
 | `opensearch` | 可重建搜索索引 | 不发布 |
 | `prometheus` | `monitoring` profile 指标抓取、规则计算与时序数据 | 不发布 |
 | `alertmanager` | `monitoring` profile 告警聚合与企业 webhook 路由 | 不发布 |
@@ -79,7 +81,7 @@ docker info --format '{{.OSType}}'
 - Web/API：`http://localhost:18080`
 - S3 外部预签名端点：`http://localhost:19000`
 
-两个入口都由同一个 `gateway` 容器发布。Web、MinIO、API 等内部服务本身不配置宿主端口。
+两个入口都由同一个 `gateway` 容器发布。Web、SeaweedFS、API 等内部服务本身不配置宿主端口。
 
 5 个 Celery Worker 会在各自容器内监听 `9100` 指标端口，但该端口只通过 Compose `expose` 提供给内部监控网络，不发布到 Windows 宿主。API `/metrics` 聚合 API Uvicorn worker；Worker task/preview/维护指标必须按 `worker-audit`、`worker-permission`、`worker-search`、`worker-maintenance` 和 `worker-preview` 分别抓取。
 
@@ -109,7 +111,7 @@ Windows 11
         |
         +-- web
         +-- api
-        +-- minio
+        +-- seaweedfs
         |
         +-- Compose internal network
               +-- postgres
@@ -132,7 +134,7 @@ Copy-Item .env.windows.example .env.windows
 - 应用 secret。
 - PostgreSQL 密码。
 - Redis 密码。
-- MinIO access key/secret key。
+- S3 access key/secret key。
 - OpenSearch 初始管理员密码。
 - 管理员初始密码。
 - CORS origins。
@@ -141,7 +143,7 @@ Copy-Item .env.windows.example .env.windows
 - S3 外部地址。
 - Grafana 独立管理员密码、`/grafana/` root URL 和 Alertmanager webhook URL 文件。
 - 仓库外治理记录根目录、备份保留天数和最少份数。
-- 公网 HTTPS 的 API/存储域名、Certbot 邮箱、证书名、HSTS、API/MinIO CORS、Trusted Hosts、Secure Cookie 和外部 S3 HTTPS URL。
+- 公网 HTTPS 的 API/存储域名、Certbot 邮箱、证书名、HSTS、API/S3 CORS、Trusted Hosts、Secure Cookie 和外部 S3 HTTPS URL。
 
 容器内连接使用 Compose 服务 DNS，例如：
 
@@ -205,8 +207,11 @@ DRIVE_AUDIT_EXTERNAL_DELIVERY_URL=
 DRIVE_AUDIT_EXTERNAL_HMAC_KEY=
 DRIVE_AUDIT_EXTERNAL_KEY_ID=default
 DRIVE_OPENSEARCH_URL=http://opensearch:9200
-DRIVE_S3_ENDPOINT_URL=http://minio:9000
+DRIVE_S3_ENDPOINT_URL=http://seaweedfs:9000
 DRIVE_S3_PUBLIC_ENDPOINT_URL=http://localhost:19000
+DRIVE_S3_ACCESS_KEY_ID=drive
+DRIVE_S3_SECRET_ACCESS_KEY=REPLACE_WITH_RANDOM_SECRET
+DRIVE_S3_CORS_ALLOWED_ORIGINS=http://localhost:18080
 GRAFANA_ROOT_URL=http://localhost:18080/grafana/
 ALERTMANAGER_WEBHOOK_URL_FILE=D:\enterprise-drive-secrets\alertmanager-webhook-url
 DRIVE_BACKUP_RETENTION_DAYS=35
@@ -226,7 +231,7 @@ DRIVE_STORAGE_SERVER_NAME=storage.example.com
 DRIVE_S3_PUBLIC_ENDPOINT_URL=https://storage.example.com
 DRIVE_SESSION_COOKIE_SECURE=true
 DRIVE_CORS_ORIGINS=["https://drive.example.com"]
-MINIO_CORS_ALLOWED_ORIGIN=https://drive.example.com
+DRIVE_S3_CORS_ALLOWED_ORIGINS=https://drive.example.com
 DRIVE_TRUSTED_HOSTS=["drive.example.com","storage.example.com"]
 DRIVE_TLS_GATEWAY_BIND=0.0.0.0
 DRIVE_TLS_HTTP_PORT=80
@@ -241,13 +246,28 @@ GRAFANA_ROOT_URL=https://drive.example.com/grafana/
 
 ### S3 内外端点分离
 
-- `DRIVE_S3_ENDPOINT_URL` 只供 API/Worker 在 Compose 网络内访问 MinIO。
+- `DRIVE_S3_ENDPOINT_URL` 只供 API/Worker 在 Compose 网络内访问 SeaweedFS S3。
 - `DRIVE_S3_PUBLIC_ENDPOINT_URL` 用于生成浏览器可访问的预签名 URL。
 - 默认外部端点是 `http://localhost:19000`。
 - 公网 TLS 模式使用独立 Host，例如 `https://storage.example.com`。
-- 外部端点不使用 `/s3` 等 base path。MinIO client 和 SigV4 会把 Host、路径、查询参数纳入签名，路径前缀重写会导致签名不匹配。
+- 外部端点不使用 `/s3` 等 base path。S3 客户端和 SigV4 会把 Host、路径、查询参数纳入签名，路径前缀重写会导致签名不匹配。
 - gateway 转发存储请求时必须保留原始 Host、查询字符串、HTTP 方法和请求体。
-- MinIO Console 不对宿主机发布；运维应通过容器内 CLI 或受控管理流程进行。
+- SeaweedFS 管理端口和目录界面不对宿主机发布；运维只使用受控 S3 管理命令和健康入口。
+
+正式镜像固定为：
+
+```text
+chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602
+OCI revision: 875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa
+```
+
+该固定镜像的 `/entrypoint.sh server` 会注入
+`-dir=/data -volume.max=0 -master.volumeSizeLimitMB=1024`；实际容器进程、日志和卷
+内容均确认 master、filer 与 volume 数据写入 `seaweedfs-data` 挂载的 `/data`。
+
+正式原始卷为新的 `seaweedfs-data`。旧 `minio-data` 只能由创建它的旧提交和固定
+MinIO 镜像读取，再按 `docs/object-storage-seaweedfs-migration.md` 通过 S3 迁移；
+禁止直接挂载到 SeaweedFS。
 
 ### 指标、日志与 tracing
 
@@ -305,13 +325,13 @@ Prometheus、Alertmanager、Grafana 只加入 `backend` 内网并使用独立 na
 | 命令 | 目标 |
 | --- | --- |
 | `config [-Quiet]` | 使用示例或实际环境文件校验 Compose 渲染结果 |
-| `up [-Build]` | 启动服务；默认 `--no-build --pull never`，只有显式 `-Build` 才构建项目镜像，migration、MinIO 初始化和 seed 由 Compose 依赖链执行 |
+| `up [-Build]` | 启动服务；默认 `--no-build --pull never`，只有显式 `-Build` 才构建项目镜像，migration、`storage-init` 和 seed 由 Compose 依赖链执行 |
 | `config/up/down/status/logs -Monitoring` | 启用可选 Prometheus、Alertmanager、Grafana profile；`up` 会校验非示例 Grafana 密码和 webhook 文件 |
-| `config -Tls [-Quiet]` | 校验公网域名格式、HTTPS S3 URL、Secure Cookie、API/MinIO CORS、Trusted Hosts 和 TLS Compose 渲染 |
+| `config -Tls [-Quiet]` | 校验公网域名格式、HTTPS S3 URL、Secure Cookie、API/S3 CORS、Trusted Hosts 和 TLS Compose 渲染 |
 | `up -Tls [-Build]` | 使用已有证书启动或更新公网 TLS gateway |
 | `status` | 查看全部容器与健康状态 |
 | `logs [-Service NAME] [-Tail N]` | 查看全部或指定服务日志 |
-| `backup -BackupDirectory PATH -ConfigEncryptionCertificateThumbprint THUMBPRINT` | 静默 source 写入面并创建 PostgreSQL、MinIO、Redis、OpenSearch、TLS 和 CMS 环境文件备份 |
+| `backup -BackupDirectory PATH -ConfigEncryptionCertificateThumbprint THUMBPRINT` | 静默 source 写入面并创建 PostgreSQL、SeaweedFS、Redis、OpenSearch、TLS 和 CMS 环境文件备份 |
 | `backup ... [-BackupSigningCertificateThumbprint THUMBPRINT] [-PackageEncryptionCertificateThumbprint THUMBPRINT]` | 可选生成 detached CMS `manifest.p7s`，并把全部数据 payload 加密认证后发布 |
 | `backup-verify -BackupPath PATH` | 校验 manifest/签名/加密 envelope、工件、PostgreSQL dump、隔离 tar 预扫描、精确代码/configuration lineage 及 16 个默认服务 image reference/actual image ID |
 | `restore -BackupPath PATH` | 把已校验备份恢复到不同且已停止的 Compose project，支持受限 ACL ForceRestore rollback |
@@ -332,7 +352,7 @@ Prometheus、Alertmanager、Grafana 只加入 `backend` 内网并使用独立 na
 | `down` | 停止服务并保留 named volumes |
 | `down -Volumes` | 显式销毁业务/TLS/监控 named volumes，并删除 TLS 续期、备份轮换和恢复演练计划任务；仅限确认备份后的环境清理 |
 
-脚本默认 `down` 不删除 volumes；`-Volumes` 是显式破坏性开关，并会删除 PostgreSQL、MinIO、OpenSearch、Redis、TLS/Certbot 和监控 volumes，以及三类对应计划任务。`.env.windows`、证书私钥、webhook 文件或备份内容不得写入 Git。普通 `up`、TLS 辅助 `run` 和内部恢复启动路径都禁止隐式拉取镜像；第三方镜像拉取、runtime/preview 构建、服务启动和备份恢复测试必须拆成独立步骤，便于看到具体耗时并避免一次命令同时占满 CPU、内存和磁盘。
+脚本默认 `down` 不删除 volumes；`-Volumes` 是显式破坏性开关，并会删除 PostgreSQL、SeaweedFS、OpenSearch、Redis、TLS/Certbot 和监控 volumes，以及三类对应计划任务。`.env.windows`、证书私钥、webhook 文件或备份内容不得写入 Git。普通 `up`、TLS 辅助 `run` 和内部恢复启动路径都禁止隐式拉取镜像；第三方镜像拉取、runtime/preview 构建、服务启动和备份恢复测试必须拆成独立步骤，便于看到具体耗时并避免一次命令同时占满 CPU、内存和磁盘。
 
 ### 首次公网证书签发
 
@@ -352,7 +372,7 @@ Prometheus、Alertmanager、Grafana 只加入 `backend` 内网并使用独立 na
 .\deploy\windows\manage.ps1 config -Tls -EnvFile .env.windows -Quiet
 ```
 
-`config -Tls` 只执行静态配置校验；它会拒绝回环/非 IPv4 gateway bind、`change-me` 示例密钥、过短 secret、关键 secret/连接 URL 中的 `${...}` 间接插值、数据库或 Redis URL 与独立密码不一致、含通配符的 Trusted Hosts、HTTP API CORS origin、与 API CORS 不完全一致或包含非 HTTPS 项的 MinIO CORS、带凭据/非 443 端口的 S3 URL 和不安全的证书名。URL 中的密码包含保留字符时仍须百分号编码，脚本会解码后与 `POSTGRES_PASSWORD`、`REDIS_PASSWORD` 比较。`tls-init` 还会拒绝 `example.com`、`.invalid`、`.test` 等示例邮箱域名。DNS 与公网可达性由上线后的 `tls-validate-public` 完成。
+`config -Tls` 只执行静态配置校验；它会拒绝回环/非 IPv4 gateway bind、`change-me` 示例密钥、过短 secret、关键 secret/连接 URL 中的 `${...}` 间接插值、数据库或 Redis URL 与独立密码不一致、含通配符的 Trusted Hosts、HTTP API CORS origin、与 API CORS 不完全一致或包含非 HTTPS 项的 `DRIVE_S3_CORS_ALLOWED_ORIGINS`、带凭据/非 443 端口的 S3 URL 和不安全的证书名。URL 中的密码包含保留字符时仍须百分号编码，脚本会解码后与 `POSTGRES_PASSWORD`、`REDIS_PASSWORD` 比较。`tls-init` 还会拒绝 `example.com`、`.invalid`、`.test` 等示例邮箱域名。DNS 与公网可达性由上线后的 `tls-validate-public` 完成。
 
 可选先使用 ACME staging 验证 challenge 链路。staging 会使用独立的 `<DRIVE_TLS_CERT_NAME>-staging` 证书名，把 HSTS `max-age` 强制为 0，且浏览器不会信任该证书：
 
@@ -369,7 +389,7 @@ Prometheus、Alertmanager、Grafana 只加入 `backend` 内网并使用独立 na
 .\deploy\windows\manage.ps1 tls-validate-public -EnvFile .env.windows
 ```
 
-`tls-validate-public` 会拒绝回环、私网、CGNAT、benchmark、documentation、multicast 和 reserved 地址；两个域名任一解析结果含非公网地址即失败。它还要求 API 和 S3 HTTP 地址精确返回同 Host 的 `308`，HTTPS `/readyz` 与 MinIO live probe 返回 200，TLS 握手通过系统信任链/主机名校验且证书至少还有 14 天有效期。成功或失败记录写到 `DRIVE_GOVERNANCE_RECORD_ROOT\tls-validations`，也可通过 `-TlsValidationDirectory` 覆盖。
+`tls-validate-public` 会拒绝回环、私网、CGNAT、benchmark、documentation、multicast 和 reserved 地址；两个域名任一解析结果含非公网地址即失败。它还要求 API 和 S3 HTTP 根地址精确返回同 Host 的 `308`，HTTPS `/readyz` 返回 200，HTTPS S3 根地址返回 `403 AccessDenied` XML，从而直接验证实际数据面而不是内部 master 健康端口；TLS 握手必须通过系统信任链/主机名校验且证书至少还有 14 天有效期。成功或失败记录写到 `DRIVE_GOVERNANCE_RECORD_ROOT\tls-validations`，也可通过 `-TlsValidationDirectory` 覆盖。
 
 `tls-init` 会记录已有 gateway 是否正在运行并先停止但保留其容器，再用同一 `gateway` service 启动临时 one-off ACME bootstrap 容器。bootstrap 期间只有 `/gateway-healthz` 和 `/.well-known/acme-challenge/` 可用，其他请求返回 `503`；证书签发与 TLS 模板 `nginx -t` 成功后，脚本删除临时容器并强制重建正式 gateway。签发、SAN 或模板检查失败时，脚本删除临时 bootstrap 并重新启动原 gateway，避免扩域或重签失败后中断已有公网入口。`tls-init` 只保证签发所需依赖和 gateway 就绪，首次正式部署随后必须执行 `up -Tls -Build`，确保 Preview 镜像、全部 Worker 和 Celery beat 一并启动。
 
@@ -425,12 +445,14 @@ docker compose -f compose.windows.yml --env-file .env.windows <command>
 
 推荐启动顺序：
 
-1. PostgreSQL、Redis、MinIO、OpenSearch 启动并通过各自 healthcheck。
-2. `migration` 一次性服务执行成功。
-3. API 启动并通过真实 `/readyz`。
-4. gateway 开始代理 API。
-5. 启动各职责 Worker。
-6. 最后启动单实例 `beat` 服务。
+1. PostgreSQL、Redis、SeaweedFS、OpenSearch 启动并通过各自 healthcheck。
+2. `migration` 与 `storage-init` 一次性服务执行成功。
+3. `storage-init` 必须完成签名 PUT/GET/DELETE、匿名拒绝、CORS allow/deny 和删除后
+   404 检查；任一失败都阻止 API/Worker 启动。
+4. API 启动并通过真实 `/readyz`。
+5. gateway 开始代理 API。
+6. 启动各职责 Worker。
+7. 最后启动单实例 `beat` 服务。
 
 ### 数据库连接池边界
 
@@ -489,7 +511,7 @@ Preview Worker 镜像必须包含：
 - `--max-tasks-per-child=20`
 - 外部命令超时、Celery soft time limit、hard time limit 和 rate limit
 
-临时目录不与 PostgreSQL、MinIO、OpenSearch 数据卷共用。详细要求见 `docs/deployment-preview-worker.md`。
+临时目录不与 PostgreSQL、SeaweedFS、OpenSearch 数据卷共用。详细要求见 `docs/deployment-preview-worker.md`。
 
 Search Worker 使用同一内容处理镜像执行图片/扫描 PDF OCR 和旧 Office/ODF 转换，但只消费 `search` 队列。默认使用独立 `SEARCH_TMPFS_SIZE=1073741824`、`--concurrency=2` 和 `--max-tasks-per-child=20`；不得与 Preview Worker 共享 tmpfs 或进程。
 
@@ -508,7 +530,7 @@ docker compose -f compose.windows.yml --env-file .env.windows exec worker-search
 
 - PostgreSQL 数据。
 - Redis 数据。
-- MinIO 对象。
+- SeaweedFS 对象（`seaweedfs-data`）。
 - OpenSearch 索引。
 - Certbot 证书、账户和续期状态。
 - ACME webroot、Certbot work/log。
@@ -519,6 +541,8 @@ docker compose -f compose.windows.yml --env-file .env.windows exec worker-search
 - named volumes 由 Compose 管理，不写入 Git 工作区。
 - 停止、重建 API/Worker/gateway 不删除数据卷。
 - `docker compose down` 默认保留数据。
+- 旧 `minio-data` 与新 `seaweedfs-data` 是不同实现的原始卷，禁止互相挂载、重命名或
+  原地复用；迁移只通过 S3。
 - 破坏性清理统一使用 `manage.ps1 down -Volumes`；启用监控时同时带 `-Monitoring`。底层 `docker compose down -v` 若缺少 profile 会遗漏对应 volumes，也不会删除 Windows TLS 续期、备份轮换和恢复演练计划任务。
 - OpenSearch 索引以 PostgreSQL 为事实来源，仍应保留重建索引脚本和演练流程。
 - Preview 临时目录属于可清理数据，不作为原文件或唯一预览事实来源。
@@ -537,14 +561,14 @@ gateway 必须负责：
 - 上传大小和超时。
 - 真实客户端 IP 头。
 - 安全响应头。
-- 禁止代理 MinIO Console。
+- 禁止代理 SeaweedFS 管理端口、目录界面或其他非 S3 管理入口。
 
 内部服务不得配置宿主 `ports`。可使用 `expose` 表达容器内端口，但安全边界依赖 Compose 网络和 gateway。
 
 生产环境还应：
 
 - 使用强随机 secret 和独立服务密码。
-- 定期轮换 MinIO、数据库和管理员凭据。
+- 定期轮换 S3、数据库和管理员凭据。
 - 保持 bucket 私有。
 - 关闭 FastAPI debug。
 - 配置准确的 CORS 和 Trusted Hosts。
@@ -559,7 +583,10 @@ gateway 必须负责：
 - Certbot 证书、账户和续期配置位于 named volumes，gateway 只读挂载证书；私钥不进入仓库或镜像。
 - HTTP-01 challenge 只允许 `/.well-known/acme-challenge/`；本机 API/S3 与 TLS 模板都拒绝未知 Host，本机 S3 仅额外允许 `localhost`/`127.0.0.1`。
 - 续期由宿主 PowerShell 命令或同一 Windows 用户的计划任务触发，不向容器挂载 Docker socket。
-- 当前机器已用自签名双域名证书在标准宿主 `80/443` 启动完整正式编排，验证 HTTP `308`、API `/healthz`/`/readyz`、HSTS、MinIO CORS、S3v4 对象往返、未知 Host 拒绝、临时 one-off bootstrap、原 gateway 恢复、大小写无关计划任务删除和全部卷/端口清理。真实受信证书、外部 DNS/网络、浏览器信任链和 Certbot renewal lineage 实际续期仍需在生产网络验收。
+- 旧 MinIO 编排曾在当前机器使用自签名双域名证书验证 HTTP `308`、API
+  `/healthz`/`/readyz`、HSTS、S3v4、未知 Host、ACME bootstrap 和彻底清理。
+  SeaweedFS 替换后的公网双域名、受信证书、外部 DNS/网络、浏览器信任链和 Certbot
+  renewal lineage 仍需重新执行，不能复用旧运行时结果。
 
 ## 11. 自动化备份、校验、轮换与隔离恢复
 
@@ -567,14 +594,20 @@ gateway 必须负责：
 
 ### 11.1 备份内容与一致性
 
-`backup` 会在维护窗口按 gateway、API/beat、各类 Worker、MinIO/Redis/OpenSearch 的顺序静默写入面，并逐服务记录 source 容器 ID、原始 `running`/`exited` 状态和 health。PostgreSQL 使用 custom-format `pg_dump`；MinIO、Redis、OpenSearch 和 `tls-certificates` 使用停止状态原始卷 tar。备份完成或中途失败后，脚本都会恢复并对账 source 原运行、退出与健康状态。
+`backup` 的当前实现会在维护窗口按 gateway、API/beat、各类 Worker、
+SeaweedFS/Redis/OpenSearch 的顺序静默写入面，并逐服务记录 source 容器 ID、原始
+`running`/`exited` 状态和 health。PostgreSQL 使用 custom-format `pg_dump`；
+SeaweedFS、Redis、OpenSearch 和 `tls-certificates` 使用停止状态原始卷 tar。
+SeaweedFS 适配已通过 backup/restore smoke `27 passed`，并完成真实
+source→backup→verify→隔离 target 全栈恢复；恢复对象、bucket、四依赖和完整服务
+健康均已核对，末尾 gateway Host 探针缺陷也已定向修复并验证。
 
 所有 `pg_dump`、卷归档、tar 安全扫描、卷清理和 PostgreSQL 恢复辅助容器统一带 `--pull never`、CPU、memory、memory-swap 与 PID 限额。默认值为 `DRIVE_BACKUP_HELPER_CPU_LIMIT=0.50`、`DRIVE_BACKUP_HELPER_MEMORY_LIMIT=512m`、`DRIVE_BACKUP_HELPER_PIDS_LIMIT=128`，memory-swap 与 memory 相同，因此不额外占用 Docker swap；内存配置只接受 `64m` 至 `4g`。`DRIVE_BACKUP_GZIP_LEVEL=1` 和 `DRIVE_BACKUP_PG_DUMP_COMPRESSION_LEVEL=1` 优先降低 CPU 峰值；正式卷归档创建后不再立刻额外执行一次完整 `tar -tzf`，但发布前仍会执行完整工件校验和隔离 tar 预扫描，恢复 rollback archive 仍保留创建后立即校验。
 
 正式备份目录只由校验通过的 `.partial-*` staging 原子发布，主要内容包括：
 
 - `postgres/postgres.dump`
-- `volumes/minio-data.tar.gz`
+- `volumes/seaweedfs-data.tar.gz`
 - `volumes/redis-data.tar.gz`
 - `volumes/opensearch-data.tar.gz`
 - `volumes/tls-certificates.tar.gz`
@@ -582,7 +615,14 @@ gateway 必须负责：
 - 归档时的 `compose.windows.yml` 与 Nginx templates
 - UTF-8 `manifest.json` 与 `manifest.sha256`
 
-manifest 记录工件大小和 SHA-256、source project、逐服务原状态、精确 Compose SHA-256、项目版本、Git commit、Alembic revision、PostgreSQL WAL LSN、CMS 证书 thumbprint，以及 `DRIVE_S3_BUCKET`、`DRIVE_OPENSEARCH_INDEX_NAME`、`DRIVE_TLS_CERT_NAME` lineage 名称。镜像清单覆盖 16 个无 profile 默认服务（`gateway`、`web`、`api`、`migration`、`seed`、`minio-init`、`beat`、5 个 Worker、PostgreSQL、Redis、MinIO、OpenSearch），每项 image ID 都来自该服务实际 Compose 容器，并在备份时确认与当前 image reference 指向的本地 image ID 一致。
+manifest 记录工件大小和 SHA-256、source project、逐服务原状态、精确 Compose
+SHA-256、项目版本、Git commit、Alembic revision、PostgreSQL WAL LSN、CMS 证书
+thumbprint，以及 `DRIVE_S3_BUCKET`、`DRIVE_OPENSEARCH_INDEX_NAME`、
+`DRIVE_TLS_CERT_NAME` lineage 名称。镜像清单覆盖 16 个无 profile 默认服务
+（`gateway`、`web`、`api`、`migration`、`seed`、`storage-init`、`beat`、5 个
+Worker、PostgreSQL、Redis、SeaweedFS、OpenSearch），每项 image ID 都来自该服务
+实际 Compose 容器，并在备份时确认与当前 image reference 指向的本地 image ID
+一致。
 
 备份根目录和 `.partial-*` staging 会自动关闭 ACL 继承，只允许当前 Windows 用户、SYSTEM、Administrators 完全控制；校验通过后 staging 原子改名为正式备份目录并保留该 restricted ACL。路径链中检测到 NTFS reparse point 时拒绝继续。
 
@@ -646,7 +686,7 @@ $backupPath = [string](
 .\deploy\windows\tests\backup-restore.integration.ps1 -PreflightOnly
 ```
 
-preflight 会渲染 Compose 并逐一检查本地镜像；缺少任一镜像时在创建证书、容器或卷之前快速退出。完整执行时固定 `COMPOSE_PARALLEL_LIMIT=1`、API/Worker 并发为 `1`，并降低测试专用 CPU/内存上限；OpenSearch 测试预算固定为 `1 CPU / 1280m` 容器内存和 `512m` JVM heap，正式 `.env.windows.example` 的 `2 CPU / 3g` 容器内存和 `1g` JVM heap 不受影响。默认恢复使用 `-NoStartAfterRestore`，随后只启动 PostgreSQL、Redis、MinIO、OpenSearch 验证恢复点。只有需要重新验收 gateway、API、全部 Worker 和 beat 时才显式执行：
+preflight 会渲染 Compose 并逐一检查本地镜像；缺少任一镜像时在创建证书、容器或卷之前快速退出。完整执行时固定 `COMPOSE_PARALLEL_LIMIT=1`、API/Worker 并发为 `1`，并降低测试专用 CPU/内存上限；OpenSearch 测试预算固定为 `1 CPU / 1280m` 容器内存和 `512m` JVM heap，正式 `.env.windows.example` 的 `2 CPU / 3g` 容器内存和 `1g` JVM heap 不受影响。默认恢复使用 `-NoStartAfterRestore`，随后只启动 PostgreSQL、Redis、SeaweedFS、OpenSearch 验证恢复点。只有需要重新验收 gateway、API、全部 Worker 和 beat 时才显式执行：
 
 ```powershell
 .\deploy\windows\tests\backup-restore.integration.ps1 -FullStackRestore
@@ -740,7 +780,11 @@ Copy-Item .env.windows .env.restore.windows
 - Redis/OpenSearch 同版本恢复仍可使用停止状态原始卷，并要求相同 image reference、image ID 和单节点拓扑。跨版本升级必须使用 `data-migration-export/apply/rollback`：Redis 导出 RDB，OpenSearch 导出 settings/mappings/bulk NDJSON；应用前创建 rollback export，拒绝导入到更低 major 版本，失败时自动回退。
 - `-ForceRestore` rollback archive 是失败时的尽力恢复机制；底层卷驱动、磁盘或 Docker 故障仍可能需要人工处理，因此发现回滚异常后不得删除脚本报告的受限 ACL 归档。
 - PostgreSQL 是核心事实来源；Redis 主要保存缓存、限流和队列状态，OpenSearch 索引可由 PostgreSQL 与对象存储重建，但仍应记录重建步骤和耗时。
-- 当前固定 MinIO Server/Client 镜像仍有 16/9 个 Critical 唯一 ID 基线。供应链门禁只阻断允许集之外的新 Critical；正式 `v1.0.0` tag/Release 在受支持修复镜像或可审计补丁镜像完成替换与重扫前保持阻塞，详见 `docs/minio-security-risk.md`。
+- 旧 MinIO Server/Client `16/9` 个 Critical 已通过 SeaweedFS 正式运行时替换关闭。
+  SeaweedFS 本地 Grype `v0.115.0` 为 `0 Critical / 1 High`；
+  `GHSA-hrxh-6v49-42gf` 的报告修复版本为 gRPC `1.82.1`。正式发布仍要求最终
+  SPDX/Grype、该 High 的外部风险接受或修复、全量数据迁移和升级/RPO-RTO 演练，
+  详见 `docs/minio-security-risk.md`。
 
 完整的 Sprint 12 证书创建、签名备份、完整包保护、离线轮换和跨版本迁移示例见 `docs/ops-sprint12-backup-portability.md`。
 
@@ -764,7 +808,16 @@ $backupPath = [string](
 
 公网 TLS 发布把上述三个命令分别加上 `-Tls`；首次签发先执行 `tls-init -Tls`，后续发布只需要 `up -Tls`。
 
-CI 使用变更范围路由，不再让所有提交重复执行全部部署门禁：`compose.windows.yml` 或 `.env.windows.example` 会同时进入 backend、Windows 和 MinIO 门禁；`deploy/windows/**/*.ps1` 只进入 Windows smoke；Nginx/监控配置进入 backend 的 Compose/template/smoke 路径。Rust crate 源码/测试只进入 `rust-desktop`，Tauri UI/配置/图标/签名只进入安装包，Tauri `src-tauri` Rust 入口才同时进入两者；CI workflow/router 和文档变更只保留 changes 路由校验。安装包 job 不再使用“任意 push 都执行”的兜底条件，只有安装包相关 scope 或手工完整运行才启动。MinIO Server/Client SBOM 与 Grype 在同一 runner 中依次生成和扫描，并与 Rust 依赖策略一起保留每周一 UTC 03:17 的定时门禁。
+CI 使用变更范围路由，不再让所有提交重复执行全部部署门禁：
+`compose.windows.yml` 或 `.env.windows.example` 会同时进入 backend、Windows 和
+object-storage 门禁；`deploy/windows/**/*.ps1` 只进入 Windows smoke；
+Nginx/监控配置进入 backend 的 Compose/template/smoke 路径。Rust crate 源码/测试
+只进入 `rust-desktop`，Tauri UI/配置/图标/签名只进入安装包，Tauri `src-tauri`
+Rust 入口才同时进入两者；CI workflow/router 和文档变更只保留 changes 路由校验。
+安装包 job 不再使用“任意 push 都执行”的兜底条件，只有安装包相关 scope 或手工完整
+运行才启动。SeaweedFS job 固定 image/digest，生成单份 SPDX SBOM 和 Grype JSON，
+Critical 非零即阻断，并与 Rust 依赖策略一起保留每周一 UTC 03:17 的定时门禁。本轮
+替换的远端 CI 结果必须以最终 push 触发的实际 run 为准。
 
 发布检查：
 
@@ -854,7 +907,8 @@ Set-Location ..
 
 该脚本使用真实 PostgreSQL、Redis、2-worker API 和 maintenance Worker，验证多进程聚合、Outbox/Search gauge、真实 Celery task 和 request/task/trace 日志，并自动清理临时容器和网络。
 
-对象存储应通过真实预签名 PUT/GET 集成测试验证 `http://localhost:19000`，不能只访问 MinIO 根路径判断成功。
+对象存储应通过真实预签名 PUT/GET 集成测试验证 `http://localhost:19000`，并检查
+`storage-init` 的全部 fail-closed 项，不能只访问 SeaweedFS healthz 判断成功。
 
 公网 TLS：
 
@@ -886,7 +940,7 @@ HTTP 检查应返回 `308` 并跳到同 Host 的 HTTPS。随后检查响应包�
     -NoStartAfterRestore
 ```
 
-隔离恢复后应检查 PostgreSQL 备份点、MinIO 对象、Redis key、OpenSearch index、Alembic revision、TLS symlink/SAN 和 CMS 环境文件；随后按需启动 target，验证 `/healthz`、`/readyz`、全部 Worker、beat、gateway 以及只有 gateway 发布宿主端口。验证结束后清理 target containers、volumes、networks、解密环境文件和临时证书。
+隔离恢复后应检查 PostgreSQL 备份点、SeaweedFS 对象、Redis key、OpenSearch index、Alembic revision、TLS symlink/SAN 和 CMS 环境文件；随后按需启动 target，验证 `/healthz`、`/readyz`、全部 Worker、beat、gateway 以及只有 gateway 发布宿主端口。验证结束后清理 target containers、volumes、networks、解密环境文件和临时证书。
 
 内部服务端口检查：
 
@@ -895,7 +949,7 @@ Get-NetTCPConnection -State Listen |
     Where-Object LocalPort -In 15432, 16379, 19200, 19600, 9000, 9001
 ```
 
-正式 Compose 下不应由 PostgreSQL、Redis、OpenSearch 或 MinIO 容器发布这些宿主端口。
+正式 Compose 下不应由 PostgreSQL、Redis、OpenSearch 或 SeaweedFS 容器发布这些宿主端口。
 
 停止并保留数据：
 
@@ -914,7 +968,7 @@ docker compose -f compose.windows.yml --env-file .env.windows down
 - `DRIVE_S3_PUBLIC_ENDPOINT_URL` 是否为 `http://localhost:19000` 或独立生产存储域名。
 - 是否错误加入 `/s3` 路径前缀。
 - gateway 是否保留原始 Host 和查询字符串。
-- API/Worker 是否误用外部端点访问 MinIO。
+- API/Worker 是否误用外部端点访问 SeaweedFS。
 
 ### `/readyz` 返回 503
 

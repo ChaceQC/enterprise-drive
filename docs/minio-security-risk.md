@@ -1,72 +1,140 @@
-# MinIO 安全风险与发布门禁
+# 对象存储安全风险与发布门禁
 
 ## 1. 当前结论
 
-截至 2026-08-05，正式 Compose 仍固定以下社区版 MinIO 镜像：
+截至 2026-08-05，正式 `compose.windows.yml` 已不再运行 MinIO Server/Client，改为：
+
+```text
+chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602
+OCI revision: 875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa
+```
+
+当前正式服务和数据边界：
+
+- 常驻服务为 `seaweedfs`，一次性门禁为 `storage-init`。
+- 正式原始卷为新的 `seaweedfs-data`。
+- MinIO `minio-data` 不属于当前服务卷，禁止直接挂载给 SeaweedFS。
+- 旧 MinIO Server/Client 的 `16/9` 个 Critical 基线已在**正式运行时替换层面**
+  关闭，不再作为当前 Compose 镜像的漏洞允许集。
+
+这不等于 `v1.0.0` 已满足发布条件。SeaweedFS Windows 备份恢复兼容已通过，但剩余
+High、最终远端供应链报告、旧数据全量迁移、UAT、soak、升级/RPO-RTO 和外部责任
+签字仍需完成。
+
+## 2. SeaweedFS 当前扫描
+
+本地使用 Grype `v0.115.0` 扫描当前固定 SeaweedFS 镜像：
+
+| 严重级别 | 唯一 ID 数量 | 当前记录 |
+| --- | ---: | --- |
+| Critical | 0 | 无 |
+| High | 1 | `GHSA-hrxh-6v49-42gf` |
+
+Grype 报告为该 High 标注的修复版本是 gRPC `1.82.1`。正式发布前必须完成以下任一项：
+
+1. 更新到包含修复依赖且通过全部对象存储兼容门禁的固定镜像；或
+2. 由外部风险责任人记录可达性、补偿控制、责任人、到期日和升级计划后签字接受。
+
+本地扫描结果不替代最终 CI 生成的 SPDX SBOM、Grype JSON 和 GitHub Actions 证据。
+本轮对象存储替换尚未把远端 CI 或 push 写成已完成。
+
+## 3. 已完成的直接验证
+
+当前实现已经获得以下本地直接证据：
+
+- 既有真实 S3 集成集合在 SeaweedFS 上为 `3 passed`。
+- 正式 `storage-init` 全部检查通过：
+  - 创建或确认私有 bucket；
+  - 签名 PUT；
+  - 签名 GET 与正文一致；
+  - 未签名 bucket 请求被拒绝；
+  - 未签名 object 请求被拒绝；
+  - 配置的 CORS origin 允许 PUT；
+  - 未配置 origin 不获得允许头；
+  - 签名 DELETE；
+  - 删除后的签名 GET 返回 404。
+- 一次真实 MinIO→SeaweedFS 单对象迁移保持：
+  - size；
+  - SHA-256；
+  - Content-Type；
+  - 用户 metadata；
+  - tags。
+- Windows backup/restore smoke `27 passed`；真实完整恢复完成 `seaweedfs-data`
+  归档、发布前 `backup-verify`、隔离 target 数据/全栈健康和对象恢复点对账。末尾
+  gateway 请求因 IP Host 命中 Nginx `444`，修复为显式 Host 后已定向验证
+  `healthz/readyz=200`。
+
+这些证据证明当前实现、代表性对象路径和 Windows 恢复兼容可工作，但不替代全量
+inventory、长期稳定性、性能、升级/RPO-RTO 和生产网络验收。
+
+## 4. 旧数据迁移门禁
+
+旧 `minio-data` 的安全迁移规则是不可豁免门禁：
+
+1. 只使用创建该卷时的旧提交、旧 `compose.windows.yml` 和固定 MinIO 镜像启动
+   source。
+2. 新 target 使用不同 Compose project 和新的 `seaweedfs-data`。
+3. source/target 之间只通过 S3 list/stat/get/put/tags 迁移，不交换原始卷。
+4. `scripts.object_storage_admin migrate` 必须先 dry-run；未完成 multipart 检测不完整
+   或数量非零时，`--apply` 必须失败。
+5. apply 后按 key、size、SHA-256、Content-Type、用户 metadata 和 tags 做全量
+   inventory 对账。
+6. UAT、soak、升级/回滚和 RPO/RTO 签字前保留旧 source、旧卷、旧镜像和旧提交。
+
+完整命令见 `docs/object-storage-seaweedfs-migration.md`。
+
+## 5. `v1.0.0` 发布决策
+
+对象存储相关门禁必须全部满足：
+
+- SeaweedFS image reference/digest 与 OCI revision 已写入发布证据。
+- 最终 SPDX SBOM 与 Grype JSON 对当前 digest 生成；Critical 为 0。
+- `GHSA-hrxh-6v49-42gf` 已修复或获得正式外部风险接受。
+- `storage-init` fail-closed 检查通过。
+- 真实 S3 multipart、预签名 PUT/GET、copy、delete、list、hash、失败清理和孤儿对象
+  扫描通过。
+- 旧 MinIO 全量 S3 级迁移和 inventory 对账通过。
+- SeaweedFS 版本的 Windows `backup`、`backup-verify`、隔离 `restore` 和恢复点检查
+  已通过本地完整兼容演练；正式候选仍需纳入升级/RPO-RTO 签字。
+- 同一候选完成 UAT、soak、升级/回滚和 RPO/RTO。
+- 真实 DNS/TLS、OIDC/LDAPS、告警接收、密钥保管和责任签字完成。
+
+上述门禁完成前，不创建 `v1.0.0` tag 或 GitHub Release。
+
+## 6. 历史 MinIO 风险记录
+
+以下内容保留用于解释替换决策，不代表当前正式 Compose 仍运行这些镜像。
+
+2026-08-03 至替换前固定的社区版镜像为：
 
 ```text
 minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
 minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727
 ```
 
-GitHub Actions run `30793900577` 的 SPDX/Grype 工件复核结果为：
+GitHub Actions run `30793900577` 的 SPDX/Grype 复核结果为：
 
-| 组件 | Critical matches | Critical 唯一 ID |
+| 历史组件 | Critical matches | Critical 唯一 ID |
 | --- | ---: | ---: |
 | MinIO Server | 25 | 16 |
 | MinIO Client | 9 | 9 |
 
-CI 已把允许集收紧到本次实际观测的 16/9 个唯一 ID；任何新增 Critical 仍会阻断。但允许集只表示“已登记的现存风险”，不表示漏洞已经修复。
+其中两个直接影响 MinIO 的 Critical：
 
-## 2. MinIO 自身 Critical
+- `GHSA-5cx5-wh4m-82fh`：OIDC JWT algorithm confusion。
+- `GHSA-jv87-32hw-hh99`：LDAP 用户枚举与无限尝试。
 
-当前 Server 允许集中包含两个直接影响 MinIO 的 Critical：
-
-- `GHSA-5cx5-wh4m-82fh`：OIDC JWT algorithm confusion。GitHub Advisory 标记受影响版本为 `< RELEASE.2026-03-17T21-25-16Z`，社区版 advisory 没有列出 patched version。
-- `GHSA-jv87-32hw-hh99`：LDAP 用户枚举与无限尝试。GitHub Advisory 同样标记 `< RELEASE.2026-03-17T21-25-16Z` 受影响，社区版 advisory 没有列出 patched version。
-
-官方 `minio/minio` 社区仓库已经归档，并在 README 中说明社区版不再维护。不能把“固定 digest”“关闭 Console”或“CI 没有新增 Critical”写成已获得上游安全修复。
-
-官方参考：
+当时的关闭 OIDC/LDAP/Console、内网隔离、固定 digest 和“只阻断新增 Critical”都只是
+可达性缓解，不能把旧镜像写成已修复。历史参考：
 
 - <https://github.com/advisories/GHSA-5cx5-wh4m-82fh>
 - <https://github.com/advisories/GHSA-jv87-32hw-hh99>
 - <https://github.com/minio/minio>
 
-## 3. 当前可达性缓解
-
-当前正式 Compose 已实施以下缓解：
-
-- 未配置 `MINIO_IDENTITY_OPENID_*`，OIDC 身份入口未启用。
-- 未配置 `MINIO_IDENTITY_LDAP_*`，LDAP 身份入口未启用。
-- `MINIO_BROWSER=off`，MinIO Console 不发布宿主端口。
-- MinIO API 只在 Compose 内网暴露，宿主只能经 Nginx gateway 的 S3 入口访问。
-- gateway 对 API 和本机 S3 入口执行 Host allowlist；未知 Host 返回 `444`。
-- MinIO Server/Client 使用 release + digest 双固定，CI 在同一 supply-chain runner 中生成两份 SBOM 和完整 Grype JSON，并阻断允许集之外的新 Critical；镜像配置变化和每周定时任务都会执行该门禁。
-
-这些措施降低当前配置下两个 MinIO 身份漏洞的可达性，但不改变镜像本身仍处于受影响版本范围的事实。以后若启用 OIDC、LDAP、Console 或新的 MinIO 管理入口，必须先完成镜像替换与重新扫描。
-
-## 4. `v1.0.0` 发布决策
-
-满足以下任一修复路线并完成全部验证前，不创建 `v1.0.0` tag 或 GitHub Release：
-
-1. 采用仍受支持、明确包含上述修复的 S3 兼容发行版，并完成许可证、采购/支持、配置迁移和数据兼容评审。
-2. 从可审计源码构建修复镜像，保存补丁来源、构建脚本、源码 commit、镜像 digest、SBOM、签名/证明材料和完整扫描报告。
-
-镜像替换后至少执行：
-
-- 更新 `.env.windows.example`、`compose.windows.yml`、`backend/docker-compose.yml` 和 CI 的固定 reference/digest。
-- 重新生成 Server/Client SPDX SBOM 与 Grype 报告，Critical 允许集归零或形成经签字的最小剩余集。
-- 运行真实 MinIO 对象读写、预签名下载、标准 S3 multipart、失败清理和孤儿对象扫描门禁。
-- 验证 `minio-init` 私有 bucket、匿名访问关闭和 CORS。
-- 完成 Windows 备份、`backup-verify` 和隔离恢复兼容性验证。
-- 由生产风险责任人记录接受范围、到期时间和回退方案。
-
-## 5. 当前允许集
-
-Server：
+历史允许集仅作为审计证据保留：
 
 ```text
+Server:
 CVE-2026-10536
 CVE-2026-11856
 CVE-2026-8924
@@ -83,11 +151,8 @@ GHSA-rm3j-f69w-wqmq
 GHSA-vgwf-h737-ff37
 GHSA-x527-x647-q7gg
 GO-2026-4337
-```
 
-Client：
-
-```text
+Client:
 GHSA-5cgq-3rg8-m6cv
 GHSA-89gr-r52h-f8rx
 GHSA-f5wc-c3c7-36mc
@@ -99,32 +164,23 @@ GHSA-x527-x647-q7gg
 GO-2026-4337
 ```
 
-允许集只在镜像 digest、Syft/Grype 版本和扫描日期可追溯时有效。扫描器数据库变化造成 ID 合并、拆分或严重级别变化时，应审查差异后更新，禁止直接扩大允许集。
+## 7. 候选评估记录
 
-## 6. 2026-08-05 候选替换复核
+- AIStor 候选
+  `quay.io/minio/aistor/minio:RELEASE.2026-07-24T16-43-31Z@sha256:17527b97a9e92dcc32b641dc161e4beb1eaf9a9198018c1489923c981f4af2ef`
+  在无有效 license 时进入 offline mode 并拒绝 S3 操作，因此未采用。
+- SeaweedFS `4.40` 在候选阶段完成镜像扫描、启动探测和 S3 兼容验证后进入正式
+  Compose。选择该镜像不能绕过数据迁移、备份恢复和发布环境责任签字。
 
-本轮没有直接替换正式 Compose 镜像，原因是可获取镜像与可用于正式数据面不是同一件事：
+## 8. 发布证据登记
 
-- 官方社区仓库当前已归档；公开 release 列表中较新的社区版仍早于 2026 年两项
-  MinIO Critical advisory 的披露与受影响边界，不能据此宣称漏洞已关闭。
-- 已拉取并核对
-  `quay.io/minio/aistor/minio:RELEASE.2026-07-24T16-43-31Z@sha256:17527b97a9e92dcc32b641dc161e4beb1eaf9a9198018c1489923c981f4af2ef`。
-  该镜像版本可启动，`/minio/health/live` 返回 200；但未安装有效 AIStor license
-  时日志明确进入 offline mode，并拒绝全部 S3 操作。因此，未完成许可证、支持条款、
-  离线恢复和续期流程前，不把它写入正式 Compose。
-- 已对
-  `chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602`
-  完成候选镜像扫描和启动探测；镜像 OCI metadata 对应版本 `4.40`、源码 revision
-  `875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa`。本轮尚未完成现有 MinIO 数据迁移、
-  S3 API/multipart、预签名、对象复制、匿名访问关闭、备份恢复和性能门禁，因此未采用。
-  不得仅因候选镜像扫描结果较少，就绕过数据兼容与运维评审。
+最终风险记录应包含：
 
-Sprint 13 的对象存储发布门禁保持以下顺序：
-
-1. 确认候选发行版的许可证、支持期限、升级通道和镜像签名/证明材料。
-2. 在隔离环境迁移代表性 `0.9.0` 数据，并验证对象数量、大小、SHA-256、metadata
-   和 multipart 未完成会话的处理边界。
-3. 只执行一次候选发行版的真实 S3 兼容测试、备份恢复兼容测试和最终 SBOM/Grype；
-   失败后只重跑受影响项。
-4. 把最终镜像 reference、digest、扫描工件、回退镜像和风险责任人写入
-   `docs/sprint13-release-readiness.md` 的发布证据，再解除 tag/Release 阻塞。
+- 当前 SeaweedFS image reference/digest、OCI revision；
+- Syft/Grype 版本、数据库时间、SPDX SBOM、完整 Grype JSON；
+- `GHSA-hrxh-6v49-42gf` 的修复或风险接受记录；
+- `storage-init` JSON 输出或等价日志；
+- S3 集成测试结果；
+- MinIO→SeaweedFS dry-run、apply、两端 inventory 和逐字段对账；
+- Windows 备份恢复、升级/回滚和 RPO/RTO 报告；
+- 风险责任人、安全负责人和发布负责人的签字日期。

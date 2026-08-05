@@ -30,14 +30,15 @@ x-app-environment: &app-environment
   DRIVE_DATABASE_MAX_OVERFLOW: "${DRIVE_DATABASE_MAX_OVERFLOW:-2}"
   DRIVE_DATABASE_POOL_TIMEOUT_SECONDS: "${DRIVE_DATABASE_POOL_TIMEOUT_SECONDS:-10}"
   DRIVE_REDIS_URL: "${DRIVE_REDIS_URL:?Set DRIVE_REDIS_URL in .env.windows}"
-  DRIVE_S3_ENDPOINT_URL: "${DRIVE_S3_ENDPOINT_URL:-http://minio:9000}"
+  DRIVE_S3_ENDPOINT_URL: "${DRIVE_S3_ENDPOINT_URL:-http://seaweedfs:9000}"
   DRIVE_S3_PUBLIC_ENDPOINT_URL: "${DRIVE_S3_PUBLIC_ENDPOINT_URL:?Set DRIVE_S3_PUBLIC_ENDPOINT_URL in .env.windows}"
   DRIVE_S3_BUCKET: "${DRIVE_S3_BUCKET:-enterprise-drive}"
-  DRIVE_S3_ACCESS_KEY_ID: "${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env.windows}"
-  DRIVE_S3_SECRET_ACCESS_KEY: "${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env.windows}"
+  DRIVE_S3_ACCESS_KEY_ID: "${DRIVE_S3_ACCESS_KEY_ID:?Set DRIVE_S3_ACCESS_KEY_ID in .env.windows}"
+  DRIVE_S3_SECRET_ACCESS_KEY: "${DRIVE_S3_SECRET_ACCESS_KEY:?Set DRIVE_S3_SECRET_ACCESS_KEY in .env.windows}"
   DRIVE_S3_REGION: "${DRIVE_S3_REGION:-us-east-1}"
   DRIVE_S3_CONTROL_REQUEST_TIMEOUT_SECONDS: "${DRIVE_S3_CONTROL_REQUEST_TIMEOUT_SECONDS:-30}"
   DRIVE_S3_CONTROL_PRESIGN_EXPIRES_SECONDS: "${DRIVE_S3_CONTROL_PRESIGN_EXPIRES_SECONDS:-300}"
+  DRIVE_S3_CORS_ALLOWED_ORIGINS: "${DRIVE_S3_CORS_ALLOWED_ORIGINS:?Set DRIVE_S3_CORS_ALLOWED_ORIGINS in .env.windows}"
   DRIVE_OPENSEARCH_URL: "${DRIVE_OPENSEARCH_URL:-http://opensearch:9200}"
   DRIVE_OPENSEARCH_INDEX_NAME: "${DRIVE_OPENSEARCH_INDEX_NAME:-drive_files_v1}"
   DRIVE_SEARCH_COMPLEX_EXTRACT_MAX_BYTES: "${DRIVE_SEARCH_COMPLEX_EXTRACT_MAX_BYTES:-20971520}"
@@ -183,7 +184,7 @@ x-app-common: &app-common
 x-app-dependencies: &app-dependencies
   migration:
     condition: service_completed_successfully
-  minio-init:
+  storage-init:
     condition: service_completed_successfully
   redis:
     condition: service_healthy
@@ -199,7 +200,7 @@ services:
         condition: service_healthy
       web:
         condition: service_healthy
-      minio-init:
+      storage-init:
         condition: service_completed_successfully
     environment:
       DRIVE_SERVER_NAME: "${DRIVE_SERVER_NAME:-localhost}"
@@ -309,7 +310,7 @@ services:
         condition: service_completed_successfully
       redis:
         condition: service_healthy
-      minio-init:
+      storage-init:
         condition: service_completed_successfully
       opensearch:
         condition: service_healthy
@@ -793,62 +794,70 @@ services:
       - no-new-privileges:true
     logging: *json-logging
 
-  minio:
-    image: "${MINIO_IMAGE:-minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e}"
+  seaweedfs:
+    image: "${SEAWEEDFS_IMAGE:-chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602}"
     restart: unless-stopped
-    command: ["server", "/data", "--console-address", ":9001"]
+    command:
+      - server
+      - -filer
+      - -s3
+      - -s3.port=9000
+      - "-s3.allowedOrigins=${DRIVE_S3_CORS_ALLOWED_ORIGINS:-http://localhost:15173}"
+      - -s3.iam=false
+      - -s3.allowDeleteBucketNotEmpty=false
+      - -s3.port.iceberg=0
+      - -filer.exposeDirectoryData=false
+      - -filer.disableDirListing=true
+      - -master.telemetry=false
     environment:
-      MINIO_ROOT_USER: "${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env.windows}"
-      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env.windows}"
-      MINIO_BROWSER: "off"
-      MINIO_API_CORS_ALLOW_ORIGIN: "${MINIO_CORS_ALLOWED_ORIGIN:-http://localhost:15173}"
+      AWS_ACCESS_KEY_ID: "${DRIVE_S3_ACCESS_KEY_ID:?Set DRIVE_S3_ACCESS_KEY_ID in .env.windows}"
+      AWS_SECRET_ACCESS_KEY: "${DRIVE_S3_SECRET_ACCESS_KEY:?Set DRIVE_S3_SECRET_ACCESS_KEY in .env.windows}"
       TZ: UTC
     expose:
       - "9000"
-      - "9001"
     volumes:
-      - minio-data:/data
+      - seaweedfs-data:/data
     networks:
       - backend
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/live"]
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS http://127.0.0.1:9333/cluster/healthz >/dev/null &&
+          test "$$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/)" = 403
       interval: 10s
       timeout: 5s
       retries: 10
       start_period: 20s
-    cpus: "${MINIO_CPU_LIMIT:-2.00}"
-    mem_limit: "${MINIO_MEMORY_LIMIT:-2g}"
-    pids_limit: ${MINIO_PIDS_LIMIT:-512}
+    cpus: "${SEAWEEDFS_CPU_LIMIT:-2.00}"
+    mem_limit: "${SEAWEEDFS_MEMORY_LIMIT:-2g}"
+    pids_limit: ${SEAWEEDFS_PIDS_LIMIT:-512}
     security_opt:
       - no-new-privileges:true
     logging: *json-logging
 
-  minio-init:
-    image: "${MINIO_MC_IMAGE:-minio/mc:RELEASE.2025-08-13T08-35-41Z@sha256:a7fe349ef4bd8521fb8497f55c6042871b2ae640607cf99d9bede5e9bdf11727}"
+  storage-init:
+    <<: *app-common
     restart: "no"
     depends_on:
-      minio:
+      seaweedfs:
         condition: service_healthy
     environment:
-      MINIO_ROOT_USER: "${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env.windows}"
-      MINIO_ROOT_PASSWORD: "${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env.windows}"
-      MINIO_BUCKET: "${DRIVE_S3_BUCKET:-enterprise-drive}"
-    entrypoint:
-      - /bin/sh
-      - -ec
+      DRIVE_S3_ENDPOINT_URL: "${DRIVE_S3_ENDPOINT_URL:-http://seaweedfs:9000}"
+      DRIVE_S3_ACCESS_KEY_ID: "${DRIVE_S3_ACCESS_KEY_ID:?Set DRIVE_S3_ACCESS_KEY_ID in .env.windows}"
+      DRIVE_S3_SECRET_ACCESS_KEY: "${DRIVE_S3_SECRET_ACCESS_KEY:?Set DRIVE_S3_SECRET_ACCESS_KEY in .env.windows}"
+      DRIVE_S3_BUCKET: "${DRIVE_S3_BUCKET:-enterprise-drive}"
+      DRIVE_S3_REGION: "${DRIVE_S3_REGION:-us-east-1}"
+      DRIVE_S3_CORS_ALLOWED_ORIGINS: "${DRIVE_S3_CORS_ALLOWED_ORIGINS:?Set DRIVE_S3_CORS_ALLOWED_ORIGINS in .env.windows}"
+      TZ: UTC
     command:
-      - >-
-        mc alias set local http://minio:9000 "$${MINIO_ROOT_USER}" "$${MINIO_ROOT_PASSWORD}";
-        mc mb --ignore-existing "local/$${MINIO_BUCKET}";
-        mc anonymous set none "local/$${MINIO_BUCKET}"
-    networks:
-      - backend
-    cpus: "${MINIO_INIT_CPU_LIMIT:-0.50}"
-    mem_limit: "${MINIO_INIT_MEMORY_LIMIT:-256m}"
-    pids_limit: ${MINIO_INIT_PIDS_LIMIT:-128}
-    security_opt:
-      - no-new-privileges:true
-    logging: *json-logging
+      - python
+      - -m
+      - scripts.object_storage_admin
+      - init
+    cpus: "${STORAGE_INIT_CPU_LIMIT:-0.50}"
+    mem_limit: "${STORAGE_INIT_MEMORY_LIMIT:-256m}"
+    pids_limit: ${STORAGE_INIT_PIDS_LIMIT:-128}
 
   opensearch:
     image: "${OPENSEARCH_IMAGE:-opensearchproject/opensearch:2.17.1}"
@@ -901,7 +910,7 @@ networks:
 volumes:
   postgres-data:
   redis-data:
-  minio-data:
+  seaweedfs-data:
   opensearch-data:
   tls-certificates:
   tls-acme-webroot:

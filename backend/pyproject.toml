@@ -67,5 +67,5 @@ addopts = "-q"
 pythonpath = ["."]
 testpaths = ["tests"]
 markers = [
-  "integration: tests that require external services such as MinIO",
+  "integration: tests that require external services such as S3-compatible object storage",
 ]

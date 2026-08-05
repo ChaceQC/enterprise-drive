@@ -22,6 +22,7 @@ data
 storage
 uploads
 minio-data
+seaweedfs-data
 postgres-data
 redis-data
 opensearch-data

@@ -811,8 +811,9 @@ function Invoke-WindowsPublicTlsValidation {
         $StorageDns = Get-WindowsPublicDnsEvidence -HostName $StorageHost
         $ApiRedirect = Invoke-WindowsHttpEvidence `
             -Uri "http://$ApiHost/readyz"
+        $StorageHealthPath = "/"
         $StorageRedirect = Invoke-WindowsHttpEvidence `
-            -Uri "http://$StorageHost/minio/health/live"
+            -Uri "http://$StorageHost$StorageHealthPath"
         if (
             $ApiRedirect.status_code -ne 308 -or
             $ApiRedirect.location -ne "https://$ApiHost/readyz"
@@ -822,7 +823,7 @@ function Invoke-WindowsPublicTlsValidation {
         if (
             $StorageRedirect.status_code -ne 308 -or
             $StorageRedirect.location -ne (
-                "https://$StorageHost/minio/health/live"
+                "https://$StorageHost$StorageHealthPath"
             )
         ) {
             throw "Storage HTTP endpoint did not return the expected HTTPS 308 redirect."
@@ -840,8 +841,11 @@ function Invoke-WindowsPublicTlsValidation {
         }
 
         $StorageReady = Invoke-WindowsHttpEvidence `
-            -Uri "https://$StorageHost/minio/health/live"
-        if ($StorageReady.status_code -ne 200) {
+            -Uri "https://$StorageHost$StorageHealthPath"
+        if (
+            $StorageReady.status_code -ne 403 -or
+            $StorageReady.body -notmatch "<Code>AccessDenied</Code>"
+        ) {
             throw "Public storage readiness returned HTTP $($StorageReady.status_code)."
         }
 

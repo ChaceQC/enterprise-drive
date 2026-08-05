@@ -436,4 +436,5 @@ uv run alembic upgrade 20260804_0024
 5. 执行跨租户、CSRF、开放重定向、state 重放、会话撤销和设备停止同步验收。
 6. 保存 provider/目录配置版本、测试时间、变更审批、run ID、审计 ID 和回滚步骤。
 
-真实身份源验收不替代既有 DNS/受信 TLS、MinIO 修复镜像、备份恢复和正式发布门禁。
+真实身份源验收不替代既有 DNS/受信 TLS、SeaweedFS 最终扫描/High 风险签字、
+MinIO→SeaweedFS 全量迁移、正式升级/RPO-RTO 和发布门禁。

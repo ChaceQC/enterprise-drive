@@ -57,7 +57,7 @@
 - Sprint 10 / `0.7.0`：TypeScript + React + Vite Web 用户端与管理后台已完成代码侧交付，覆盖文件/批量/上传下载、搜索预览回收站、分享通知、公开分享、管理页面、生成式 OpenAPI client、Compose Web 发布和 Playwright E2E。
 - Sprint 11 / `0.8.0`：`BE-040` 至 `BE-043`、`FE-010` 至 `FE-011` 已完成并通过远端 CI；覆盖登录失败防护、账号锁定、密码与会话管理、OIDC/OAuth 2.1 + PKCE、LDAP 同步，以及用户端和管理端身份页面。
 - Sprint 12 / `0.9.0`：`BE-046` 至 `BE-050`、`FE-012`、`OPS-001` 至 `OPS-003`、`QA-001` 至 `QA-002` 已完成代码侧交付；覆盖大目录权限重算、生命周期策略/运行、审计分区/归档/投递、Outbox dead-letter、治理页面/看板、备份签名/完整包保护/离线副本、Redis/OpenSearch 可移植迁移和四依赖故障恢复矩阵。legal hold、高级内容分类和复杂 DLP 继续归远期 `GOV-001`。
-- Sprint 13 / `1.0.0`：后端、Web、桌面端统一 UAT、性能、安全、升级回滚和正式发布。
+- Sprint 13 / `1.0.0`：候选版本与工件基线已冻结，正式对象存储已从 MinIO 替换为 SeaweedFS `4.40`；后端、Web、桌面端统一 UAT、性能、长期稳定性、升级回滚和正式发布仍按清单收口。
 
 虚拟盘、macOS/Linux 文件提供器、WebDAV、SMB、移动端、在线协同、复杂 DLP、跨地域双活和计费已进入带编号与入口条件的远期 Backlog。
 
@@ -65,13 +65,22 @@
 
 当前仓库已完成 Sprint 1 至 Sprint 12 的代码侧交付，并把后端、Web、桌面安装包、更新器和 OpenAPI 契约统一到 Sprint 13 候选版本 `1.0.0`。其中 Sprint 7 和 Sprint 8 覆盖 `DC-001` 至 `DC-010`，Sprint 9 覆盖 `BE-036` 至 `BE-039`、`BE-044`、`BE-045`，Sprint 10 覆盖 `FE-001` 至 `FE-009`，Sprint 11 覆盖 `BE-040` 至 `BE-043`、`FE-010` 至 `FE-011`，Sprint 12 覆盖 `BE-046` 至 `BE-050`、`FE-012`、`OPS-001` 至 `OPS-003`、`QA-001` 至 `QA-002`。当前运行时 OpenAPI 快照统计为 116 个路径、148 个操作、178 个 schemas；数据库 migration head 为 `20260804_0026`。`frontend/` 包含 React/Vite/TypeScript 用户端与管理后台、生成式 API client、Cookie Session/CSRF、账号安全与 OIDC/LDAP 页面、治理看板、统一错误恢复和 Playwright E2E；桌面端包含 Tauri 2 应用、设备会话、双向同步、SQLite 离线队列、DTP/1 传输、Windows Credential Manager/路径适配、签名更新回退和脱敏诊断。
 
+正式 `compose.windows.yml` 当前使用
+`chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602`
+（OCI revision `875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa`）、`seaweedfs`、
+fail-closed `storage-init` 和新的 `seaweedfs-data`。既有真实 S3 集成集合为
+`3 passed`，正式初始化检查和一次真实 MinIO→SeaweedFS 单对象迁移已验证；旧
+`minio-data` 只能由旧提交和旧固定镜像读取，再走 S3 级迁移，禁止直接挂载给
+SeaweedFS。完整步骤见
+[对象存储 S3 级迁移](docs/object-storage-seaweedfs-migration.md)。
+
 Sprint 3 上传主链路已包含 `upload_sessions`、multipart init/presign/complete/abort、秒传、服务端 SHA-256、最终对象归档、失败清理、过期会话回收、限流、下载、容量流水以及对象/回收站治理。multipart complete 使用标准 S3 HTTP 控制面；同 hash 首次上传在 PostgreSQL 中通过原子 upsert 只创建一个 blob，异常 complete 可从对象事实恢复，失败路径会清理受控 `uploads/...` 临时对象。
 
 配额管理已提供 `GET /api/v1/admin/quotas/accounts`、`PUT /api/v1/admin/quotas/accounts/{owner_type}/{owner_id}` 以及配额策略的列表、创建、更新和停用接口。空间、租户、用户和策略账户继续由数据库事实驱动；更新现有额度需要乐观前置条件，新额度不得低于已用容量，数据库中已建立的用户/租户账户优先于环境默认值。`quota.reconcile_space_usage` 当前仍只校准空间账户；部门/临时额度和多维通用校准继续归后续治理。
 
 回收站保留期任务 `file.cleanup_expired_trash` 已接入 `maintenance` 队列和 Celery beat，默认保留 30 天。任务按租户扫描超过保留期的删除批次根节点，排除同一 `deleted_at/deleted_by` 批次内的子节点，事务锁定根节点与全部已删除后代后复用彻底删除语义：删除版本和节点、扣减 blob 引用、按版本流水释放全部配额维度、写入搜索删除事件与系统审计。迁移 `20260731_0013` 增加 `idx_nodes_trash_cleanup`，`/metrics` 暴露 `trash_cleanup_total{status}` 和 `trash_cleanup_released_bytes_total`。
 
-项目文件传输正式使用 `Drive Transfer Protocol v1`（`DTP/1`）。上传、文件下载和外链下载允许客户端发送 `X-Drive-Transfer-Protocol: DTP/1`，未知版本返回 HTTP 426；JSON 传输响应返回 `protocol_version=DTP/1`，代理文件流返回同名响应头。DTP/1 只定义 HTTPS 之上的状态机、分片、断点、校验、幂等和错误码；普通文件正文通过短期预签名 HTTPS 直达 MinIO/S3，高密级或强审计场景可使用 `GET /api/v1/files/{node_id}/content` 由 API 流式代理。
+项目文件传输正式使用 `Drive Transfer Protocol v1`（`DTP/1`）。上传、文件下载和外链下载允许客户端发送 `X-Drive-Transfer-Protocol: DTP/1`，未知版本返回 HTTP 426；JSON 传输响应返回 `protocol_version=DTP/1`，代理文件流返回同名响应头。DTP/1 只定义 HTTPS 之上的状态机、分片、断点、校验、幂等和错误码；普通文件正文通过短期预签名 HTTPS 直达 S3 兼容对象存储，高密级或强审计场景可使用 `GET /api/v1/files/{node_id}/content` 由 API 流式代理。
 
 文件安全策略已提供 `/api/v1/admin/file-security/policies` 的列表、创建、更新和停用接口，可按扩展名或 MIME 前缀选择 `presigned`、`proxy`、`watermark`、`blocked` 模式，并记录密级、策略版本和审计。当前版本与历史版本下载都会执行关键字 DLP 的 audit/block、fail-closed 和自动选路；内部图片/PDF 可通过 `GET /api/v1/files/{node_id}/watermarked-content` 生成动态水印。公开外链支持 `delivery_mode=presigned|watermark`，水印派生对象使用真实文件名、MIME 和大小记账；要求代理的策略会阻止外链直连。搜索正文已支持图片/扫描 PDF OCR；外链代理流、历史版本专用水印、legal hold 和高级内容分类继续归后续治理。
 
@@ -131,21 +140,24 @@ uv run python scripts/smoke_observability_docker.py `
   --image enterprise-drive-backend:windows-local
 ```
 
-真实 MinIO 集成测试默认跳过；需要本机已有 MinIO 或通过 Docker 启动临时 MinIO 后显式打开：
+真实 S3 兼容集成测试默认跳过；需要本机已有 SeaweedFS 后显式打开：
 
 ```powershell
 Set-Location backend
-$env:DRIVE_RUN_MINIO_TESTS = "1"
-$env:DRIVE_TEST_MINIO_ENDPOINT = "http://127.0.0.1:19000"
-$env:DRIVE_TEST_MINIO_ACCESS_KEY = "drive-dev"
-$env:DRIVE_TEST_MINIO_SECRET_KEY = "drive-dev-password"
-$env:DRIVE_TEST_MINIO_BUCKET = "enterprise-drive-test"
-uv run pytest tests/test_storage_minio_integration.py -q
+$env:DRIVE_RUN_S3_TESTS = "1"
+$env:DRIVE_TEST_S3_ENDPOINT = "http://127.0.0.1:19000"
+$env:DRIVE_TEST_S3_ACCESS_KEY = "drive-dev"
+$env:DRIVE_TEST_S3_SECRET_KEY = "drive-dev-password"
+$env:DRIVE_TEST_S3_BUCKET = "enterprise-drive-test"
+uv run pytest tests/test_storage_s3_integration.py -q
 ```
 
-GitHub `backend-ci` 会启动临时 MinIO，并运行这组真实对象存储集成测试，覆盖基于公共预签名 API 和标准 S3 HTTP 的 multipart 控制面、预签名上传/下载、copy、delete、list、hash 校验和孤儿最终对象扫描。
+GitHub `backend-ci` 的当前工作流会启动临时 SeaweedFS，并运行这组真实对象存储集成
+测试，覆盖基于公共预签名 API 和标准 S3 HTTP 的 multipart 控制面、预签名上传/下载、
+copy、delete、list、hash 校验和孤儿最终对象扫描。本轮替换是否通过远端 job 仍以最终
+push 触发的实际 run 为准。
 
-`backend-ci` 先通过 `.github/scripts/ci_scope.py` 计算变更范围：Rust crate 源码/测试只运行 `rust-desktop`，Tauri UI/配置/图标/签名只运行安装包 job，Tauri Rust 入口同时运行两者；普通库源码不会因为 push 自动重复构建 NSIS。CI workflow/router、桌面 README 和其他文档变更只保留 `changes` 轻量校验，相关业务代码未变化时直接跳过对应重 job。Rust job 先跑 workspace tests，再以 `--no-deps` 执行 Clippy；Rust 校验与安装包 job共享按 `Cargo.lock`/toolchain 计算的 Cargo registry/git cache，安装包先一次 `cargo fetch` 再以 offline 模式构建。Sprint 13 的安装包 job 还会从 Git 历史构建上一版本回滚安装包，对当前/回滚包执行 Authenticode 与更新签名验证，并生成 `release-manifest.json` 和 `SHA256SUMS`。相同分支的新提交会取消旧运行，MinIO 与 Rust 依赖供应链扫描每周一 UTC 03:17 额外执行，手工 `workflow_dispatch` 仍运行完整门禁。
+`backend-ci` 先通过 `.github/scripts/ci_scope.py` 计算变更范围：Rust crate 源码/测试只运行 `rust-desktop`，Tauri UI/配置/图标/签名只运行安装包 job，Tauri Rust 入口同时运行两者；普通库源码不会因为 push 自动重复构建 NSIS。CI workflow/router、桌面 README 和其他文档变更只保留 `changes` 轻量校验，相关业务代码未变化时直接跳过对应重 job。Rust job 先跑 workspace tests，再以 `--no-deps` 执行 Clippy；Rust 校验与安装包 job共享按 `Cargo.lock`/toolchain 计算的 Cargo registry/git cache，安装包先一次 `cargo fetch` 再以 offline 模式构建。Sprint 13 的安装包 job 还会从 Git 历史构建上一版本回滚安装包，对当前/回滚包执行 Authenticode 与更新签名验证，并生成 `release-manifest.json` 和 `SHA256SUMS`。相同分支的新提交会取消旧运行，SeaweedFS 与 Rust 依赖供应链扫描每周一 UTC 03:17 额外执行，手工 `workflow_dispatch` 仍运行完整门禁。
 
 BE-029 目标规模门禁已完成：10,000 节点、100 万 OpenSearch 文档和 1,000 万审计日志均已进入真实 target 环境；search、audit、mixed、upload-init 沿用既有通过工件，本轮只补此前未通过的 `upload_complete`。最终计入 1,936 个 complete 样本、0 失败，吞吐 `58.364 RPS`，不含 storage merge 的 API P95 为 `790 ms`，端到端 P95 为 `840 ms`，storage merge P95 为 `71 ms`，`report.json passed=true`；2,000 个准备节点已全部清理。详见 `docs/performance-benchmark.md`。
 
@@ -183,12 +195,13 @@ GitHub `backend-ci` 同时启动临时 PostgreSQL 16 容器、执行 Alembic upg
 - `docs/ops-sprint12-backup-portability.md`：manifest 来源签名、完整包保护、离线副本与 Redis/OpenSearch 可移植迁移。
 - `docs/deployment-preview-worker.md`：预览 Worker 资源配额和部署说明。
 - `docs/maintenance-monitoring.md`：maintenance 周期任务状态、指标、告警规则和排障顺序。
-- `docs/minio-security-risk.md`：固定 MinIO 镜像的 Critical 基线、可达性缓解和正式发布门禁。
+- `docs/minio-security-risk.md`：SeaweedFS 替换后的对象存储安全风险、历史 MinIO 基线和正式发布门禁。
 - `docs/performance-benchmark.md`：`BE-029` Locust 性能基准、fixture、资源边界和报告格式。
 - `docs/security-testing.md`：`BE-030` 威胁模型、Bandit/pip-audit 门禁、登录防护和安全修复记录。
 - `docs/identity-security.md`：Sprint 11 本地账号、OIDC/PKCE、LDAP 同步、会话撤销和身份安全边界。
 - `docs/release-v1.0.0.md`：`v1.0.0` 候选发布说明、兼容性、工件和阻塞项。
 - `docs/sprint13-release-readiness.md`：`REL-001` 至 `REL-005` 的 UAT、性能、安全、升级回滚、RPO/RTO 和签字清单。
+- `docs/object-storage-seaweedfs-migration.md`：旧 MinIO 原始卷只读边界、双 S3 端点迁移、multipart fail-closed 和 inventory 对账。
 
 ## 部署说明
 
@@ -196,14 +209,14 @@ GitHub `backend-ci` 同时启动临时 PostgreSQL 16 容器、执行 Alembic upg
 
 应用本身也会在 `DRIVE_ENVIRONMENT=production` 时执行 fail-fast 配置校验，因此绕过 `manage.ps1` 直接启动 API、Worker、beat、migration 或 seed 仍会拒绝示例/过短 secret、无强密码连接 URL、关闭限流、Wildcard Trusted Hosts 和不安全公网 HTTP/Cookie 配置。默认 `localhost:18080/19000` HTTP 基线仅在全部浏览器与 S3 公共端点均为 localhost/回环地址时允许。
 
-Compose 内的 Nginx gateway 是唯一宿主端口入口。默认本机模式使用 `http://localhost:18080` 同时提供 Web 页面和 API，S3 外部端点为 `http://localhost:19000`；内部 `web` 服务只在 Compose 网络暴露 `8080`。公网 TLS 模式已提供 ACME HTTP-01 bootstrap、Certbot 证书卷、TLS server block、HTTP `308` 跳转、`80/443` 双域名 Host 分流、证书续期与 Nginx 热重载命令；生产使用 `https://drive.example.com`、`https://storage.example.com` 时，必须先配置真实 DNS、邮箱、API/MinIO CORS、Trusted Hosts、Secure Cookie 和 S3 公共端点，执行 `manage.ps1 tls-init -Tls` 后再运行 `manage.ps1 up -Tls -Build`。Web、API、Worker、PostgreSQL、Redis、OpenSearch、MinIO API/Console 等内部服务不发布宿主端口；Worker metrics `9100` 也只暴露在 Compose 网络内。
+Compose 内的 Nginx gateway 是唯一宿主端口入口。默认本机模式使用 `http://localhost:18080` 同时提供 Web 页面和 API，S3 外部端点为 `http://localhost:19000`；内部 `web` 服务只在 Compose 网络暴露 `8080`。公网 TLS 模式已提供 ACME HTTP-01 bootstrap、Certbot 证书卷、TLS server block、HTTP `308` 跳转、`80/443` 双域名 Host 分流、证书续期与 Nginx 热重载命令；生产使用 `https://drive.example.com`、`https://storage.example.com` 时，必须先配置真实 DNS、邮箱、API/S3 CORS、Trusted Hosts、Secure Cookie 和 S3 公共端点，执行 `manage.ps1 tls-init -Tls` 后再运行 `manage.ps1 up -Tls -Build`。Web、API、Worker、PostgreSQL、Redis、OpenSearch 和 SeaweedFS S3 等内部服务不发布宿主端口；Worker metrics `9100` 也只暴露在 Compose 网络内。
 
-正式编排还包含真实 PostgreSQL `/readyz` 探针、独立 Celery beat、隔离的 Preview Worker、内部 Web、named volumes 和自动化备份恢复。`manage.ps1 backup` 会生成 PostgreSQL custom dump、MinIO/Redis/OpenSearch/TLS 停止状态卷归档、CMS 环境文件密文和严格 manifest；manifest v2 从 16 个无 profile 默认服务的实际 Compose 容器记录 image ID，并记录工件大小/SHA-256、精确 `compose.windows.yml` SHA-256、Git commit、项目版本、S3 bucket、OpenSearch index、`DRIVE_TLS_CERT_NAME` lineage 名称、Alembic revision 与 WAL LSN。传入签名证书后会生成 detached CMS `manifest.p7s`；传入完整包加密证书后，payload 使用 AES-256-CBC，加上 HMAC-SHA256 完整性和 RSA-OAEP-SHA256 密钥封装，发布目录不保留明文数据工件。`backup-verify` 要求当前 Git HEAD、Compose、项目版本、configuration lineage 和全部 16 个服务镜像与 manifest 精确一致，并在无网络、只读、drop capabilities 的临时容器/卷中预解包扫描 tar。
+正式编排还包含真实 PostgreSQL `/readyz` 探针、独立 Celery beat、隔离的 Preview Worker、内部 Web、named volumes 和自动化备份恢复。对象存储替换后的脚本与 manifest 逻辑卷名称已经切换为 `seaweedfs-data`，目标归档名为 `volumes/seaweedfs-data.tar.gz`；Windows backup/restore smoke `27 passed`，真实完整恢复已通过发布前校验、隔离 target 四依赖/全栈健康和对象恢复点对账。既有备份格式继续记录 16 个无 profile 默认服务的实际 Compose image ID、工件大小/SHA-256、精确 `compose.windows.yml` SHA-256、Git commit、项目版本、S3 bucket、OpenSearch index、`DRIVE_TLS_CERT_NAME` lineage 名称、Alembic revision 与 WAL LSN；manifest v2、detached CMS、完整包保护和隔离 tar 扫描要求保持不变。
 
-`backup` 和 `restore` 同时使用 project 级与逐 physical volume Windows mutex；备份根目录会拒绝卷根、仓库目录/祖先及未预先使用 restricted ACL 的既有非空目录，staging/正式备份、`-ForceRestore` rollback archive 和恢复后的 CMS 文件会自动应用只允许当前用户、SYSTEM、Administrators 的 restricted ACL。`restore` 只接受不同且已停止的 Compose project，并拒绝 source/target 卷重叠、错误卷标签、foreign attachment；使用 `-ForceRestore` 时会先归档原非空卷，失败后还原原非空卷、清空原空卷、删除新卷并停止 target，回滚异常则保留并报告归档路径。恢复提交后的 rollback cleanup 异常只报告维护失败，不会反向回滚已恢复数据。CMS 明文输出必须使用仓库和备份目录外的绝对新文件路径、已有父目录，并只在本次恢复模式全部门禁成功的末尾原子发布；若发布竞态中目标被其他进程创建，脚本保留该 foreign file。真实随机 source/target project 演练已验证数据库和对象回到同一备份点、CMS 环境文件解密、TLS lineage、Worker/beat、gateway 与健康检查。
+`backup` 和 `restore` 同时使用 project 级与逐 physical volume Windows mutex；备份根目录会拒绝卷根、仓库目录/祖先及未预先使用 restricted ACL 的既有非空目录，staging/正式备份、`-ForceRestore` rollback archive 和恢复后的 CMS 文件会自动应用只允许当前用户、SYSTEM、Administrators 的 restricted ACL。`restore` 只接受不同且已停止的 Compose project，并拒绝 source/target 卷重叠、错误卷标签、foreign attachment；使用 `-ForceRestore` 时会先归档原非空卷，失败后还原原非空卷、清空原空卷、删除新卷并停止 target，回滚异常则保留并报告归档路径。恢复提交后的 rollback cleanup 异常只报告维护失败，不会反向回滚已恢复数据。CMS 明文输出必须使用仓库和备份目录外的绝对新文件路径、已有父目录，并只在本次恢复模式全部门禁成功的末尾原子发布；若发布竞态中目标被其他进程创建，脚本保留该 foreign file。SeaweedFS 版本已重新执行真实随机 source/target 完整恢复门禁；生产升级恢复耗时与 RPO/RTO 仍需使用最终候选单独签字。
 
 `backup-retention` 按保留天数和最少份数轮换经过校验的托管备份，`backup-offline-rotate` 把指定或最新托管备份原子复制到离线目录，逐文件对账 size/SHA-256 并记录 canonical inventory digest；`restore-drill` 把最新或指定备份恢复到随机隔离 Compose project 并在结束后删除 target 容器/卷。Redis/OpenSearch 升级不再复制原始卷：`data-migration-export` 生成 Redis RDB 和 OpenSearch settings/mappings/bulk NDJSON，`data-migration-apply` 在修改目标前创建 rollback export、拒绝向更低 major 版本迁移，并在失败时自动回退。完整命令、保留规则和报告字段见 [Sprint 12 备份安全、离线副本与跨版本数据迁移](docs/ops-sprint12-backup-portability.md)。
 
-备份安全边界如下：未启用完整包保护时，PostgreSQL dump、MinIO/Redis/OpenSearch 原始卷归档和 TLS 证书卷仍依赖 BitLocker、restricted NTFS ACL 与加密介质；detached CMS 签名验证来源和 manifest 完整性，但证书信任链、吊销和双人保管仍由组织 PKI 负责；完整包加密证书私钥丢失会使备份永久不可恢复。`-ForceRestore` rollback 与跨版本自动回退都属于有证据的尽力恢复。当前 MinIO Server/Client 仍有 16/9 个 Critical 唯一 ID 基线，其中两个 MinIO 自身 Critical 在固定社区镜像中没有上游 patched version；CI 阻断新增 Critical 不代表现有风险已经消除。正式 `v1.0.0` tag/Release 在采用受支持修复镜像或可审计补丁镜像并重新扫描前保持阻塞，详见 [MinIO 安全风险与发布门禁](docs/minio-security-risk.md)。
+备份安全边界如下：未启用完整包保护时，PostgreSQL dump、SeaweedFS/Redis/OpenSearch 原始卷归档和 TLS 证书卷仍依赖 BitLocker、restricted NTFS ACL 与加密介质；detached CMS 签名验证来源和 manifest 完整性，但证书信任链、吊销和双人保管仍由组织 PKI 负责；完整包加密证书私钥丢失会使备份永久不可恢复。`-ForceRestore` rollback 与跨版本自动回退都属于有证据的尽力恢复。旧 MinIO `16/9` Critical 已退出正式运行时；SeaweedFS 本地 Grype `v0.115.0` 为 `0 Critical / 1 High`，`GHSA-hrxh-6v49-42gf` 仍需外部风险接受或修复。最终扫描、全量迁移、UAT、soak、升级/RPO-RTO 和外部签字完成前，正式 `v1.0.0` tag/Release 继续阻塞，详见 [对象存储安全风险与发布门禁](docs/minio-security-risk.md)。
 
-本机已用自签名双域名证书在标准宿主 `80/443` 启动完整编排，验证 HTTP `308`、API readiness、MinIO CORS/S3v4、临时 ACME bootstrap、原 gateway 恢复和彻底清理；公网受信证书签发与真实续期仍需要生产 DNS/网络环境。生产完成后使用 `tls-validate-public` 一次性验证双域名只解析到公网地址、HTTP 精确 `308`、HTTPS readiness、证书链和剩余有效期，并保存 JSON 记录。完整流程见 [Windows 11 Docker 部署说明](docs/deployment-windows-docker.md)，预览资源限制见 [预览 Worker 部署说明](docs/deployment-preview-worker.md)。Kubernetes、systemd 仅作为未来可选迁移方案。
+本机旧 MinIO 栈曾用自签名双域名证书在标准宿主 `80/443` 验证 HTTP `308`、API readiness、S3v4、临时 ACME bootstrap、原 gateway 恢复和彻底清理；SeaweedFS 替换后的 Windows 备份恢复已重新验证，公网双域名仍需在真实网络执行。公网受信证书签发与真实续期需要生产 DNS/网络环境。生产完成后使用 `tls-validate-public` 一次性验证双域名只解析到公网地址、HTTP 精确 `308`、HTTPS readiness、证书链和剩余有效期，并保存 JSON 记录。完整流程见 [Windows 11 Docker 部署说明](docs/deployment-windows-docker.md)，预览资源限制见 [预览 Worker 部署说明](docs/deployment-preview-worker.md)。Kubernetes、systemd 仅作为未来可选迁移方案。

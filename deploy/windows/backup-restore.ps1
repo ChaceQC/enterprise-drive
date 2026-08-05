@@ -624,7 +624,7 @@ function Get-WindowsBackupVolumeMap {
     foreach ($LogicalName in @(
         "postgres-data",
         "redis-data",
-        "minio-data",
+        "seaweedfs-data",
         "opensearch-data",
         "tls-certificates"
     )) {
@@ -1411,7 +1411,7 @@ function Restore-WindowsSourceServiceState {
     $RecoveryErrors = New-Object "System.Collections.Generic.List[string]"
     foreach ($Group in @(
         @("postgres"),
-        @("redis", "minio", "opensearch"),
+        @("redis", "seaweedfs", "opensearch"),
         @("api", "web"),
         @(
             "worker-audit",
@@ -1857,7 +1857,7 @@ function Get-WindowsManifestVolumeMap {
     $ExpectedModes = [ordered]@{
         "postgres-data" = "pg_dump"
         "redis-data" = "stopped-volume-tar"
-        "minio-data" = "stopped-volume-tar"
+        "seaweedfs-data" = "stopped-volume-tar"
         "opensearch-data" = "stopped-volume-tar"
         "tls-certificates" = "stopped-volume-tar"
     }
@@ -2485,7 +2485,7 @@ function Test-WindowsBackup {
 
         foreach ($RequiredArtifact in @(
         "postgres/postgres.dump",
-        "volumes/minio-data.tar.gz",
+        "volumes/seaweedfs-data.tar.gz",
         "volumes/redis-data.tar.gz",
         "volumes/opensearch-data.tar.gz",
         "volumes/tls-certificates.tar.gz",
@@ -2626,7 +2626,7 @@ function Test-WindowsBackup {
         "pg_restore --list /backup/postgres/postgres.dump >/dev/null"
     )
         foreach ($ArchivePath in @(
-        "volumes/minio-data.tar.gz",
+        "volumes/seaweedfs-data.tar.gz",
         "volumes/redis-data.tar.gz",
         "volumes/opensearch-data.tar.gz",
         "volumes/tls-certificates.tar.gz"
@@ -2749,7 +2749,7 @@ function Invoke-WindowsBackup {
             "beat",
             "postgres",
             "redis",
-            "minio",
+            "seaweedfs",
             "opensearch"
         )
         foreach ($Container in $Containers) {
@@ -2871,7 +2871,7 @@ function Invoke-WindowsBackup {
         Stop-WindowsComposeServices `
             -ComposeBaseArguments $ComposeBaseArguments `
             -RunningServices $RunningServices `
-            -RequestedServices @("minio", "redis", "opensearch") `
+            -RequestedServices @("seaweedfs", "redis", "opensearch") `
             -StoppedServices $StoppedServices `
             -TimeoutSeconds $QuiesceTimeoutSeconds
 
@@ -2933,7 +2933,7 @@ function Invoke-WindowsBackup {
         )
 
         foreach ($LogicalName in @(
-            "minio-data",
+            "seaweedfs-data",
             "redis-data",
             "opensearch-data",
             "tls-certificates"
@@ -3013,7 +3013,7 @@ function Invoke-WindowsBackup {
         foreach ($LogicalName in @(
             "postgres-data",
             "redis-data",
-            "minio-data",
+            "seaweedfs-data",
             "opensearch-data",
             "tls-certificates"
         )) {
@@ -3361,7 +3361,7 @@ function Invoke-WindowsRestore {
     $LogicalVolumeNames = @(
         "postgres-data",
         "redis-data",
-        "minio-data",
+        "seaweedfs-data",
         "opensearch-data",
         "tls-certificates"
     )
@@ -3507,7 +3507,7 @@ function Invoke-WindowsRestore {
         }
 
         foreach ($LogicalName in @(
-            "minio-data",
+            "seaweedfs-data",
             "redis-data",
             "opensearch-data",
             "tls-certificates"

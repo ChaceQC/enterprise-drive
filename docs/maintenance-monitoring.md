@@ -210,6 +210,6 @@ CI 会：
 2. 检查 Prometheus targets 和 rule evaluation 状态。
 3. 检查 `worker_tasks_total` 的 task/status 与最近错误日志。
 4. 检查 Alertmanager route、webhook 文件路径和接收端响应。
-5. 检查 Redis、PostgreSQL、MinIO 和 Docker Desktop 资源状态。
+5. 检查 Redis、PostgreSQL、SeaweedFS 和 Docker Desktop 资源状态。
 6. 根据 `maintenance_task_result_total` 判断是扫描积压、对象存储错误还是容量漂移。
 7. 修复依赖后等待下一次周期任务，或通过管理员维护 API 创建显式运行；成功执行会自动清零连续失败告警。

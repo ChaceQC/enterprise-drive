@@ -9,6 +9,11 @@
 
 所有输出目录必须是仓库外的绝对专用目录，并由脚本应用或校验 restricted NTFS ACL。
 
+> 2026-08-05 更新：正式对象存储已从 MinIO 替换为 SeaweedFS，当前对象卷归档名为
+> `volumes/seaweedfs-data.tar.gz`。本文件的 Sprint 12 密码学和离线轮换规则继续
+> 适用；SeaweedFS 版完整 backup/restore 兼容演练已单独完成，不再复用旧 MinIO
+> 恢复结论。正式升级恢复耗时与 RPO/RTO 仍需最终候选签字。
+
 ## 1. Manifest 来源签名
 
 新备份格式为 `format_version=2`。传入 `-BackupSigningCertificateThumbprint` 后，备份会：
@@ -34,7 +39,7 @@ $signing = New-SelfSignedCertificate `
 
 ## 2. 可选完整包加密
 
-传入 `-PackageEncryptionCertificateThumbprint` 后，PostgreSQL dump、MinIO/Redis/OpenSearch/TLS 卷归档、Compose/Nginx 配置及可选 CMS 环境文件会被打包并加密。发布目录不再保留这些明文 payload，只保留：
+传入 `-PackageEncryptionCertificateThumbprint` 后，PostgreSQL dump、SeaweedFS/Redis/OpenSearch/TLS 卷归档、Compose/Nginx 配置及可选 CMS 环境文件会被打包并加密。发布目录不再保留这些明文 payload，只保留：
 
 - `package/payload.enc`
 - `package/envelope.json`

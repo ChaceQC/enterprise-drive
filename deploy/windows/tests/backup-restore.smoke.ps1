@@ -138,8 +138,8 @@ $script:SmokeDefaultServices = @(
     "gateway",
     "web",
     "migration",
-    "minio",
-    "minio-init",
+    "seaweedfs",
+    "storage-init",
     "opensearch",
     "postgres",
     "redis",
@@ -150,11 +150,11 @@ $script:SmokeDefaultServices = @(
     "worker-preview",
     "worker-search"
 )
-$script:SmokeExitedServices = @("migration", "minio-init", "seed")
+$script:SmokeExitedServices = @("migration", "storage-init", "seed")
 $script:SmokeLogicalVolumes = @(
     "postgres-data",
     "redis-data",
-    "minio-data",
+    "seaweedfs-data",
     "opensearch-data",
     "tls-certificates"
 )
@@ -691,9 +691,9 @@ try {
         $null = New-Item -ItemType Directory -Path $BackupRoot -Force
         $ValidPath = Resolve-WindowsBackupArtifactPath `
             -BackupRoot $BackupRoot `
-            -RelativePath "volumes/minio-data.tar.gz"
+            -RelativePath "volumes/seaweedfs-data.tar.gz"
         Assert-SmokeEqual `
-            -Expected (Join-Path $BackupRoot "volumes\minio-data.tar.gz") `
+            -Expected (Join-Path $BackupRoot "volumes\seaweedfs-data.tar.gz") `
             -Actual $ValidPath `
             -Message "A valid artifact path resolved incorrectly."
 
@@ -1755,11 +1755,11 @@ try {
             ),
             (
                 "compose --project-name backup-source stop --timeout 30 " +
-                "minio redis opensearch"
+                "seaweedfs redis opensearch"
             ),
             (
                 "compose --project-name backup-source up --detach --no-deps " +
-                "--no-build --pull never redis minio opensearch"
+                "--no-build --pull never redis seaweedfs opensearch"
             ),
             (
                 "compose --project-name backup-source up --detach --no-deps " +
@@ -1928,7 +1928,7 @@ try {
 
     Invoke-SmokeCase -Name "volume attachment project guard" -Body {
         Reset-SmokeStateMachine -ProjectName "attachment-target"
-        $VolumeName = [string]$script:StateVolumeMap["minio-data"]
+        $VolumeName = [string]$script:StateVolumeMap["seaweedfs-data"]
         $ContainerId = "foreign-container"
         $script:StateVolumeAttachments[$VolumeName] = @($ContainerId)
         $script:StateContainerLabels[$ContainerId] = [pscustomobject]@{
@@ -2161,7 +2161,7 @@ try {
     Invoke-SmokeCase -Name "restore failure stops target services" -Body {
         Reset-SmokeStateMachine -ProjectName "failure-target"
         $script:StateRestoreManifest = New-SmokeRestoreManifest
-        $PreservedLogicalName = "minio-data"
+        $PreservedLogicalName = "seaweedfs-data"
         $PreservedVolume = [string](
             $script:StateVolumeMap[$PreservedLogicalName]
         )
@@ -2292,7 +2292,7 @@ try {
     Invoke-SmokeCase -Name "post-commit rollback cleanup never reverts data" -Body {
         Reset-SmokeStateMachine -ProjectName "commit-cleanup-target"
         $script:StateRestoreManifest = New-SmokeRestoreManifest
-        $PreservedLogicalName = "minio-data"
+        $PreservedLogicalName = "seaweedfs-data"
         $PreservedVolume = [string](
             $script:StateVolumeMap[$PreservedLogicalName]
         )

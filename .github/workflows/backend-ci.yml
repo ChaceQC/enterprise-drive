@@ -41,7 +41,7 @@ jobs:
       installer: ${{ steps.scope.outputs.installer }}
       rust_policy: ${{ steps.scope.outputs.rust_policy }}
       windows: ${{ steps.scope.outputs.windows }}
-      minio: ${{ steps.scope.outputs.minio }}
+      object_storage: ${{ steps.scope.outputs.object_storage }}
       summary: ${{ steps.scope.outputs.summary }}
     steps:
       - name: Checkout
@@ -270,38 +270,63 @@ jobs:
           docker logs enterprise-drive-ci-opensearch
           exit 1
 
-      - name: Start MinIO
+      - name: Start SeaweedFS
         run: |
-          MINIO_IMAGE="$(sed -n 's/^MINIO_IMAGE=//p' ../.env.windows.example)"
-          test -n "${MINIO_IMAGE}"
-          docker run -d --name enterprise-drive-ci-minio \
+          SEAWEEDFS_IMAGE="$(sed -n 's/^SEAWEEDFS_IMAGE=//p' ../.env.windows.example)"
+          test -n "${SEAWEEDFS_IMAGE}"
+          docker run -d --name enterprise-drive-ci-seaweedfs \
             -p 9000:9000 \
-            -e MINIO_ROOT_USER=drive-dev \
-            -e MINIO_ROOT_PASSWORD=drive-dev-password \
-            "${MINIO_IMAGE}" server /data
+            -e AWS_ACCESS_KEY_ID=drive-dev \
+            -e AWS_SECRET_ACCESS_KEY=drive-dev-password \
+            "${SEAWEEDFS_IMAGE}" \
+            server \
+            -filer \
+            -s3 \
+            -s3.port=9000 \
+            -s3.allowedOrigins=http://localhost:15173 \
+            -s3.iam=false \
+            -s3.allowDeleteBucketNotEmpty=false \
+            -s3.port.iceberg=0 \
+            -filer.exposeDirectoryData=false \
+            -filer.disableDirListing=true \
+            -master.telemetry=false
           for _ in {1..30}; do
-            if curl -fsS http://127.0.0.1:9000/minio/health/live; then
+            if docker exec enterprise-drive-ci-seaweedfs \
+              sh -ec '
+                curl -fsS http://127.0.0.1:9333/cluster/healthz >/dev/null
+                test "$(curl -sS -o /dev/null -w %{http_code} http://127.0.0.1:9000/)" = 403
+              '; then
               exit 0
             fi
             sleep 2
           done
-          docker logs enterprise-drive-ci-minio
+          docker logs enterprise-drive-ci-seaweedfs
           exit 1
+
+      - name: Initialize SeaweedFS private S3 bucket
+        env:
+          DRIVE_S3_ENDPOINT_URL: "http://127.0.0.1:9000"
+          DRIVE_S3_ACCESS_KEY_ID: "drive-dev"
+          DRIVE_S3_SECRET_ACCESS_KEY: "drive-dev-password"
+          DRIVE_S3_BUCKET: "enterprise-drive-ci"
+          DRIVE_S3_REGION: "us-east-1"
+          DRIVE_S3_CORS_ALLOWED_ORIGINS: "http://localhost:15173"
+        run: uv run python -X utf8 -m scripts.object_storage_admin init
 
       - name: Pytest
         env:
-          DRIVE_RUN_MINIO_TESTS: "1"
-          DRIVE_TEST_MINIO_ENDPOINT: "http://127.0.0.1:9000"
-          DRIVE_TEST_MINIO_ACCESS_KEY: "drive-dev"
-          DRIVE_TEST_MINIO_SECRET_KEY: "drive-dev-password"
-          DRIVE_TEST_MINIO_BUCKET: "enterprise-drive-ci"
+          DRIVE_RUN_S3_TESTS: "1"
+          DRIVE_TEST_S3_ENDPOINT: "http://127.0.0.1:9000"
+          DRIVE_TEST_S3_ACCESS_KEY: "drive-dev"
+          DRIVE_TEST_S3_SECRET_KEY: "drive-dev-password"
+          DRIVE_TEST_S3_BUCKET: "enterprise-drive-ci"
           DRIVE_RUN_POSTGRES_TESTS: "1"
           DRIVE_TEST_POSTGRES_URL: postgresql+asyncpg://drive:drive-ci-password@127.0.0.1:15432/enterprise_drive
           DRIVE_RUN_SPRINT12_MATRIX: "1"
           DRIVE_TEST_POSTGRES_CONTAINER: enterprise-drive-ci-postgres
           DRIVE_TEST_REDIS_URL: redis://:drive-ci-password@127.0.0.1:16379/0
           DRIVE_TEST_REDIS_CONTAINER: enterprise-drive-ci-redis
-          DRIVE_TEST_MINIO_CONTAINER: enterprise-drive-ci-minio
+          DRIVE_TEST_S3_CONTAINER: enterprise-drive-ci-seaweedfs
           DRIVE_TEST_OPENSEARCH_URL: http://127.0.0.1:19200
           DRIVE_TEST_OPENSEARCH_CONTAINER: enterprise-drive-ci-opensearch
           DRIVE_SPRINT12_MATRIX_REPORT: output/sprint12-dependency-matrix.json
@@ -405,7 +430,7 @@ jobs:
           DRIVE_SESSION_COOKIE_SECURE: "true"
           DRIVE_TRUSTED_HOSTS: '["drive.example.com","storage.example.com"]'
           DRIVE_CORS_ORIGINS: '["https://drive.example.com"]'
-          MINIO_CORS_ALLOWED_ORIGIN: https://drive.example.com
+          DRIVE_S3_CORS_ALLOWED_ORIGINS: https://drive.example.com
           DRIVE_GATEWAY_TEMPLATE_PATH: ./deploy/windows/nginx/tls.conf.template
           DRIVE_GATEWAY_BIND: 0.0.0.0
           DRIVE_STORAGE_GATEWAY_BIND: 0.0.0.0
@@ -443,7 +468,7 @@ jobs:
           expected_volumes = {
               "postgres-data",
               "redis-data",
-              "minio-data",
+              "seaweedfs-data",
               "opensearch-data",
               "tls-certificates",
           }
@@ -466,8 +491,8 @@ jobs:
               "redis-data": {
                   ("redis", "/data", False),
               },
-              "minio-data": {
-                  ("minio", "/data", False),
+              "seaweedfs-data": {
+                  ("seaweedfs", "/data", False),
               },
               "opensearch-data": {
                   ("opensearch", "/usr/share/opensearch/data", False),
@@ -517,7 +542,7 @@ jobs:
 
           docker run --rm --pull never \
             --add-host api:127.0.0.1 \
-            --add-host minio:127.0.0.1 \
+            --add-host seaweedfs:127.0.0.1 \
             --mount "type=bind,source=${PWD}/deploy/windows/nginx/tls.conf.template,target=/etc/nginx/templates/default.conf.template,readonly" \
             --mount "type=volume,source=${tls_volume},target=/etc/letsencrypt,readonly" \
             -e DRIVE_SERVER_NAME=drive.example.com \
@@ -557,7 +582,7 @@ jobs:
         run: |
           docker rm -f enterprise-drive-ci-opensearch >/dev/null 2>&1 || true
           docker rm -f enterprise-drive-ci-redis >/dev/null 2>&1 || true
-          docker rm -f enterprise-drive-ci-minio >/dev/null 2>&1 || true
+          docker rm -f enterprise-drive-ci-seaweedfs >/dev/null 2>&1 || true
           docker rm -f enterprise-drive-ci-postgres >/dev/null 2>&1 || true
 
   rust-desktop:
@@ -1054,21 +1079,20 @@ jobs:
           path: desktop/dist/windows
           if-no-files-found: error
 
-  minio-image-policy:
+  object-storage-image-policy:
     needs: changes
-    if: needs.changes.outputs.minio == 'true'
+    if: needs.changes.outputs.object_storage == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
-      server_image: ${{ steps.images.outputs.server_image }}
-      client_image: ${{ steps.images.outputs.client_image }}
+      image: ${{ steps.images.outputs.image }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Verify immutable MinIO image references
+      - name: Verify immutable SeaweedFS image reference
         id: images
         run: |
           set -euo pipefail
@@ -1076,32 +1100,42 @@ jobs:
             .env.windows.example
             compose.windows.yml
             backend/docker-compose.yml
-            .github/workflows/backend-ci.yml
           )
-          if grep -En 'minio/(minio|mc):latest([^[:alnum:]_.-]|$)' "${files[@]}"; then
-            echo "Mutable MinIO image tag detected." >&2
+          if grep -En 'minio/(minio|mc):' "${files[@]}"; then
+            echo "Legacy MinIO runtime image reference detected." >&2
             exit 1
           fi
 
-          test "$(grep -c '^MINIO_IMAGE=' .env.windows.example)" -eq 1
-          test "$(grep -c '^MINIO_MC_IMAGE=' .env.windows.example)" -eq 1
-          server_image="$(sed -n 's/^MINIO_IMAGE=//p' .env.windows.example)"
-          client_image="$(sed -n 's/^MINIO_MC_IMAGE=//p' .env.windows.example)"
-          server_pattern='^minio/minio:RELEASE\.[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}Z@sha256:[0-9a-f]{64}$'
-          client_pattern='^minio/mc:RELEASE\.[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}Z@sha256:[0-9a-f]{64}$'
-          [[ "${server_image}" =~ ${server_pattern} ]]
-          [[ "${client_image}" =~ ${client_pattern} ]]
+          test "$(grep -c '^SEAWEEDFS_IMAGE=' .env.windows.example)" -eq 1
+          image="$(sed -n 's/^SEAWEEDFS_IMAGE=//p' .env.windows.example)"
+          image_pattern='^chrislusf/seaweedfs:[0-9]+\.[0-9]+@sha256:[0-9a-f]{64}$'
+          [[ "${image}" =~ ${image_pattern} ]]
 
           root_config="$(docker compose --profile tls-tools --env-file .env.windows.example -f compose.windows.yml config --format json)"
-          test "$(jq -r '.services.minio.image' <<<"${root_config}")" = "${server_image}"
-          test "$(jq -r '.services["minio-init"].image' <<<"${root_config}")" = "${client_image}"
+          test "$(jq -r '.services.seaweedfs.image' <<<"${root_config}")" = "${image}"
+          test "$(jq -r '.services["storage-init"].image' <<<"${root_config}")" = "enterprise-drive-backend:windows-local"
+          actual_storage_init_env="$(
+            jq -r '.services["storage-init"].environment | keys[]' <<<"${root_config}" |
+              LC_ALL=C sort
+          )"
+          expected_storage_init_env="$(
+            printf '%s\n' \
+              DRIVE_S3_ACCESS_KEY_ID \
+              DRIVE_S3_BUCKET \
+              DRIVE_S3_CORS_ALLOWED_ORIGINS \
+              DRIVE_S3_ENDPOINT_URL \
+              DRIVE_S3_REGION \
+              DRIVE_S3_SECRET_ACCESS_KEY \
+              TZ
+          )"
+          test "${actual_storage_init_env}" = "${expected_storage_init_env}"
           dev_config="$(docker compose -f backend/docker-compose.yml config --format json)"
-          test "$(jq -r '.services.minio.image' <<<"${dev_config}")" = "${server_image}"
+          test "$(jq -r '.services.seaweedfs.image' <<<"${dev_config}")" = "${image}"
 
           verify_registry_digest() {
-            local image="$1"
-            local tag_reference="${image%@sha256:*}"
-            local expected_digest="${image##*@}"
+            local reference="$1"
+            local tag_reference="${reference%@sha256:*}"
+            local expected_digest="${reference##*@}"
             local resolved_digest
             resolved_digest="$(
               docker buildx imagetools inspect "${tag_reference}" --format '{{json .Manifest}}' |
@@ -1109,15 +1143,13 @@ jobs:
             )"
             test "${resolved_digest}" = "${expected_digest}"
           }
-          verify_registry_digest "${server_image}"
-          verify_registry_digest "${client_image}"
+          verify_registry_digest "${image}"
 
-          echo "server_image=${server_image}" >>"${GITHUB_OUTPUT}"
-          echo "client_image=${client_image}" >>"${GITHUB_OUTPUT}"
+          echo "image=${image}" >>"${GITHUB_OUTPUT}"
 
-  minio-supply-chain:
-    needs: minio-image-policy
-    if: needs.minio-image-policy.result == 'success'
+  object-storage-supply-chain:
+    needs: object-storage-image-policy
+    if: needs.object-storage-image-policy.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -1126,22 +1158,12 @@ jobs:
       - name: Prepare artifact directory
         run: mkdir -p supply-chain-artifacts
 
-      - name: Generate MinIO server SPDX JSON SBOM
+      - name: Generate SeaweedFS SPDX JSON SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
         with:
-          image: ${{ needs.minio-image-policy.outputs.server_image }}
+          image: ${{ needs.object-storage-image-policy.outputs.image }}
           format: spdx-json
-          output-file: supply-chain-artifacts/minio-server.spdx.json
-          syft-version: v1.46.0
-          dependency-snapshot: false
-          upload-artifact: false
-
-      - name: Generate MinIO client SPDX JSON SBOM
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
-        with:
-          image: ${{ needs.minio-image-policy.outputs.client_image }}
-          format: spdx-json
-          output-file: supply-chain-artifacts/minio-client.spdx.json
+          output-file: supply-chain-artifacts/seaweedfs.spdx.json
           syft-version: v1.46.0
           dependency-snapshot: false
           upload-artifact: false
@@ -1152,124 +1174,62 @@ jobs:
         with:
           grype-version: v0.115.0
 
-      - name: Generate and gate MinIO vulnerability reports
+      - name: Generate and gate SeaweedFS vulnerability report
         env:
           GRYPE_CMD: ${{ steps.grype.outputs.cmd }}
-          SERVER_IMAGE: ${{ needs.minio-image-policy.outputs.server_image }}
-          CLIENT_IMAGE: ${{ needs.minio-image-policy.outputs.client_image }}
+          SEAWEEDFS_IMAGE: ${{ needs.object-storage-image-policy.outputs.image }}
         run: |
           set -euo pipefail
-          failures=0
+          sbom="supply-chain-artifacts/seaweedfs.spdx.json"
+          report="supply-chain-artifacts/seaweedfs.grype.json"
+          critical_ids="supply-chain-artifacts/seaweedfs-critical.txt"
+          high_ids="supply-chain-artifacts/seaweedfs-high.txt"
 
-          scan_component() {
-            local component="$1"
-            local image="$2"
-            local sbom="supply-chain-artifacts/minio-${component}.spdx.json"
-            local report="supply-chain-artifacts/minio-${component}.grype.json"
-            local baseline
-            case "${component}" in
-              server)
-                baseline=$'CVE-2026-10536\nCVE-2026-11856\nCVE-2026-8924\nCVE-2026-8927\nCVE-2026-9079\nGHSA-5cgq-3rg8-m6cv\nGHSA-5cx5-wh4m-82fh\nGHSA-89gr-r52h-f8rx\nGHSA-f5wc-c3c7-36mc\nGHSA-jppx-rxg9-jmrx\nGHSA-jv87-32hw-hh99\nGHSA-p77j-4mvh-x3m3\nGHSA-rm3j-f69w-wqmq\nGHSA-vgwf-h737-ff37\nGHSA-x527-x647-q7gg\nGO-2026-4337'
-                ;;
-              client)
-                baseline=$'GHSA-5cgq-3rg8-m6cv\nGHSA-89gr-r52h-f8rx\nGHSA-f5wc-c3c7-36mc\nGHSA-jppx-rxg9-jmrx\nGHSA-p77j-4mvh-x3m3\nGHSA-rm3j-f69w-wqmq\nGHSA-vgwf-h737-ff37\nGHSA-x527-x647-q7gg\nGO-2026-4337'
-                ;;
-              *)
-                echo "Unknown MinIO component: ${component}" >&2
-                return 1
-                ;;
-            esac
+          "${GRYPE_CMD}" \
+            --output json \
+            --file "${report}" \
+            "sbom:${sbom}"
+          jq -r '
+            .matches[]?
+            | select(.vulnerability.severity == "Critical")
+            | .vulnerability.id
+          ' "${report}" | LC_ALL=C sort -u >"${critical_ids}"
+          jq -r '
+            .matches[]?
+            | select(.vulnerability.severity == "High")
+            | .vulnerability.id
+          ' "${report}" | LC_ALL=C sort -u >"${high_ids}"
 
-            if ! "${GRYPE_CMD}" \
-              --output json \
-              --file "${report}" \
-              "sbom:${sbom}"; then
-              echo "Grype failed for ${component}." >&2
-              return 1
-            fi
+          critical_count="$(grep -c . "${critical_ids}" || true)"
+          high_count="$(grep -c . "${high_ids}" || true)"
+          {
+            echo "### SeaweedFS object-storage supply-chain scan"
+            echo
+            echo "- Image: \`${SEAWEEDFS_IMAGE}\`"
+            echo "- SBOM: SPDX JSON generated by Syft v1.46.0"
+            echo "- Scanner: Grype v0.115.0"
+            echo "- Current Critical IDs: ${critical_count}"
+            echo "- Current High IDs: ${high_count}"
+            echo
+            echo "<details><summary>Current High vulnerability IDs</summary>"
+            echo
+            echo '```text'
+            cat "${high_ids}"
+            echo '```'
+            echo "</details>"
+          } >>"${GITHUB_STEP_SUMMARY}"
 
-            local baseline_file
-            local observed_file
-            local new_file
-            baseline_file="$(mktemp)" || return 1
-            observed_file="$(mktemp)" || {
-              rm -f "${baseline_file}"
-              return 1
-            }
-            new_file="$(mktemp)" || {
-              rm -f "${baseline_file}" "${observed_file}"
-              return 1
-            }
-            cleanup_component() {
-              rm -f "${baseline_file}" "${observed_file}" "${new_file}"
-            }
-            if ! printf '%s\n' "${baseline}" | LC_ALL=C sort -u >"${baseline_file}"; then
-              cleanup_component
-              return 1
-            fi
-            if ! jq -r '
-              .matches[]?
-              | select(.vulnerability.severity == "Critical")
-              | .vulnerability.id
-            ' "${report}" | LC_ALL=C sort -u >"${observed_file}"; then
-              cleanup_component
-              return 1
-            fi
-            if ! comm -13 "${baseline_file}" "${observed_file}" >"${new_file}"; then
-              cleanup_component
-              return 1
-            fi
-
-            local baseline_count
-            local critical_count
-            local new_count
-            baseline_count="$(wc -l <"${baseline_file}" | tr -d ' ')"
-            critical_count="$(wc -l <"${observed_file}" | tr -d ' ')"
-            new_count="$(wc -l <"${new_file}" | tr -d ' ')"
-            if ! {
-              echo "### MinIO ${component} supply-chain scan"
-              echo
-              echo "- Image: \`${image}\`"
-              echo "- SBOM: SPDX JSON generated by Syft v1.46.0"
-              echo "- Scanner: Grype v0.115.0"
-              echo "- Audited Critical baseline (2026-08-03): ${baseline_count}"
-              echo "- Current Critical IDs: ${critical_count}"
-              echo "- Newly discovered Critical IDs: ${new_count}"
-              echo
-              echo "<details><summary>Current Critical vulnerability IDs</summary>"
-              echo
-              echo '```text'
-              cat "${observed_file}"
-              echo '```'
-              echo "</details>"
-            } >>"${GITHUB_STEP_SUMMARY}"; then
-              cleanup_component
-              return 1
-            fi
-
-            if [[ -s "${new_file}" ]]; then
-              echo "New Critical vulnerabilities were found for ${component}:" >&2
-              cat "${new_file}" >&2 || true
-              cleanup_component
-              return 1
-            fi
-            cleanup_component
-            return 0
-          }
-
-          if ! scan_component server "${SERVER_IMAGE}"; then
-            failures=1
+          if [[ -s "${critical_ids}" ]]; then
+            echo "Critical vulnerabilities were found in SeaweedFS:" >&2
+            cat "${critical_ids}" >&2
+            exit 1
           fi
-          if ! scan_component client "${CLIENT_IMAGE}"; then
-            failures=1
-          fi
-          exit "${failures}"
 
-      - name: Upload MinIO supply-chain artifacts
+      - name: Upload object-storage supply-chain artifacts
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: minio-supply-chain
+          name: object-storage-supply-chain
           path: supply-chain-artifacts/
           if-no-files-found: error
 
@@ -1372,7 +1332,7 @@ jobs:
           $env:DRIVE_SESSION_COOKIE_SECURE = "true"
           $env:DRIVE_TRUSTED_HOSTS = '["drive.example.com","storage.example.com"]'
           $env:DRIVE_CORS_ORIGINS = '["https://app.example.com"]'
-          $env:MINIO_CORS_ALLOWED_ORIGIN = "https://app.example.com"
+          $env:DRIVE_S3_CORS_ALLOWED_ORIGINS = "https://app.example.com"
           $env:DRIVE_SECRET_KEY = "0123456789abcdef0123456789abcdef01234567"
           $env:POSTGRES_PASSWORD = "Postgres-Strong-Secret-2026"
           $env:DRIVE_DATABASE_URL = "postgresql+asyncpg://drive:Postgres-Strong-Secret-2026@postgres:5432/enterprise_drive"
@@ -1380,7 +1340,7 @@ jobs:
           $env:DRIVE_REDIS_URL = "redis://:Redis-Strong-Secret-2026@redis:6379/0"
           $env:DRIVE_CELERY_BROKER_URL = "redis://:Redis-Strong-Secret-2026@redis:6379/1"
           $env:DRIVE_CELERY_RESULT_BACKEND = "redis://:Redis-Strong-Secret-2026@redis:6379/2"
-          $env:MINIO_ROOT_PASSWORD = "Minio-Strong-Secret-2026"
+          $env:DRIVE_S3_SECRET_ACCESS_KEY = "Object-Storage-Strong-Secret-2026"
           $env:OPENSEARCH_INITIAL_ADMIN_PASSWORD = "OpenSearch-Strong-Secret-2026"
           $env:DRIVE_ADMIN_PASSWORD = "Admin-Strong-Secret-2026"
           $env:CERTBOT_EMAIL = "ops@contoso.org"
@@ -1455,7 +1415,7 @@ jobs:
           }
 
           $env:DRIVE_SECRET_KEY = '0123456789abcdef0123456789abcdef01234567'
-          $env:MINIO_ROOT_PASSWORD = '${WEAK_PASSWORD}'
+          $env:DRIVE_S3_SECRET_ACCESS_KEY = '${WEAK_PASSWORD}'
           try {
               .\deploy\windows\manage.ps1 config -Tls -EnvFile .env.windows.example -Quiet
               throw "interpolated secret guard did not fail"
@@ -1466,7 +1426,7 @@ jobs:
               }
           }
 
-          $env:MINIO_ROOT_PASSWORD = "Minio-Strong-Secret-2026"
+          $env:DRIVE_S3_SECRET_ACCESS_KEY = "Object-Storage-Strong-Secret-2026"
           $env:DRIVE_TRUSTED_HOSTS = '["*","drive.example.com","storage.example.com"]'
           try {
               .\deploy\windows\manage.ps1 config -Tls -EnvFile .env.windows.example -Quiet
@@ -1491,10 +1451,10 @@ jobs:
           }
 
           $env:DRIVE_S3_PUBLIC_ENDPOINT_URL = "https://storage.example.com"
-          $env:MINIO_CORS_ALLOWED_ORIGIN = "https://other.example.com"
+          $env:DRIVE_S3_CORS_ALLOWED_ORIGINS = "https://other.example.com"
           try {
               .\deploy\windows\manage.ps1 config -Tls -EnvFile .env.windows.example -Quiet
-              throw "MinIO CORS alignment guard did not fail"
+              throw "S3 CORS alignment guard did not fail"
           }
           catch {
               if ($_.Exception.Message -notlike "*must exactly match DRIVE_CORS_ORIGINS*") {
@@ -1502,7 +1462,7 @@ jobs:
               }
           }
 
-          $env:MINIO_CORS_ALLOWED_ORIGIN = "https://app.example.com"
+          $env:DRIVE_S3_CORS_ALLOWED_ORIGINS = "https://app.example.com"
           $env:DRIVE_TLS_GATEWAY_BIND = "127.0.0.1"
           try {
               .\deploy\windows\manage.ps1 config -Tls -EnvFile .env.windows.example -Quiet

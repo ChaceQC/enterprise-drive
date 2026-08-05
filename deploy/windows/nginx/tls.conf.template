@@ -8,8 +8,8 @@ upstream enterprise_drive_api {
     keepalive 32;
 }
 
-upstream enterprise_drive_minio {
-    server minio:9000;
+upstream enterprise_drive_storage {
+    server seaweedfs:9000;
     keepalive 32;
 }
 
@@ -172,7 +172,7 @@ server {
     }
 
     location / {
-        proxy_pass http://enterprise_drive_minio;
+        proxy_pass http://enterprise_drive_storage;
         proxy_http_version 1.1;
         proxy_set_header Host $http_host;
         proxy_set_header X-Real-IP $remote_addr;

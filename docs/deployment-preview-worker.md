@@ -5,7 +5,7 @@
 ## 基本原则
 
 - Windows 11 正式部署使用 Docker Desktop 的 WSL2 后端和 Linux containers；根 `compose.windows.yml` 是唯一正式编排入口。
-- Nginx gateway 在 Compose 内运行，并且是唯一发布宿主端口的服务；Preview Worker、API、Redis、数据库、OpenSearch 和 MinIO 都只加入内部网络。
+- Nginx gateway 在 Compose 内运行，并且是唯一发布宿主端口的服务；Preview Worker、API、Redis、数据库、OpenSearch 和 SeaweedFS 都只加入内部网络。
 - `backend/docker-compose.yml` 只用于本地依赖开发，不作为生产编排清单。
 - `preview` Worker 只消费 `preview` 队列；`search` Worker 只消费 `search` 队列，OCR/旧格式转换不会进入 `audit`、`permission` 或 `maintenance` 队列。
 - 内容处理镜像需要安装 LibreOffice、Poppler 和 Tesseract，并在构建时确认 `soffice`、`pdftoppm`、`tesseract` 以及 `eng`、`chi_sim` 语言包可用。
@@ -100,7 +100,7 @@ worker-preview:
 
 - CPU 上限建议 `2.0`，并发默认 `1`。
 - 默认内存上限为 `3 GiB`。
-- 默认临时目录上限为 `1 GiB`，可通过 `PREVIEW_TMPFS_SIZE` 调整；不得复用 PostgreSQL、MinIO 或 OpenSearch 数据卷。
+- 默认临时目录上限为 `1 GiB`，可通过 `PREVIEW_TMPFS_SIZE` 调整；不得复用 PostgreSQL、SeaweedFS 或 OpenSearch 数据卷。
 - 两个内容处理 Worker 均使用 `--max-tasks-per-child=20`，用于回收 LibreOffice/Poppler/Tesseract 长时间运行产生的内存碎片。
 - Preview Worker 只消费 `preview` 队列；`audit`、`permission`、`search`、`maintenance` 使用其他 Worker。
 - 外部命令超时、Celery 软/硬超时和速率限制必须同时启用。

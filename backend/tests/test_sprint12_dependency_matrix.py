@@ -7,10 +7,12 @@ import subprocess
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from time import perf_counter
+from urllib.parse import urlsplit
 
 import httpx
 import pytest
 import redis.asyncio as redis
+from minio import Minio
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
@@ -25,13 +27,13 @@ async def test_full_dependency_fault_and_recovery_matrix() -> None:
     probes = {
         "postgres": _probe_postgres,
         "redis": _probe_redis,
-        "minio": _probe_minio,
+        "s3": _probe_s3,
         "opensearch": _probe_opensearch,
     }
     containers = {
         "postgres": _required_env("DRIVE_TEST_POSTGRES_CONTAINER"),
         "redis": _required_env("DRIVE_TEST_REDIS_CONTAINER"),
-        "minio": _required_env("DRIVE_TEST_MINIO_CONTAINER"),
+        "s3": _required_env("DRIVE_TEST_S3_CONTAINER", "DRIVE_TEST_MINIO_CONTAINER"),
         "opensearch": _required_env("DRIVE_TEST_OPENSEARCH_CONTAINER"),
     }
     report: dict[str, object] = {"dependencies": {}, "faults": []}
@@ -42,7 +44,7 @@ async def test_full_dependency_fault_and_recovery_matrix() -> None:
         assert isinstance(dependency_report, dict)
         dependency_report[name] = {"initial": "healthy"}
 
-    for name in ("redis", "opensearch", "minio", "postgres"):
+    for name in ("redis", "opensearch", "s3", "postgres"):
         probe = probes[name]
         container = containers[name]
         started_at = perf_counter()
@@ -90,12 +92,33 @@ async def _probe_redis() -> None:
         await client.aclose()
 
 
-async def _probe_minio() -> None:
-    async with httpx.AsyncClient(timeout=2) as client:
-        response = await client.get(
-            f"{_required_env('DRIVE_TEST_MINIO_ENDPOINT').rstrip('/')}/minio/health/live"
+async def _probe_s3() -> None:
+    endpoint_url = _required_env("DRIVE_TEST_S3_ENDPOINT", "DRIVE_TEST_MINIO_ENDPOINT")
+    parsed_endpoint = urlsplit(endpoint_url)
+    endpoint = parsed_endpoint.netloc or parsed_endpoint.path
+    client = Minio(
+        endpoint,
+        access_key=_required_env(
+            "DRIVE_TEST_S3_ACCESS_KEY",
+            "DRIVE_TEST_MINIO_ACCESS_KEY",
+        ),
+        secret_key=_required_env(
+            "DRIVE_TEST_S3_SECRET_KEY",
+            "DRIVE_TEST_MINIO_SECRET_KEY",
+        ),
+        region=_required_env(
+            "DRIVE_TEST_S3_REGION",
+            "DRIVE_TEST_MINIO_REGION",
+            default="us-east-1",
+        ),
+        secure=parsed_endpoint.scheme == "https",
+    )
+    bucket = _required_env("DRIVE_TEST_S3_BUCKET", "DRIVE_TEST_MINIO_BUCKET")
+    exists = await asyncio.to_thread(client.bucket_exists, bucket)
+    if not exists:
+        raise AssertionError(
+            "authenticated S3 probe succeeded but configured bucket does not exist"
         )
-        response.raise_for_status()
 
 
 async def _probe_opensearch() -> None:
@@ -150,8 +173,19 @@ def _docker(command: str, container: str) -> None:
     )
 
 
-def _required_env(name: str) -> str:
-    value = os.environ.get(name, "").strip()
+def _required_env(
+    name: str,
+    *fallback_names: str,
+    default: str = "",
+) -> str:
+    value = next(
+        (
+            os.environ[candidate].strip()
+            for candidate in (name, *fallback_names)
+            if os.environ.get(candidate, "").strip()
+        ),
+        default,
+    )
     if not value:
         raise AssertionError(f"missing required environment variable: {name}")
     return value
