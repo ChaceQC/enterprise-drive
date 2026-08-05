@@ -419,6 +419,9 @@ class UploadRepository:
     async def flush(self) -> None:
         await self.session.flush()
 
+    async def refresh(self, instance: object) -> None:
+        await self.session.refresh(instance)
+
     async def commit(self) -> None:
         await self.session.commit()
 

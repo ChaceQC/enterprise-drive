@@ -50,9 +50,9 @@ async def _dispatch_outbox(batch_size: int | None = None) -> dict[str, int]:
     async with session_factory() as session:
         repository = AuditRepository(session)
         publisher: OutboxPublisher
-        if settings.audit_external_delivery_url is None:
+        if not settings.audit_external_delivery_url:
             publisher = LoggingOutboxPublisher()
-        elif settings.audit_external_hmac_key is None:
+        elif not settings.audit_external_hmac_key:
             publisher = MisconfiguredAuditPublisher()
         else:
             publisher = HttpAuditPublisher(

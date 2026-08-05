@@ -40,6 +40,8 @@ from app.modules.upload.target import require_upload_version_target
 from app.modules.upload.timing import (
     UploadCompleteTimings,
     measure_upload_complete_phase,
+    record_upload_complete_phase_elapsed,
+    start_upload_complete_phase,
 )
 
 
@@ -77,6 +79,7 @@ class UploadLifecycleService:
         audit_context: AuditContext | None = None,
         timings: UploadCompleteTimings | None = None,
     ) -> CompleteUploadResponse:
+        pre_storage_started = start_upload_complete_phase(timings)
         tenant_id = current_user.tenant_id
         user_id = current_user.id
         upload_session = await self._get_upload_session_for_update(
@@ -158,6 +161,11 @@ class UploadLifecycleService:
             return CompleteUploadResponse.model_validate(operation.replay_json)
         upload_session.status = "completing"
         await self.repository.commit()
+        record_upload_complete_phase_elapsed(
+            timings,
+            "pre_storage",
+            pre_storage_started,
+        )
 
         try:
             with measure_upload_complete_phase(timings, "storage_complete"):
@@ -214,6 +222,7 @@ class UploadLifecycleService:
             raise
         should_delete_temp_object = final_storage_key != temp_storage_key
 
+        db_finalize_started = start_upload_complete_phase(timings)
         upload_session = await self._get_upload_session_for_update(
             current_user=current_user,
             session_id=session_id,
@@ -230,6 +239,11 @@ class UploadLifecycleService:
                     response_status=200,
                 )
                 await self.repository.commit()
+                record_upload_complete_phase_elapsed(
+                    timings,
+                    "db_finalize",
+                    db_finalize_started,
+                )
                 return response
             if upload_session.status != "completing":
                 raise ApiError("UPLOAD_NOT_ACTIVE", "上传会话不可继续上传", status_code=409)
@@ -296,15 +310,6 @@ class UploadLifecycleService:
             )
             node.current_version_id = version.id
             node.updated_at = utc_now()
-            await self.quota_service.reserve_file_version(
-                tenant_id=tenant_id,
-                space_id=upload_session.space_id,
-                version_id=version.id,
-                size_bytes=upload_session.size_bytes,
-                user_id=user_id,
-                file_name=node.name,
-                mime_type=upload_session.mime_type,
-            )
             upload_session.status = "completed"
             upload_session.completed_node_id = node.id
             upload_session.completed_version_id = version.id
@@ -371,14 +376,34 @@ class UploadLifecycleService:
                 response=response,
                 response_status=200,
             )
+            # 先落盘节点、版本、审计和 Outbox，再在紧邻提交的位置原子扣减配额。
+            # 这样所有内容仍处于同一事务，但高并发 complete 不会在组装事件期间
+            # 长时间持有共享空间配额账户的行锁。
+            await self.repository.flush()
+            await self.quota_service.reserve_file_version(
+                tenant_id=tenant_id,
+                space_id=upload_session.space_id,
+                version_id=version.id,
+                size_bytes=upload_session.size_bytes,
+                user_id=user_id,
+                file_name=node.name,
+                mime_type=upload_session.mime_type,
+            )
             await self.repository.commit()
+            record_upload_complete_phase_elapsed(
+                timings,
+                "db_finalize",
+                db_finalize_started,
+            )
             if should_delete_temp_object:
-                await self._delete_temp_object(
-                    bucket=storage_bucket,
-                    storage_key=temp_storage_key,
-                )
+                with measure_upload_complete_phase(timings, "temp_delete"):
+                    await self._delete_temp_object(
+                        bucket=storage_bucket,
+                        storage_key=temp_storage_key,
+                    )
         except ApiError as exc:
             await self.repository.rollback()
+            await self.repository.refresh(current_user)
             failure_reason = {
                 "QUOTA_EXCEEDED": "quota_exceeded",
                 "BLOB_DELETING": "blob_deleting",
@@ -393,6 +418,7 @@ class UploadLifecycleService:
             raise
         except IntegrityError as exc:
             await self.repository.rollback()
+            await self.repository.refresh(current_user)
             await self._mark_failed(
                 current_user=current_user,
                 session_id=session_id,

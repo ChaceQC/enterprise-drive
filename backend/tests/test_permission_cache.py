@@ -285,6 +285,86 @@ async def test_audit_dispatcher_skips_permission_changed_events(
     assert stored_audit_event.status == "sent"
 
 
+@pytest.mark.asyncio
+async def test_audit_dispatcher_treats_blank_external_delivery_as_local_logging(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await seed_admin(session_factory, settings)
+    tenant_id, _ = await _get_seeded_tenant_and_user(session_factory)
+    async with session_factory() as session:
+        repository = AuditRepository(session)
+        event = await repository.add_outbox_event(
+            tenant_id=tenant_id,
+            event_type="audit.fixture.blank_external_delivery",
+            aggregate_type="audit_log",
+            aggregate_id=uuid4(),
+            payload={"audit_log_id": str(uuid4())},
+        )
+        await session.commit()
+
+    blank_delivery_settings = settings.model_copy(
+        update={
+            "audit_external_delivery_url": "",
+            "audit_external_hmac_key": "",
+        }
+    )
+    monkeypatch.setattr(audit_tasks, "get_settings", lambda: blank_delivery_settings)
+    monkeypatch.setattr(audit_tasks, "get_session_factory", lambda: session_factory)
+
+    result = await audit_tasks._dispatch_outbox(batch_size=10)
+
+    assert result == {"claimed": 1, "sent": 1, "failed": 0, "dead": 0}
+    async with session_factory() as session:
+        stored = await session.get(OutboxEvent, event.id)
+
+    assert stored is not None
+    assert stored.status == "sent"
+    assert stored.retry_count == 0
+
+
+@pytest.mark.asyncio
+async def test_audit_dispatcher_treats_blank_hmac_as_misconfigured(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await seed_admin(session_factory, settings)
+    tenant_id, _ = await _get_seeded_tenant_and_user(session_factory)
+    async with session_factory() as session:
+        repository = AuditRepository(session)
+        event = await repository.add_outbox_event(
+            tenant_id=tenant_id,
+            event_type="audit.fixture.blank_external_hmac",
+            aggregate_type="audit_log",
+            aggregate_id=uuid4(),
+            payload={"audit_log_id": str(uuid4())},
+        )
+        await session.commit()
+
+    blank_hmac_settings = settings.model_copy(
+        update={
+            "audit_external_delivery_url": "https://audit.example.test/events",
+            "audit_external_hmac_key": "",
+        }
+    )
+    monkeypatch.setattr(audit_tasks, "get_settings", lambda: blank_hmac_settings)
+    monkeypatch.setattr(audit_tasks, "get_session_factory", lambda: session_factory)
+
+    result = await audit_tasks._dispatch_outbox(batch_size=10)
+
+    assert result == {"claimed": 1, "sent": 0, "failed": 0, "dead": 1}
+    async with session_factory() as session:
+        stored = await session.get(OutboxEvent, event.id)
+
+    assert stored is not None
+    assert stored.status == "dead"
+    assert stored.retry_count == 1
+    assert stored.last_error_kind == "permanent"
+    assert stored.last_error_code == "external_signing_key_missing"
+
+
 async def _get_seeded_tenant_and_user(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> tuple[UUID, UUID]:

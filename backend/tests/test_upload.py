@@ -13,6 +13,8 @@ from app.infrastructure.storage.testing import InMemoryStorageAdapter
 from app.modules.audit.models import AuditLog, OutboxEvent
 from app.modules.file.models import FileBlob, FileVersion, Node
 from app.modules.quota.models import QuotaAccount, QuotaLedger
+from app.modules.quota.repository import QuotaRepository
+from app.modules.sync.models import ClientOperation
 from app.modules.upload.models import UploadPart, UploadSession
 from tests.helpers import (
     add_space_member,
@@ -328,9 +330,12 @@ async def test_complete_multipart_upload_creates_file_version_and_is_idempotent(
 
     assert complete_response.status_code == 200
     assert complete_response.json()["protocol_version"] == "DTP/1"
+    assert "pre_storage;dur=" in complete_response.headers["server-timing"]
     assert "storage_complete;dur=" in complete_response.headers["server-timing"]
     assert "hash_validation;dur=" in complete_response.headers["server-timing"]
     assert "final_object;dur=" in complete_response.headers["server-timing"]
+    assert "db_finalize;dur=" in complete_response.headers["server-timing"]
+    assert "temp_delete;dur=" in complete_response.headers["server-timing"]
     assert duplicate_response.status_code == 200
     assert "server-timing" not in duplicate_response.headers
     assert duplicate_response.json() == complete_response.json()
@@ -392,6 +397,119 @@ async def test_complete_multipart_upload_creates_file_version_and_is_idempotent(
     assert [(part.part_no, part.etag) for part in upload_parts] == [(1, "etag-1"), (2, "etag-2")]
     assert audit.request_id == "req_upload_complete"
     assert outbox_event.aggregate_type == "audit_log"
+
+
+@pytest.mark.asyncio
+async def test_complete_upload_quota_failure_rolls_back_flushed_finalize_rows(
+    client: AsyncClient,
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+    storage_adapter: InMemoryStorageAdapter,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await seed_admin(session_factory, settings)
+    token = await login(client)
+    space = await create_space(client, token, slug="complete-quota-race-space")
+    size_bytes = 1024
+    content_hash = zero_bytes_sha256(size_bytes)
+    init_response = await client.post(
+        "/api/v1/uploads/init",
+        headers={"X-CSRF-Token": token},
+        json={
+            "space_id": space["id"],
+            "parent_id": space["root_node_id"],
+            "file_name": "并发配额失败.bin",
+            "size_bytes": size_bytes,
+            "content_hash": content_hash,
+            "hash_algo": "sha256",
+        },
+    )
+    session_id = init_response.json()["session_id"]
+
+    async def reject_reservation(
+        _repository: QuotaRepository,
+        **_kwargs: object,
+    ) -> UUID | None:
+        return None
+
+    monkeypatch.setattr(QuotaRepository, "try_add_usage", reject_reservation)
+
+    response = await client.post(
+        f"/api/v1/uploads/{session_id}/complete",
+        headers={
+            "X-CSRF-Token": token,
+            "X-Client-Operation-ID": "complete-quota-race",
+        },
+        json={"parts": [{"part_no": 1, "etag": "etag-1", "size_bytes": size_bytes}]},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["code"] == "QUOTA_EXCEEDED"
+
+    async with session_factory() as session:
+        upload_session = (
+            await session.execute(select(UploadSession).where(UploadSession.id == UUID(session_id)))
+        ).scalar_one()
+        nodes = (
+            (
+                await session.execute(
+                    select(Node).where(Node.parent_id == UUID(str(space["root_node_id"])))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        versions = (await session.execute(select(FileVersion))).scalars().all()
+        blobs = (await session.execute(select(FileBlob))).scalars().all()
+        quota_account = (await session.execute(select(QuotaAccount))).scalar_one()
+        ledgers = (await session.execute(select(QuotaLedger))).scalars().all()
+        completed_audits = (
+            (await session.execute(select(AuditLog).where(AuditLog.action == "upload.completed")))
+            .scalars()
+            .all()
+        )
+        staged_events = (
+            (
+                await session.execute(
+                    select(OutboxEvent).where(
+                        OutboxEvent.event_type.in_(
+                            {
+                                "audit.upload.completed",
+                                "search.index_requested",
+                                "search.extract_requested",
+                                "preview.render_requested",
+                            }
+                        )
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        failed_audit = (
+            await session.execute(select(AuditLog).where(AuditLog.action == "upload.failed"))
+        ).scalar_one()
+        client_operation = (
+            await session.execute(
+                select(ClientOperation).where(ClientOperation.operation_id == "complete-quota-race")
+            )
+        ).scalar_one()
+
+    assert upload_session.status == "failed"
+    assert upload_session.completed_node_id is None
+    assert upload_session.completed_version_id is None
+    assert upload_session.completed_blob_id is None
+    assert nodes == []
+    assert versions == []
+    assert blobs == []
+    assert quota_account.used_bytes == 0
+    assert ledgers == []
+    assert completed_audits == []
+    assert staged_events == []
+    assert failed_audit.metadata_json["reason"] == "quota_exceeded"
+    assert client_operation.status == "pending"
+    assert client_operation.response_json == {}
+    assert upload_session.provider_upload_id in storage_adapter.aborted_uploads
 
 
 @pytest.mark.asyncio

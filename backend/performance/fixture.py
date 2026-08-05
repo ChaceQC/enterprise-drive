@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import secrets
+import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -238,10 +239,21 @@ def _delete_and_purge_node(
     *,
     node_id: str,
     csrf: str,
+    operation_timeout_seconds: float = 900.0,
+    operation_poll_interval_seconds: float = 0.5,
 ) -> int:
     headers = {"X-CSRF-Token": csrf}
     delete_response = client.delete(f"/api/v1/files/{node_id}", headers=headers)
-    if delete_response.status_code not in (200, 404):
+    if delete_response.status_code == 202:
+        _wait_for_tree_operation(
+            client,
+            response=delete_response,
+            action="删除",
+            node_id=node_id,
+            timeout_seconds=operation_timeout_seconds,
+            poll_interval_seconds=operation_poll_interval_seconds,
+        )
+    elif delete_response.status_code not in (200, 404):
         raise RuntimeError(
             f"删除性能 fixture 失败: node={node_id} status={delete_response.status_code} "
             f"body={delete_response.text[:500]}"
@@ -250,6 +262,16 @@ def _delete_and_purge_node(
     purge_response = client.delete(f"/api/v1/files/{node_id}/purge", headers=headers)
     if purge_response.status_code == 404:
         return 0
+    if purge_response.status_code == 202:
+        operation = _wait_for_tree_operation(
+            client,
+            response=purge_response,
+            action="彻底清理",
+            node_id=node_id,
+            timeout_seconds=operation_timeout_seconds,
+            poll_interval_seconds=operation_poll_interval_seconds,
+        )
+        return int(operation.get("processed_count") or 0)
     if purge_response.status_code != 200:
         raise RuntimeError(
             f"彻底清理性能 fixture 失败: node={node_id} status={purge_response.status_code} "
@@ -257,6 +279,53 @@ def _delete_and_purge_node(
         )
     payload = purge_response.json()
     return int(payload.get("purged_count") or 0)
+
+
+def _wait_for_tree_operation(
+    client: httpx.Client,
+    *,
+    response: httpx.Response,
+    action: str,
+    node_id: str,
+    timeout_seconds: float,
+    poll_interval_seconds: float,
+) -> dict[str, Any]:
+    payload = response.json()
+    operation_id = str(payload.get("operation_id") or "").strip()
+    if not operation_id:
+        raise RuntimeError(
+            f"{action}性能 fixture 返回 202 但缺少 operation_id: "
+            f"node={node_id} body={response.text[:500]}"
+        )
+
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        operation_response = client.get(f"/api/v1/files/operations/{operation_id}")
+        if operation_response.status_code != 200:
+            raise RuntimeError(
+                f"查询性能 fixture {action}操作失败: node={node_id} "
+                f"operation={operation_id} status={operation_response.status_code} "
+                f"body={operation_response.text[:500]}"
+            )
+        operation = operation_response.json()
+        status = str(operation.get("status") or "")
+        if status == "completed":
+            return operation
+        if status == "failed":
+            raise RuntimeError(
+                f"性能 fixture {action}操作失败: node={node_id} "
+                f"operation={operation_id} error={operation.get('error_code')}"
+            )
+        if status not in {"pending", "running"}:
+            raise RuntimeError(
+                f"性能 fixture {action}操作状态无效: node={node_id} "
+                f"operation={operation_id} status={status}"
+            )
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                f"等待性能 fixture {action}操作超时: node={node_id} operation={operation_id}"
+            )
+        time.sleep(max(poll_interval_seconds, 0.0))
 
 
 def write_fixture(fixture: BenchmarkFixture, path: Path) -> None:

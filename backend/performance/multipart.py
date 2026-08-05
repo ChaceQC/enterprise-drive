@@ -123,6 +123,34 @@ def record_complete_timing(
         exception=None,
         context=context or {},
     )
+    phase_metric_names = {
+        "pre_storage": "upload_complete_pre_storage",
+        "hash_validation": "upload_complete_hash_validation",
+        "final_object": "upload_complete_final_object",
+        "db_finalize": "upload_complete_db_finalize",
+        "temp_delete": "upload_complete_temp_delete",
+    }
+    for phase, metric_name in phase_metric_names.items():
+        phase_ms = timings.get(phase)
+        if phase_ms is None:
+            continue
+        _fire_request_event(
+            request_type="BENCH",
+            name=metric_name,
+            response_time=phase_ms,
+            response_length=0,
+            exception=None,
+            context=context or {},
+        )
+    measured_server_ms = sum(timings.values())
+    _fire_request_event(
+        request_type="BENCH",
+        name="upload_complete_unattributed",
+        response_time=max(response_time_ms - measured_server_ms, 0.0),
+        response_length=0,
+        exception=None,
+        context=context or {},
+    )
     _fire_request_event(
         request_type="BENCH",
         name="upload_complete_api_without_storage_merge",

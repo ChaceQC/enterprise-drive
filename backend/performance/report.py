@@ -117,7 +117,7 @@ def write_report(
                 else None
             ),
             "multipart_size_bytes": (
-                int(os.getenv("PERF_MULTIPART_SIZE_BYTES", "0"))
+                int(os.getenv("PERF_MULTIPART_SIZE_BYTES", str(64 * 1024)))
                 if scenario == "upload_complete"
                 else None
             ),

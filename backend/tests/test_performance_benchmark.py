@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 import pytest
 
+from performance import multipart
 from performance.complete_queue import (
     COMPLETE_QUEUE_SCHEMA,
     PreparedCompleteItem,
@@ -83,13 +84,51 @@ def test_profiles_keep_smoke_below_target_resource_budget() -> None:
 
 def test_server_timing_parser_extracts_upload_complete_phases() -> None:
     timings = parse_server_timing(
-        "storage_complete;dur=12.5, hash_validation;dur=3.25, final_object;dur=8"
+        "pre_storage;dur=4, storage_complete;dur=12.5, "
+        "hash_validation;dur=3.25, final_object;dur=8, "
+        "db_finalize;dur=20, temp_delete;dur=2"
     )
 
     assert timings == {
+        "pre_storage": 4.0,
         "storage_complete": 12.5,
         "hash_validation": 3.25,
         "final_object": 8.0,
+        "db_finalize": 20.0,
+        "temp_delete": 2.0,
+    }
+
+
+def test_upload_complete_timing_records_each_server_phase(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        multipart,
+        "_fire_request_event",
+        lambda **kwargs: events.append(kwargs),
+    )
+
+    multipart.record_complete_timing(
+        response_time_ms=100,
+        server_timing_header=(
+            "pre_storage;dur=4, storage_complete;dur=12.5, "
+            "hash_validation;dur=3.25, final_object;dur=8, "
+            "db_finalize;dur=20, temp_delete;dur=2"
+        ),
+        context={"source": "test"},
+    )
+
+    response_times = {event["name"]: event["response_time"] for event in events}
+    assert response_times == {
+        "upload_complete_storage_merge": 12.5,
+        "upload_complete_pre_storage": 4.0,
+        "upload_complete_hash_validation": 3.25,
+        "upload_complete_final_object": 8.0,
+        "upload_complete_db_finalize": 20.0,
+        "upload_complete_temp_delete": 2.0,
+        "upload_complete_unattributed": 50.25,
+        "upload_complete_api_without_storage_merge": 87.5,
     }
 
 
@@ -413,7 +452,11 @@ def test_target_required_metric_requires_at_least_one_sample(tmp_path: Path) -> 
     assert report["passed"] is False
 
 
-def test_target_upload_complete_requires_end_to_end_metric(tmp_path: Path) -> None:
+def test_target_upload_complete_requires_end_to_end_metric(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("PERF_MULTIPART_SIZE_BYTES", raising=False)
     stats_path = tmp_path / "stats_stats.csv"
     with stats_path.open("w", encoding="utf-8", newline="") as handle:
         writer = csv.DictWriter(
@@ -461,6 +504,7 @@ def test_target_upload_complete_requires_end_to_end_metric(tmp_path: Path) -> No
     )
 
     assert report["summary"]["missing_required_metrics"] == ["upload_complete_end_to_end"]
+    assert report["workload"]["multipart_size_bytes"] == 64 * 1024
     assert report["passed"] is False
 
 
@@ -487,6 +531,54 @@ def test_fixture_cleanup_soft_deletes_before_single_purge() -> None:
     assert calls == [
         ("DELETE", "/api/v1/files/fixture-root-id"),
         ("DELETE", "/api/v1/files/fixture-root-id/purge"),
+    ]
+
+
+def test_fixture_cleanup_waits_for_async_delete_and_purge() -> None:
+    calls: list[tuple[str, str]] = []
+    delete_polls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal delete_polls
+        calls.append((request.method, request.url.path))
+        if request.method == "DELETE" and request.url.path == "/api/v1/files/fixture-root-id":
+            return httpx.Response(202, json={"operation_id": "delete-operation"})
+        if request.url.path == "/api/v1/files/operations/delete-operation":
+            delete_polls += 1
+            return httpx.Response(
+                200,
+                json={
+                    "status": "running" if delete_polls == 1 else "completed",
+                    "processed_count": 101,
+                },
+            )
+        if request.method == "DELETE" and request.url.path == "/api/v1/files/fixture-root-id/purge":
+            return httpx.Response(202, json={"operation_id": "purge-operation"})
+        if request.url.path == "/api/v1/files/operations/purge-operation":
+            return httpx.Response(
+                200,
+                json={"status": "completed", "processed_count": 101},
+            )
+        raise AssertionError(f"unexpected request: {request.method} {request.url.path}")
+
+    with httpx.Client(
+        base_url="http://fixture.test",
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        removed = _delete_and_purge_node(
+            client,
+            node_id="fixture-root-id",
+            csrf="csrf-token",
+            operation_poll_interval_seconds=0,
+        )
+
+    assert removed == 101
+    assert calls == [
+        ("DELETE", "/api/v1/files/fixture-root-id"),
+        ("GET", "/api/v1/files/operations/delete-operation"),
+        ("GET", "/api/v1/files/operations/delete-operation"),
+        ("DELETE", "/api/v1/files/fixture-root-id/purge"),
+        ("GET", "/api/v1/files/operations/purge-operation"),
     ]
 
 
