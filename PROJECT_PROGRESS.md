@@ -4,8 +4,9 @@
 
 ### 当前状态
 
-- 分支：`dev`；正式对象存储替换已完成实现与本地直接验证，最终 commit、push 和受影响
-  远端 CI 由本轮收尾统一确认。
+- 分支：`dev`；对象存储替换功能提交
+  `ba378cf2f18a5d56ea154a8f50f24bf6d3d2079d` 已推送到 `origin/dev`，对应
+  `backend-ci` run `31031565671` 全绿。
 - 正式 `compose.windows.yml` 使用
   `chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602`
   （OCI revision `875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa`）、`seaweedfs`、
@@ -52,14 +53,22 @@
   `DRIVE_S3_REGION=us-east-1`，不受调用进程中的迁移端点污染。
 - 本地 Grype `v0.115.0`：`0 Critical / 1 High`。High 为
   `GHSA-hrxh-6v49-42gf`，报告修复版本为 gRPC `1.82.1`。
-- 本轮遵循“不重复测试”：没有重跑已通过的全量 pytest、Playwright、历史性能
-  target 或无关 Rust/桌面集合；完整备份恢复主流程只执行一次，最后失败项仅做
-  gateway Host 探针的定向修复和复测。
+- 远端 run `31031565671`：backend `468 passed, 2 warnings`；
+  `windows-deployment`、`object-storage-image-policy` 和
+  `object-storage-supply-chain` 全部成功。供应链 artifact `8940899557`
+  （ZIP digest `sha256:13ffc1fa5e2ec0a19f153c5e8047458ca3780a3618441ec7a04ee6cb773a48b4`）
+  复核为 `0 Critical / 1 High`；四依赖 artifact `8941042883` 对 PostgreSQL、
+  Redis、S3、OpenSearch 的 4 个故障场景均检测并恢复，最终状态为 healthy。
+- CI scope router `21 tests` 通过；当前文档与路由器差异仅选择 installer，因为
+  `docs/release-v1.0.0.md` 会进入 Windows Release artifact，其余普通 Markdown
+  不触发昂贵业务门禁。
+- 本轮遵循“不重复测试”：本地没有重跑已通过的全量 pytest、Playwright、历史性能
+  target 或无关 Rust/桌面集合；远端 backend 已按受影响门禁执行 `468 passed`。
+  完整备份恢复主流程只执行一次，最后失败项仅做 gateway Host 探针的定向修复和复测。
 
 ### 尚未验证或签字
 
 - 旧 MinIO 全量对象的 dry-run/apply/inventory 对账。
-- 本轮对象存储替换提交对应的远端 CI、供应链 artifact 和 push 结果。
 - 真实 DNS/受信 TLS、OIDC/LDAPS、生产告警接收和密钥保管。
 - 角色 UAT、长期 soak、完整升级/回滚、恢复耗时和 RPO/RTO。
 
@@ -74,12 +83,12 @@
 
 ### 下一步
 
-1. 只运行对象存储替换直接影响的最终 SBOM/Grype/Compose/CI 门禁；失败后只重跑
-   实际失败项。
-2. 按 `docs/object-storage-seaweedfs-migration.md` 对代表性及最终全量旧数据执行
+1. 按 `docs/object-storage-seaweedfs-migration.md` 对最终全量旧数据执行
    S3 级迁移和 inventory 对账。
-3. 完成 SeaweedFS High 风险处理、UAT、soak、升级/回滚、RPO/RTO 和外部环境签字。
-4. 全部门禁通过后才执行 `dev -> main -> v1.0.0 tag/Release`。
+2. 完成 SeaweedFS High 风险处理、候选 target 性能、UAT、soak、升级/回滚、
+   RPO/RTO 和外部环境签字。
+3. 使用最终候选重新生成完整 Windows/Release 工件；全部门禁通过后才执行
+   `dev -> main -> v1.0.0 tag/Release`。
 
 ### 涉及文件
 
@@ -91,6 +100,7 @@
 - `backend/tests/test_object_storage_admin.py`
 - `.github/workflows/backend-ci.yml`
 - `.github/scripts/ci_scope.py`
+- `.github/scripts/test_ci_scope.py`
 - `deploy/windows/`
 - `docs/object-storage-seaweedfs-migration.md`
 - `docs/minio-security-risk.md`
@@ -105,13 +115,14 @@
 - `backend/README.md`
 - `企业网盘开发者技术计划书.md`
 
-## 2026-08-05 Sprint 13 v1.0.0 候选发布收口
+## 2026-08-05 Sprint 13 v1.0.0 候选发布收口（对象存储替换前历史快照）
 
-### 当前状态
+### 当时状态
 
-- 分支：`dev`；Sprint 13 候选代码提交
+- 分支：`dev`；当时候选基线提交
   `8c54c96e12f925fe7e0a07bf3a6444e63f600044` 已推送到 `origin/dev`，同 SHA
-  远端 CI 与 Windows 候选工件均已验证。
+  远端 CI 与 Windows 候选工件均已验证；该工件不包含后续
+  `ba378cf2f18a5d56ea154a8f50f24bf6d3d2079d` 的对象存储替换。
 - 后端、Web、OpenAPI client、Rust workspace、Tauri、桌面契约及依赖锁文件已统一为
   `1.0.0`；migration head 保持 `20260804_0026`，OpenAPI 保持
   116 paths / 148 operations / 178 schemas。
@@ -179,20 +190,22 @@
   `0.9.0` 回滚包 SHA-256 为
   `2e848d8abdf15a0abd6eeabb6931946a05ddef4d3431c4116690dee4abf96ecc`。
 
-### 阻塞与风险
+### 当时阻塞与风险（已由本文件顶部后续记录更新）
 
-- 当前 MinIO Server/Client 既有 Critical 风险尚未由受支持修复镜像或可审计补丁
-  镜像关闭，正式 tag/Release 保持阻塞。
+- 当时 MinIO Server/Client 的 Critical 风险仍阻塞正式 tag/Release；后续已由
+  SeaweedFS 正式运行时替换关闭，当前剩余风险以上方对象存储记录为准。
 - 真实 DNS、受信证书、企业 OIDC/LDAPS、生产告警接收端和密钥保管需要生产环境。
-- 角色 UAT、长期 soak、`0.9.0 -> 1.0.0` 全栈升级/回滚、恢复耗时和 RPO/RTO 尚需
-  使用本次 CI 生成的同一候选工件执行并签字。
+- 当时计划使用本次 CI 工件执行角色 UAT、长期 soak、`0.9.0 -> 1.0.0` 全栈升级/
+  回滚、恢复耗时和 RPO/RTO；对象存储替换后，该 Windows artifact 仅保留为历史
+  证据，正式验收必须使用重新生成的最终候选完整工件。
 
-### 下一步
+### 当时下一步（已由本文件顶部后续记录取代）
 
-1. 使用已冻结候选 commit 和 Windows artifact 执行角色 UAT、长期 soak、
-   `0.9.0 -> 1.0.0` 升级/回滚、恢复耗时与 RPO/RTO 实测。
-2. 采用受支持修复发行版或可审计补丁镜像关闭 MinIO Critical，并只运行其直接相关的
-   S3、备份恢复、SBOM/Grype 和迁移门禁。
+1. 原计划使用已冻结候选 commit 和 Windows artifact 执行角色 UAT、长期 soak、
+   `0.9.0 -> 1.0.0` 升级/回滚、恢复耗时与 RPO/RTO 实测；当前应改用对象存储替换后
+   重新生成的最终候选完整工件。
+2. 原计划通过 MinIO 修复镜像关闭 Critical；后续已改为 SeaweedFS 运行时替换，
+   当前仅保留 SeaweedFS High 风险处理、全量迁移和最终发布门禁。
 3. 在真实网络完成 DNS、受信证书、OIDC/LDAPS、告警接收与密钥责任签字。
 4. 外部阻塞关闭并完成候选环境签字后，再合并 `main`、创建 `v1.0.0` tag 和
    GitHub Release。

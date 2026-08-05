@@ -41,7 +41,8 @@ OCI revision: 875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa
   前形成外部风险接受或修复证据。
 
 上述结果关闭了旧 MinIO `16/9` 个 Critical 基线的**正式运行时替换**问题并完成
-Windows 备份恢复兼容，但不等于完整升级/RPO-RTO、生产 UAT 或远端 CI 已完成。
+Windows 备份恢复兼容；提交 `ba378cf2f18a` 的远端 run `31031565671` 也已全绿，
+但不等于完整升级/RPO-RTO 或生产 UAT 已完成。
 
 ## 3. 准备两个隔离环境
 

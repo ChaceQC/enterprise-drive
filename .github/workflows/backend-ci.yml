@@ -10,6 +10,10 @@ on:
       - ".env.windows.example"
       - "deploy/monitoring/**"
       - "deploy/windows/**"
+      - "docs/release-v1.0.0.md"
+      - "PROJECT_PLAN.md"
+      - "PROJECT_PROGRESS.md"
+      - "PROJECT_STAGE_STATUS.md"
       - ".github/scripts/**"
       - ".github/workflows/backend-ci.yml"
   pull_request:
@@ -21,6 +25,10 @@ on:
       - ".env.windows.example"
       - "deploy/monitoring/**"
       - "deploy/windows/**"
+      - "docs/release-v1.0.0.md"
+      - "PROJECT_PLAN.md"
+      - "PROJECT_PROGRESS.md"
+      - "PROJECT_STAGE_STATUS.md"
       - ".github/scripts/**"
       - ".github/workflows/backend-ci.yml"
   schedule:

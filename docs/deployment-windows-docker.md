@@ -813,11 +813,14 @@ CI 使用变更范围路由，不再让所有提交重复执行全部部署门�
 object-storage 门禁；`deploy/windows/**/*.ps1` 只进入 Windows smoke；
 Nginx/监控配置进入 backend 的 Compose/template/smoke 路径。Rust crate 源码/测试
 只进入 `rust-desktop`，Tauri UI/配置/图标/签名只进入安装包，Tauri `src-tauri`
-Rust 入口才同时进入两者；CI workflow/router 和文档变更只保留 changes 路由校验。
-安装包 job 不再使用“任意 push 都执行”的兜底条件，只有安装包相关 scope 或手工完整
-运行才启动。SeaweedFS job 固定 image/digest，生成单份 SPDX SBOM 和 Grype JSON，
+Rust 入口才同时进入两者；CI workflow/router 和普通 Markdown 变更只保留 changes
+路由校验。安装包 job 不再使用“任意 push 都执行”的兜底条件，只有安装包相关 scope、
+会打包为 `RELEASE_NOTES.md` 的 `docs/release-v1.0.0.md` 或手工完整运行才启动。
+SeaweedFS job 固定 image/digest，生成单份 SPDX SBOM 和 Grype JSON，
 Critical 非零即阻断，并与 Rust 依赖策略一起保留每周一 UTC 03:17 的定时门禁。本轮
-替换的远端 CI 结果必须以最终 push 触发的实际 run 为准。
+替换的远端 CI 已由提交 `ba378cf2f18a` 触发的 run `31031565671` 验证：
+backend、Windows deployment、SeaweedFS image policy 与 supply-chain 全绿，供应链
+artifact 为 `8940899557`。
 
 发布检查：
 

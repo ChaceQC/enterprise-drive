@@ -26,6 +26,7 @@ SCOPE_KEYS = (
 
 WORKFLOW_PATH = ".github/workflows/backend-ci.yml"
 SCOPE_SCRIPT_PREFIX = ".github/scripts/"
+RELEASE_NOTES_PATH = "docs/release-v1.0.0.md"
 
 
 def _empty_scope() -> dict[str, bool]:
@@ -70,6 +71,17 @@ def scope_for_paths(paths: Iterable[str]) -> dict[str, bool]:
     for raw_path in paths:
         path = _normalise(raw_path)
         if not path:
+            continue
+
+        if path == RELEASE_NOTES_PATH:
+            # 发布说明会复制到 Windows Release artifact；其变更必须重新生成
+            # manifest 和校验和，但不需要重复运行其他业务测试。
+            scope["installer"] = True
+            continue
+
+        if path.endswith(".md"):
+            # README 和子目录说明文档可能位于 backend/frontend/desktop 下；
+            # 除上述发布说明外，它们不改变运行时或发布工件，不应触发昂贵测试。
             continue
 
         if path == WORKFLOW_PATH or path.startswith(SCOPE_SCRIPT_PREFIX):

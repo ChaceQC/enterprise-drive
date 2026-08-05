@@ -180,8 +180,9 @@
   Windows 桌面用户和运维角色执行真实 gateway/API 流程，形成缺陷关闭与最终签字。
 - `REL-002` 性能与安全发布门禁：固定 target 场景必需指标、OpenAPI type/format/enum
   兼容门禁，执行候选版本性能、长期 soak、代码/依赖/镜像扫描和非阻断风险接受。
-  旧 MinIO `16/9` Critical 已通过 SeaweedFS 正式运行时替换关闭；SeaweedFS
-  `GHSA-hrxh-6v49-42gf` High、最终 SBOM/Grype 和受影响 CI 仍须形成正式证据。
+  旧 MinIO `16/9` Critical 已通过 SeaweedFS 正式运行时替换关闭；run
+  `31031565671` 已生成当前 digest 的远端 SBOM/Grype 证据并通过受影响 CI，
+  `GHSA-hrxh-6v49-42gf` High 仍须修复或获得外部风险接受。
 - `REL-003` 安装、升级与回滚：从 `0.9.0` 演练到 `1.0.0`，验证备份/恢复、
   Redis/OpenSearch 迁移、依赖故障恢复和带上一版安装包的桌面自动回退。
 - `REL-004` 运维责任与 RPO/RTO：固定 DNS/证书、身份、备份、告警、供应链和桌面
@@ -207,24 +208,19 @@
 
 ## 5. 当前下一步
 
-2026-08-05 Sprint 13 对象存储替换已完成实现侧直接验证：正式
-`compose.windows.yml` 使用
-`chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602`
-（OCI revision `875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa`）、`seaweedfs`、
-fail-closed `storage-init` 和新的 `seaweedfs-data`。既有真实 S3 集成集合为
-`3 passed`；正式 `storage-init` 已通过签名 PUT/GET/DELETE、匿名 bucket/object
-拒绝、CORS allow/deny 和删除后校验；真实单对象 MinIO→SeaweedFS 迁移保持 size、
-SHA-256、Content-Type、用户 metadata 和 tags。旧 `minio-data` 只允许由旧提交和
-固定 MinIO 镜像读取，再按 `docs/object-storage-seaweedfs-migration.md` 走 S3 级
-迁移，禁止直接挂载给 SeaweedFS。本地 Grype `v0.115.0` 为
-`0 Critical / 1 High`，High 为 `GHSA-hrxh-6v49-42gf`（报告修复版本 gRPC
-`1.82.1`）。Windows backup/restore smoke `27 passed`，真实完整恢复已完成
-`seaweedfs-data` 归档、发布前校验、隔离 target 数据/全栈健康和对象恢复点对账；
-末尾 gateway Host 探针缺陷已定向修复并验证。仍需外部 High 风险接受或修复、全量
-数据迁移、受影响 CI、UAT、soak、升级/RPO-RTO 和生产签字；本段不把尚未验证的
-push 或远端 CI 写成完成。
-
-2026-08-05 Sprint 13 候选发布代码侧已收口：后端、Web、OpenAPI client、Rust workspace、Tauri、桌面契约和锁文件统一为 `1.0.0`；性能 target 补齐场景必需指标与零样本失败，OpenAPI 门禁补齐 `type`、`format` 和 enum 收窄检测；桌面更新强制携带当前客户端对应的 `0.9.0` 回滚安装包，并对当前/回滚包执行 Ed25519、SHA-256、目标平台和 Authenticode 固定签名者验证，关键恢复失败不写健康标记，watchdog 错误 fail-closed；Windows CI 从 Git 历史构建回滚包并生成 `release-manifest.json`/`SHA256SUMS`。候选代码提交 `8c54c96e12f925fe7e0a07bf3a6444e63f600044` 已推送，`backend-ci` run `31019866714` 全绿：`changes`、`backend`、`frontend`、`rust-desktop`、`rust-dependency-policy` 和 `windows-desktop-installer` 成功，未受影响的 Windows 部署和 MinIO jobs 按 scope 跳过；后端为 `458 passed, 2 warnings`，前端单元测试 `14 passed`、Playwright `28 passed, 2 skipped`。Windows artifact `8937081786`（`enterprise-drive-windows-8c54c96e12f925fe7e0a07bf3a6444e63f600044`）已下载复验，ZIP SHA-256 为 `3cf32a39505014ec5b2affa7b9a170260f688f3a0060d9263684bfb36184b7aa`，清单 commit/version、7 个角色、当前/回滚安装包、`latest.json` 与 `SHA256SUMS` 均一致。本地只运行新增和直接受影响门禁，未重复历史性能 target、全量 Playwright、全量 pytest、MinIO/备份恢复或无关桌面集合。这一 run 是对象存储替换前的候选基线，不覆盖上方 SeaweedFS 变更；当时仍存在的 MinIO blocker 已由上方运行时替换处理，真实 UAT、soak、升级/RPO-RTO、SeaweedFS 最终远端扫描、全量迁移、DNS/TLS、OIDC/LDAPS、告警签字及正式 tag/Release 继续按发布清单执行。
+2026-08-05 Sprint 13 候选发布基线 `8c54c96e12f925fe7e0a07bf3a6444e63f600044`
+及 run `31019866714`、Windows artifact `8937081786` 保留为对象存储替换前的历史
+证据。必要对象存储变更提交 `ba378cf2f18a5d56ea154a8f50f24bf6d3d2079d`
+已推送；run `31031565671` 的 changes、backend、windows-deployment、
+object-storage-image-policy、object-storage-supply-chain 成功，未受影响的
+frontend、Rust 和 installer 按 scope 跳过。backend 为 `468 passed, 2 warnings`，
+当前 SeaweedFS digest 的供应链 artifact `8940899557` 为 `0 Critical / 1 High`，
+四依赖 artifact `8941042883` 最终状态 healthy；Windows backup/restore smoke
+`27 passed`，完整隔离恢复和 gateway Host 探针也已验证。旧 Windows artifact 不包含
+对象存储替换，当前候选必须重新生成完整 Release 工件。本地没有重复历史性能 target、
+全量 Playwright 或全量 pytest；仍需处理 High（若更换 digest 则重新扫描）、全量迁移、
+候选 target 性能、UAT、soak、升级/RPO-RTO、DNS/TLS、OIDC/LDAPS、告警签字及正式
+tag/Release。
 
 2026-08-04 Sprint 12 已完成：`BE-046` 至 `BE-050`、`FE-012`、`OPS-001` 至 `OPS-003`、`QA-001` 至 `QA-002` 已落地，项目版本统一为 `0.9.0`，migration head 为 `20260804_0026`，OpenAPI 归档为 116 个路径、148 个操作、178 个 schemas。本地确认治理后端 `4 passed`、审计/Outbox 定向用例、前端 lint/typecheck 与 Chromium 治理 E2E `1 passed`、版本一致性 `1 passed`、空库升级与 `0026 -> 0024 -> 0026` 往返、四依赖故障恢复、OPS 双 project Redis/OpenSearch 迁移/回退、监控规则/看板、OpenAPI/client、route matrix、Compose、actionlint 和 CI scope；最终功能/修复提交 `91ad743` 已推送，`backend-ci` run `30935875456` 的 `changes`、`frontend`、`backend` 成功，其余 6 个未受影响 job 按 scope 跳过，后端 `456 passed, 2 warnings`，四依赖报告 artifact 为 `8903238332`。本轮没有重复运行 Sprint 10 浏览器全集、既有 MinIO 全集、性能 target 或桌面历史集合；当前下一步进入 Sprint 13 完整 UAT、升级回滚和 `v1.0.0` 发布门禁。
 

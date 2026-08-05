@@ -121,7 +121,25 @@ class CiScopeTests(unittest.TestCase):
         )
 
     def test_docs_only_change_runs_no_expensive_gate(self) -> None:
-        self.assertEqual(scope_for_paths(["desktop/README.md"]), enabled())
+        self.assertEqual(
+            scope_for_paths(
+                [
+                    "backend/README.md",
+                    "frontend/README.md",
+                    "desktop/README.md",
+                    "PROJECT_PLAN.md",
+                    "PROJECT_PROGRESS.md",
+                    "PROJECT_STAGE_STATUS.md",
+                ]
+            ),
+            enabled(),
+        )
+
+    def test_release_notes_change_rebuilds_installer_artifact(self) -> None:
+        self.assertEqual(
+            scope_for_paths(["docs/release-v1.0.0.md"]),
+            enabled("installer"),
+        )
 
     def test_schedule_keeps_supply_chain_coverage(self) -> None:
         self.assertEqual(

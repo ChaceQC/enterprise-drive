@@ -154,10 +154,11 @@ uv run pytest tests/test_storage_s3_integration.py -q
 
 GitHub `backend-ci` 的当前工作流会启动临时 SeaweedFS，并运行这组真实对象存储集成
 测试，覆盖基于公共预签名 API 和标准 S3 HTTP 的 multipart 控制面、预签名上传/下载、
-copy、delete、list、hash 校验和孤儿最终对象扫描。本轮替换是否通过远端 job 仍以最终
-push 触发的实际 run 为准。
+copy、delete、list、hash 校验和孤儿最终对象扫描。提交 `ba378cf2f18a` 对应的
+`backend-ci` run `31031565671` 已验证 backend、Windows deployment、SeaweedFS
+image policy 和 supply-chain 门禁全绿。
 
-`backend-ci` 先通过 `.github/scripts/ci_scope.py` 计算变更范围：Rust crate 源码/测试只运行 `rust-desktop`，Tauri UI/配置/图标/签名只运行安装包 job，Tauri Rust 入口同时运行两者；普通库源码不会因为 push 自动重复构建 NSIS。CI workflow/router、桌面 README 和其他文档变更只保留 `changes` 轻量校验，相关业务代码未变化时直接跳过对应重 job。Rust job 先跑 workspace tests，再以 `--no-deps` 执行 Clippy；Rust 校验与安装包 job共享按 `Cargo.lock`/toolchain 计算的 Cargo registry/git cache，安装包先一次 `cargo fetch` 再以 offline 模式构建。Sprint 13 的安装包 job 还会从 Git 历史构建上一版本回滚安装包，对当前/回滚包执行 Authenticode 与更新签名验证，并生成 `release-manifest.json` 和 `SHA256SUMS`。相同分支的新提交会取消旧运行，SeaweedFS 与 Rust 依赖供应链扫描每周一 UTC 03:17 额外执行，手工 `workflow_dispatch` 仍运行完整门禁。
+`backend-ci` 先通过 `.github/scripts/ci_scope.py` 计算变更范围：Rust crate 源码/测试只运行 `rust-desktop`，Tauri UI/配置/图标/签名只运行安装包 job，Tauri Rust 入口同时运行两者；普通库源码不会因为 push 自动重复构建 NSIS。CI workflow/router 和普通 Markdown 文档变更只保留 `changes` 轻量校验，相关业务代码未变化时直接跳过对应重 job；`docs/release-v1.0.0.md` 会进入 Windows Release artifact，因此该发布说明变更只触发 installer。Rust job 先跑 workspace tests，再以 `--no-deps` 执行 Clippy；Rust 校验与安装包 job共享按 `Cargo.lock`/toolchain 计算的 Cargo registry/git cache，安装包先一次 `cargo fetch` 再以 offline 模式构建。Sprint 13 的安装包 job 还会从 Git 历史构建上一版本回滚安装包，对当前/回滚包执行 Authenticode 与更新签名验证，并生成 `release-manifest.json` 和 `SHA256SUMS`。相同分支的新提交会取消旧运行，SeaweedFS 与 Rust 依赖供应链扫描每周一 UTC 03:17 额外执行，手工 `workflow_dispatch` 仍运行完整门禁。
 
 BE-029 目标规模门禁已完成：10,000 节点、100 万 OpenSearch 文档和 1,000 万审计日志均已进入真实 target 环境；search、audit、mixed、upload-init 沿用既有通过工件，本轮只补此前未通过的 `upload_complete`。最终计入 1,936 个 complete 样本、0 失败，吞吐 `58.364 RPS`，不含 storage merge 的 API P95 为 `790 ms`，端到端 P95 为 `840 ms`，storage merge P95 为 `71 ms`，`report.json passed=true`；2,000 个准备节点已全部清理。详见 `docs/performance-benchmark.md`。
 
@@ -217,6 +218,6 @@ Compose 内的 Nginx gateway 是唯一宿主端口入口。默认本机模式使
 
 `backup-retention` 按保留天数和最少份数轮换经过校验的托管备份，`backup-offline-rotate` 把指定或最新托管备份原子复制到离线目录，逐文件对账 size/SHA-256 并记录 canonical inventory digest；`restore-drill` 把最新或指定备份恢复到随机隔离 Compose project 并在结束后删除 target 容器/卷。Redis/OpenSearch 升级不再复制原始卷：`data-migration-export` 生成 Redis RDB 和 OpenSearch settings/mappings/bulk NDJSON，`data-migration-apply` 在修改目标前创建 rollback export、拒绝向更低 major 版本迁移，并在失败时自动回退。完整命令、保留规则和报告字段见 [Sprint 12 备份安全、离线副本与跨版本数据迁移](docs/ops-sprint12-backup-portability.md)。
 
-备份安全边界如下：未启用完整包保护时，PostgreSQL dump、SeaweedFS/Redis/OpenSearch 原始卷归档和 TLS 证书卷仍依赖 BitLocker、restricted NTFS ACL 与加密介质；detached CMS 签名验证来源和 manifest 完整性，但证书信任链、吊销和双人保管仍由组织 PKI 负责；完整包加密证书私钥丢失会使备份永久不可恢复。`-ForceRestore` rollback 与跨版本自动回退都属于有证据的尽力恢复。旧 MinIO `16/9` Critical 已退出正式运行时；SeaweedFS 本地 Grype `v0.115.0` 为 `0 Critical / 1 High`，`GHSA-hrxh-6v49-42gf` 仍需外部风险接受或修复。最终扫描、全量迁移、UAT、soak、升级/RPO-RTO 和外部签字完成前，正式 `v1.0.0` tag/Release 继续阻塞，详见 [对象存储安全风险与发布门禁](docs/minio-security-risk.md)。
+备份安全边界如下：未启用完整包保护时，PostgreSQL dump、SeaweedFS/Redis/OpenSearch 原始卷归档和 TLS 证书卷仍依赖 BitLocker、restricted NTFS ACL 与加密介质；detached CMS 签名验证来源和 manifest 完整性，但证书信任链、吊销和双人保管仍由组织 PKI 负责；完整包加密证书私钥丢失会使备份永久不可恢复。`-ForceRestore` rollback 与跨版本自动回退都属于有证据的尽力恢复。旧 MinIO `16/9` Critical 已退出正式运行时；`ba378cf2f18a` 的 run `31031565671` 已生成 SeaweedFS 供应链 artifact `8940899557`，Grype 为 `0 Critical / 1 High`，`GHSA-hrxh-6v49-42gf` 仍需外部风险接受或修复。全量迁移、UAT、soak、升级/RPO-RTO、最终完整工件和外部签字完成前，正式 `v1.0.0` tag/Release 继续阻塞，详见 [对象存储安全风险与发布门禁](docs/minio-security-risk.md)。
 
 本机旧 MinIO 栈曾用自签名双域名证书在标准宿主 `80/443` 验证 HTTP `308`、API readiness、S3v4、临时 ACME bootstrap、原 gateway 恢复和彻底清理；SeaweedFS 替换后的 Windows 备份恢复已重新验证，公网双域名仍需在真实网络执行。公网受信证书签发与真实续期需要生产 DNS/网络环境。生产完成后使用 `tls-validate-public` 一次性验证双域名只解析到公网地址、HTTP 精确 `308`、HTTPS readiness、证书链和剩余有效期，并保存 JSON 记录。完整流程见 [Windows 11 Docker 部署说明](docs/deployment-windows-docker.md)，预览资源限制见 [预览 Worker 部署说明](docs/deployment-preview-worker.md)。Kubernetes、systemd 仅作为未来可选迁移方案。

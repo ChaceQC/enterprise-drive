@@ -35,8 +35,11 @@ Grype 报告为该 High 标注的修复版本是 gRPC `1.82.1`。正式发布前
 1. 更新到包含修复依赖且通过全部对象存储兼容门禁的固定镜像；或
 2. 由外部风险责任人记录可达性、补偿控制、责任人、到期日和升级计划后签字接受。
 
-本地扫描结果不替代最终 CI 生成的 SPDX SBOM、Grype JSON 和 GitHub Actions 证据。
-本轮对象存储替换尚未把远端 CI 或 push 写成已完成。
+功能提交 `ba378cf2f18a5d56ea154a8f50f24bf6d3d2079d` 已推送。`backend-ci`
+run `31031565671` 的 object-storage image policy 与 supply-chain 均成功；artifact
+`8940899557` 包含 Syft `1.46.0` SPDX、Grype `0.115.0` JSON 和 Critical/High ID
+列表，结果为 `0 Critical / 1 High`，ZIP digest 为
+`sha256:13ffc1fa5e2ec0a19f153c5e8047458ca3780a3618441ec7a04ee6cb773a48b4`。
 
 ## 3. 已完成的直接验证
 
@@ -63,6 +66,9 @@ Grype 报告为该 High 标注的修复版本是 gRPC `1.82.1`。正式发布前
   归档、发布前 `backup-verify`、隔离 target 数据/全栈健康和对象恢复点对账。末尾
   gateway 请求因 IP Host 命中 Nginx `444`，修复为显式 Host 后已定向验证
   `healthz/readyz=200`。
+- 远端 run `31031565671` 的 backend 为 `468 passed, 2 warnings`；四依赖 artifact
+  `8941042883` 对 PostgreSQL、Redis、S3 和 OpenSearch 均检测到故障并恢复，
+  `final_state=healthy`。
 
 这些证据证明当前实现、代表性对象路径和 Windows 恢复兼容可工作，但不替代全量
 inventory、长期稳定性、性能、升级/RPO-RTO 和生产网络验收。
@@ -88,7 +94,8 @@ inventory、长期稳定性、性能、升级/RPO-RTO 和生产网络验收。
 对象存储相关门禁必须全部满足：
 
 - SeaweedFS image reference/digest 与 OCI revision 已写入发布证据。
-- 最终 SPDX SBOM 与 Grype JSON 对当前 digest 生成；Critical 为 0。
+- SPDX SBOM 与 Grype JSON 已对当前 digest 生成；Critical 为 0。若修复 High 导致
+  image digest 变化，必须对新 digest 重新生成并执行同一门禁。
 - `GHSA-hrxh-6v49-42gf` 已修复或获得正式外部风险接受。
 - `storage-init` fail-closed 检查通过。
 - 真实 S3 multipart、预签名 PUT/GET、copy、delete、list、hash、失败清理和孤儿对象

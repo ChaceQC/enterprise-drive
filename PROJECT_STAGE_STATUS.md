@@ -15,9 +15,9 @@
 | 项目 | 当前实际状态 |
 |---|---|
 | 分支 | `dev` |
-| 候选代码 HEAD | `8c54c96e12f`（同 SHA CI 与 Windows artifact 已验证） |
-| 当前对象存储变更 | 正式运行时已从 MinIO 替换为 SeaweedFS `4.40`；该变更仍待最终提交、push 和受影响 CI，不能复用 `8c54c96e12f` 的远端结果作为新变更证据 |
-| 工作区 | Sprint 13 对象存储替换已完成本地直接验证和 Windows 备份恢复兼容演练；生产环境验收与远端门禁保持未完成 |
+| 候选功能代码 | `ba378cf2f18a`（对象存储替换同 SHA 受影响 CI 已验证） |
+| 当前对象存储变更 | 正式运行时已从 MinIO 替换为 SeaweedFS `4.40`；提交、push、远端 backend/Windows/image-policy/supply-chain 门禁均已完成 |
+| 工作区 | Sprint 13 对象存储替换已完成本地直接验证、Windows 备份恢复兼容演练和远端门禁；生产环境验收仍待外部执行 |
 | 后端、前端、Rust、Tauri 版本 | `1.0.0` 候选 |
 | 运行时 OpenAPI | 116 个路径、148 个操作、178 个 Schema |
 | 数据库迁移 head | `20260804_0026` |
@@ -50,13 +50,13 @@
 
 | 子阶段 | 目标 | 当前状态 | 代码/工件依据 | 仍需完成 |
 |---|---|---|---|---|
-| Sprint 13.1：发布基线冻结 | 固定版本、OpenAPI、迁移、依赖、配置和兼容窗口 | 代码与远端门禁完成 | 候选代码 `8c54c96e12f` 已统一后端、Web、OpenAPI client、Rust workspace、Tauri 和锁文件为 `1.0.0`；migration head 保持 `20260804_0026`；同 SHA CI 全绿 | 保持候选冻结，生产前置关闭前不追加未经验证的代码 |
+| Sprint 13.1：发布基线冻结 | 固定版本、OpenAPI、迁移、依赖、配置和兼容窗口 | 代码与远端门禁完成 | 基线 `8c54c96e12f` 完成跨端 `1.0.0` 冻结；对象存储必要变更 `ba378cf2f18a` 保持版本/OpenAPI/migration 不变，受影响 CI 全绿 | 保持候选冻结，生产前置关闭前不追加未经验证的代码 |
 | Sprint 13.2：生产环境前置条件 | DNS、HTTPS、证书、Secret、OIDC/LDAP、对象存储和监控接收端 | 对象存储运行时替换完成，外部环境待验收 | 正式 Compose 使用 `seaweedfs`、`storage-init` 和新的 `seaweedfs-data`；SeaweedFS 固定为 `4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602`，OCI revision `875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa` | 真实 DNS/受信证书、真实身份源、真实告警接收、生产 secret 与责任签字 |
 | Sprint 13.3：完整 UAT | 用户端、管理端、公开分享、权限、上传下载、身份、桌面同步全流程 | 清单冻结，待候选环境签字 | `docs/sprint13-release-readiness.md` 已按普通用户、空间角色、管理员、身份、外部分享、桌面和运维角色固定真实 UAT | 执行真实 gateway/API 流程、关闭缺陷并签字 |
 | Sprint 13.4：性能与稳定性 | 目标规模、长时间运行、并发、依赖故障、恢复和资源边界 | 自动门禁已补强，候选运行待执行 | target 各场景已强制必需指标和非零样本；既有 10,000 节点/100 万索引/1,000 万审计证据保留 | 对 `1.0.0` 执行 target、长期 soak、升级恢复耗时与 RPO/RTO 实测 |
-| Sprint 13.5：安全与供应链 | 代码、依赖、镜像、签名、SBOM、密钥和发布风险 | MinIO Critical 运行时 blocker 已关闭，剩余风险待签字 | OpenAPI 已检测 type/format/enum 收窄；桌面运行时校验 Authenticode 固定签名者；SeaweedFS 本地 Grype `v0.115.0` 为 `0 Critical / 1 High` | 对 `GHSA-hrxh-6v49-42gf`（报告修复版本 gRPC `1.82.1`）完成外部风险接受或修复；完成最终 SBOM/Grype、密钥轮换和受影响 CI |
+| Sprint 13.5：安全与供应链 | 代码、依赖、镜像、签名、SBOM、密钥和发布风险 | 当前 SeaweedFS digest 的远端扫描证据完成，剩余 High 与生产密钥待签字 | Run `31031565671` 的 artifact `8940899557` 含 Syft `1.46.0` SPDX 与 Grype `0.115.0`，结果 `0 Critical / 1 High`；High 为 `GHSA-hrxh-6v49-42gf` | 修复该 High 或完成外部风险接受；若修复更换 digest 则重新扫描；完成生产密钥轮换与责任签字 |
 | Sprint 13.6：升级、备份与回滚 | 版本升级、跨版本迁移、失败恢复、备份恢复、桌面更新回退 | 对象存储 Windows 备份恢复兼容已通过，完整升级与全量迁移待执行 | 更新清单强制携带当前客户端对应的上一版安装包；对象存储迁移工具 fail-closed 检测未完成 multipart；SeaweedFS 完整 source→backup→verify→隔离 target 恢复已核对 PostgreSQL、Redis、OpenSearch、对象和全栈健康 | 用同一候选执行 MinIO→SeaweedFS 全量迁移、服务端/桌面升级回滚并形成 RPO/RTO 证据 |
-| Sprint 13.7：发布工件 | 镜像、Web 包、Windows 安装包、更新包、OpenAPI、SBOM、校验和 | Windows 候选工件已产出并复验 | Artifact `8937081786` 包含当前/回滚安装包、`latest.json`、OpenAPI、发布说明、公钥、证书、`release-manifest.json` 和 `SHA256SUMS`；清单 commit/version/7 个角色与 ZIP SHA-256 已复验 | 正式后端/Web/Preview 镜像 digest、SBOM、最终扫描与完整 Release 工件仍待生产门禁 |
+| Sprint 13.7：发布工件 | 镜像、Web 包、Windows 安装包、更新包、OpenAPI、SBOM、校验和 | 对象存储 SBOM 已产出；当前候选完整工件待重建 | Artifact `8940899557` 对应 `ba378cf2f18a`；旧 Windows artifact `8937081786` 对应对象存储替换前的 `8c54c96e12f`，仅保留历史证据 | 使用最终候选重新生成后端/Web/Preview digest、Windows 当前/回滚包、完整 SBOM 和 Release 清单 |
 | Sprint 13.8：正式发布收口 | 合并主分支、创建 tag/Release、部署、监控和试点交接 | 尚未开始 | 当前仓库仍无 Git tag 或正式 GitHub Release；现有 Actions candidate artifact 不等于正式发布 | `dev` 合并 `main`、创建 `v1.0.0`、发布 Release、完成试点交接和上线复盘 |
 
 ## 5. 当前验证状态
@@ -71,25 +71,24 @@
 | 发布清单工具 | `6 tests OK`；覆盖工件/校验和篡改、缺件、绝对路径、UNC 和大小写重复路径 |
 | 后端受影响 Ruff lint/format | 通过 |
 | Rust 定向门禁 | `drive-update` GNU check、3 tests、Clippy，`drive-desktop` GNU check/Clippy，workspace fmt 和 metadata 通过；9 个 package 均为 `1.0.0` |
-| CI 配置 | actionlint 通过；scope router `20 tests OK` |
+| CI 配置 | actionlint 通过；scope router `21 tests OK`；普通 Markdown 保持轻量，发布说明变更只选择 installer |
 | Git 差异检查 | `git diff --check` 通过 |
-| 未重复范围 | 未运行历史性能 target、全量 Playwright、全量 pytest 和无关桌面集合；备份恢复主流程只执行一次，末尾 gateway Host 探针失败后仅定向复测该探针 |
-| 远端候选门禁 | `backend-ci` run `31019866714` 成功；changes/backend/frontend/rust-desktop/rust-policy/installer 成功，未受影响 Windows 部署与 MinIO jobs 按 scope 跳过 |
-| Windows 候选工件 | Artifact `8937081786`，ZIP SHA-256 `3cf32a39505014ec5b2affa7b9a170260f688f3a0060d9263684bfb36184b7aa`；当前包 `76a2dd8d...3e786`，回滚包 `2e848d8a...96ecc`；清单复验通过 |
+| 未重复范围 | 本地未重跑历史性能 target、全量 Playwright、全量 pytest 和无关桌面集合；远端 backend 按受影响门禁执行 `468 passed`；备份恢复主流程只执行一次，末尾 gateway Host 探针失败后仅定向复测该探针 |
+| 远端对象存储门禁 | `backend-ci` run `31031565671` 对 `ba378cf2f18a` 成功；changes、backend、windows-deployment、object-storage-image-policy、object-storage-supply-chain 全绿，未受影响 frontend/Rust/installer 按 scope 跳过；backend `468 passed, 2 warnings` |
+| 历史 Windows 候选工件 | Artifact `8937081786` 对应 `8c54c96e12f`，ZIP SHA-256 `3cf32a39505014ec5b2affa7b9a170260f688f3a0060d9263684bfb36184b7aa`；对象存储替换后需按最终候选重建，不作为当前同 SHA 工件 |
 | SeaweedFS 正式镜像 | `chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602`；OCI revision `875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa` |
 | 对象存储直接验证 | 既有真实 S3 集成 `3 passed`；正式 `storage-init` 的签名 PUT/GET/DELETE、匿名拒绝、CORS allow/deny 和删除后检查全部通过；最小化为 7 个 S3/TZ 变量后真实复测仍为 8 项通过 |
 | 旧数据迁移抽样 | 真实 MinIO→SeaweedFS 单对象迁移通过，size、SHA-256、Content-Type、用户 metadata 和 tags 均保持一致 |
 | Windows 备份恢复兼容 | backup/restore smoke `27 passed`；真实 `-FullStackRestore` 已完成 `seaweedfs-data` 归档、发布前 `backup-verify`、隔离 target 恢复和四依赖/全栈健康检查，恢复对象与 bucket 均保持；末尾 gateway 探针 Host 路由缺陷已定向修复并验证 `healthz/readyz=200` |
-| 对象存储本地扫描 | Grype `v0.115.0`：`0 Critical / 1 High`；High 为 `GHSA-hrxh-6v49-42gf`，待外部风险接受或修复 |
-| 新变更未完成门禁 | 尚未把完整全量迁移、远端 CI 或 push 写成已完成；旧候选 run `31019866714` 不覆盖本次对象存储替换 |
+| 对象存储供应链 | Artifact `8940899557`（ZIP digest `sha256:13ffc1fa5e2ec0a19f153c5e8047458ca3780a3618441ec7a04ee6cb773a48b4`）包含 SPDX、Grype JSON、Critical/High ID；`0 Critical / 1 High` |
+| 四依赖恢复矩阵 | Artifact `8941042883` 对 PostgreSQL、Redis、S3、OpenSearch 各完成故障检测与恢复，`final_state=healthy` |
 
 ## 6. 目前真正剩余的工作
 
-1. 为 SeaweedFS 的 `GHSA-hrxh-6v49-42gf` 完成外部风险接受或修复，并获取最终
-   SBOM/Grype 与受影响远端 CI 证据。
+1. 为 SeaweedFS 的 `GHSA-hrxh-6v49-42gf` 完成外部风险接受或修复。
 2. 按 `docs/object-storage-seaweedfs-migration.md` 完成旧 MinIO 全量 S3 级迁移和
    inventory 对账；旧 `minio-data` 不得直接挂载到 SeaweedFS。
 3. 在真实网络完成 DNS、受信证书、OIDC/LDAPS 和监控通知验收。
-4. 使用同一候选代码和 Windows 工件执行真实候选环境的 UAT、soak、安全、升级、
-   恢复、回滚和 RPO/RTO 签字。
+4. 使用最终候选重新生成完整 Windows/Release 工件，并执行候选 target 性能、真实
+   UAT、soak、安全、升级、恢复、回滚和 RPO/RTO 签字。
 5. 外部阻塞全部关闭后，执行 `dev -> main`、创建 `v1.0.0` tag/Release，并完成试点交接。

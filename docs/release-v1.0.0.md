@@ -3,12 +3,13 @@
 发布日期：待正式发布门禁完成后确定
 候选版本：`1.0.0`
 候选分支：`dev`
-候选基线 commit：`8c54c96e12f925fe7e0a07bf3a6444e63f600044`
-候选 CI：[`backend-ci` run `31019866714`](https://github.com/ChaceQC/enterprise-drive/actions/runs/31019866714)（成功）
-Windows artifact：[`8937081786`](https://github.com/ChaceQC/enterprise-drive/actions/runs/31019866714/artifacts/8937081786)
+候选功能 commit：`ba378cf2f18a5d56ea154a8f50f24bf6d3d2079d`
+候选 CI：[`backend-ci` run `31031565671`](https://github.com/ChaceQC/enterprise-drive/actions/runs/31031565671)（成功）
+对象存储 artifact：[`8940899557`](https://github.com/ChaceQC/enterprise-drive/actions/runs/31031565671/artifacts/8940899557)
+历史 Windows artifact：[`8937081786`](https://github.com/ChaceQC/enterprise-drive/actions/runs/31019866714/artifacts/8937081786)（对应旧基线 `8c54c96e12f`，不是当前同 SHA 工件）
 数据库 migration head：`20260804_0026`
 OpenAPI：116 paths / 148 operations / 178 schemas
-对象存储替换：实现、直接验证和 Windows 备份恢复兼容完成，最终 commit/push/受影响 CI 待确认
+对象存储替换：实现、直接验证、Windows 备份恢复、push 和受影响 CI 均完成
 
 ## 1. 发布定位
 
@@ -105,15 +106,18 @@ python -X utf8 .github/scripts/release_manifest.py verify `
 
 ## 6. 已知发布阻塞
 
-1. SeaweedFS 本地 Grype `v0.115.0` 为 `0 Critical / 1 High`；
+1. SeaweedFS 远端 Grype `v0.115.0` 为 `0 Critical / 1 High`；
    `GHSA-hrxh-6v49-42gf`（报告修复版本 gRPC `1.82.1`）仍需修复或外部风险接受，
-   并需最终 SPDX/Grype 与受影响 CI 证据。
+   当前 digest 的 SPDX/Grype 与受影响 CI 证据已由 artifact `8940899557` 提供；
+   若修复导致 digest 变化则必须重新扫描。
 2. 旧 MinIO 全量 S3 级迁移和对象 RPO/RTO 尚未执行完成；旧 `minio-data` 不得
    直接挂载到 SeaweedFS。
 3. 真实公网 DNS、受信证书签发/续期、双域名 HTTPS 验收尚需生产网络。
 4. 企业 OIDC provider、LDAPS 目录和生产告警接收端尚需真实互操作验收。
-5. 候选版本仍需完成角色 UAT、长期 soak、升级/回滚、恢复耗时测量与 RPO/RTO
-   责任人签字。
+5. 候选版本仍需完成 target 性能、角色 UAT、长期 soak、升级/回滚、恢复耗时测量与
+   RPO/RTO 责任人签字。
+6. 历史 Windows artifact `8937081786` 不包含当前对象存储变更；正式 Release 必须
+   使用最终候选重新生成当前/回滚安装包、镜像 digest 和完整清单。
 
 上述项目的验收和签字格式见
 [`docs/sprint13-release-readiness.md`](sprint13-release-readiness.md)。

@@ -60,9 +60,10 @@ OCI revision: 875cd1f67ea25e8965a4f5ba1e6aaf501ba6b6fa
   `seaweedfs-data`、发布前校验、隔离 target 四依赖/全栈健康和对象恢复点，gateway
   Host 探针缺陷已定向修复并验证。
 
-本地 Grype `v0.115.0` 扫描为 `0 Critical / 1 High`。High 为
+本地及远端 Grype `v0.115.0` 扫描均为 `0 Critical / 1 High`。High 为
 `GHSA-hrxh-6v49-42gf`，报告修复版本是 gRPC `1.82.1`；正式发布前须修复或由外部
-风险责任人签字接受。当前直接证据不包含新的远端 CI、全量数据迁移、升级/RPO-RTO、
+风险责任人签字接受。功能提交 `ba378cf2f18a` 的 run `31031565671` 已全绿，供应链
+artifact `8940899557` 已生成；当前直接证据仍不包含全量数据迁移、升级/RPO-RTO、
 soak 或生产网络验收。
 
 ## 2026-07-31 首轮结果

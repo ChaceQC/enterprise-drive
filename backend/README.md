@@ -128,7 +128,7 @@ Copy-Item .env.windows .env.restore.windows
 
 `-RestoreEnvironmentOutput` 只把备份中的 CMS 环境文件解密到仓库和备份目录外的绝对、尚不存在文件路径，不会替换当前 target 的 `-EnvFile`；父目录必须预先存在且不得经过 reparse point。CMS 明文先保存在内存中，只在本次恢复模式的数据、Alembic revision 和镜像门禁全部成功后的最后一步，通过同目录 restricted ACL 临时文件原子发布；未使用 `-NoStartAfterRestore` 时还会先完成全栈健康和实际容器 image ID 对账。若原子发布时目标路径已被其他进程创建，失败清理会保留该 foreign file。备份根目录、staging/正式备份、rollback archive 和最终 CMS 输出会自动关闭 ACL 继承，并只允许当前用户、SYSTEM、Administrators 完全控制。
 
-未传入完整包加密证书时，Windows CMS 仍只加密 `.env.windows`，其余 payload 依赖 BitLocker、restricted NTFS ACL 与加密外部介质；传入证书时使用 AES-256-CBC、HMAC-SHA256 和 RSA-OAEP-SHA256 保护完整 payload。`manifest.p7s` 提供来源签名，但证书信任链、吊销和双人保管仍由组织 PKI 流程负责。Redis/OpenSearch 同版本原始卷恢复只支持相同 image reference、相同 image ID、单节点同拓扑；跨版本升级使用 Redis RDB 与 OpenSearch settings/mappings/bulk 可移植导出，导入前保存 rollback export，失败自动回退。旧 MinIO `16/9` Critical 已通过 SeaweedFS 正式运行时替换退出当前部署，SeaweedFS Windows 备份恢复兼容已通过；本地扫描的 `GHSA-hrxh-6v49-42gf` High、最终 SBOM/Grype、全量迁移、升级/RPO-RTO 和外部风险签字仍阻塞正式 `v1.0.0`。完整操作见 `../docs/ops-sprint12-backup-portability.md`、`../docs/deployment-windows-docker.md` 和 `../docs/object-storage-seaweedfs-migration.md`，风险登记见 `../docs/minio-security-risk.md`。
+未传入完整包加密证书时，Windows CMS 仍只加密 `.env.windows`，其余 payload 依赖 BitLocker、restricted NTFS ACL 与加密外部介质；传入证书时使用 AES-256-CBC、HMAC-SHA256 和 RSA-OAEP-SHA256 保护完整 payload。`manifest.p7s` 提供来源签名，但证书信任链、吊销和双人保管仍由组织 PKI 流程负责。Redis/OpenSearch 同版本原始卷恢复只支持相同 image reference、相同 image ID、单节点同拓扑；跨版本升级使用 Redis RDB 与 OpenSearch settings/mappings/bulk 可移植导出，导入前保存 rollback export，失败自动回退。旧 MinIO `16/9` Critical 已通过 SeaweedFS 正式运行时替换退出当前部署，SeaweedFS Windows 备份恢复兼容与远端 SBOM/Grype 已通过；`GHSA-hrxh-6v49-42gf` High、全量迁移、最终完整工件、升级/RPO-RTO 和外部风险签字仍阻塞正式 `v1.0.0`。完整操作见 `../docs/ops-sprint12-backup-portability.md`、`../docs/deployment-windows-docker.md` 和 `../docs/object-storage-seaweedfs-migration.md`，风险登记见 `../docs/minio-security-risk.md`。
 
 ## 常用验证
 
@@ -202,7 +202,9 @@ POST/DELETE 的 multipart 控制面、预签名 PUT/GET、copy、delete、list�
 `3 passed`。运行时客户端依赖限制为 `minio>=7.2.20,<8`；
 `DRIVE_S3_CONTROL_REQUEST_TIMEOUT_SECONDS` 和
 `DRIVE_S3_CONTROL_PRESIGN_EXPIRES_SECONDS` 分别控制内部控制请求超时和控制 URL
-有效期。本轮对象存储替换的远端 CI 结果仍待最终 push 后确认。
+有效期。对象存储替换提交 `ba378cf2f18a` 的 `backend-ci` run `31031565671` 已全绿；
+backend 为 `468 passed, 2 warnings`，供应链 artifact `8940899557` 为
+`0 Critical / 1 High`。
 
 CI 先按变更路径决定是否进入后端 job；后端源码、桌面 OpenAPI 契约、根 Compose、监控或 Nginx 模板变化才运行完整后端门禁。Ruff、Bandit、pip-audit 和 Mypy 会先执行，全部通过后才启动 PostgreSQL/SeaweedFS、执行 migration、pytest、Docker smoke 与镜像构建，静态失败不再提前占用集成服务。对象存储供应链 job 固定 SeaweedFS image/digest，生成 SPDX SBOM，并由 Grype 阻断任意 Critical。
 

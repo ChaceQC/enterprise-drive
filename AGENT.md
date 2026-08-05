@@ -60,7 +60,7 @@
 - 初始仓库优先创建为私有仓库，确认可公开后再调整可见性。
 - 每次完成可验证改动后必须 commit。
 - 每次 commit 后必须 push 到 GitHub。
-- 正式 tag/Release 必须满足对应版本的生产证书、依赖/镜像风险和恢复门禁。旧 MinIO `16/9` Critical 已由 SeaweedFS 正式运行时替换关闭，Windows 备份恢复兼容也已通过；但 SeaweedFS 的剩余 High 风险接受、最终 SBOM/Grype、全量迁移、UAT、soak、升级/RPO-RTO 和生产签字未完成前仍不得创建 `v1.0.0` tag 或 GitHub Release。
+- 正式 tag/Release 必须满足对应版本的生产证书、依赖/镜像风险和恢复门禁。旧 MinIO `16/9` Critical 已由 SeaweedFS 正式运行时替换关闭，Windows 备份恢复兼容及当前 digest 的远端 SBOM/Grype 也已通过；但 SeaweedFS 的剩余 High 风险接受、全量迁移、UAT、soak、升级/RPO-RTO、最终完整工件和生产签字未完成前仍不得创建 `v1.0.0` tag 或 GitHub Release。
 - 提交前必须检查 `git status`，避免混入无关改动。
 - 提交前必须先检查本次改动是否影响 `README.md`、`PROJECT_PLAN.md`、`PROJECT_PROGRESS.md`、`AGENT.md`、《企业网盘开发者技术计划书.md》或子目录 README；受影响文档未同步时，不得先提交代码。
 - 必须维护 `.gitignore`，禁止提交 `.env`、密钥、证书私钥、依赖目录、构建产物、上传文件、对象存储数据目录、数据库数据目录、OpenSearch 数据目录、日志和备份文件。
@@ -464,7 +464,7 @@ Windows Docker Compose 要求：
 - 离线副本必须原子发布，复制前后逐文件对账并记录 canonical inventory digest；操作系统不能证明介质已物理下线，完成后仍需卸载、断开或移交。
 - Redis/OpenSearch 同版本原始卷恢复只支持相同 image reference、相同 image ID、单节点同拓扑；跨版本必须使用 Redis RDB 与 OpenSearch settings/mappings/bulk 可移植导出。应用前创建 rollback export，拒绝导入到更低 major 版本，失败时自动回退并保存 JSON 证据。
 - `-ForceRestore` rollback archive 是失败时的尽力恢复机制；发生卷驱动、磁盘或 Docker 故障时仍可能需要人工处理，脚本必须保留受限 ACL 归档并报告绝对路径。
-- 正式运行时已改为固定 `chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602`，因此旧 MinIO Server/Client `16/9` 个 Critical 不再位于正式运行时。SeaweedFS 本地 Grype `v0.115.0` 为 `0 Critical / 1 High`，`GHSA-hrxh-6v49-42gf` 的报告修复版本为 gRPC `1.82.1`；Windows 备份恢复兼容已通过，正式发布仍需最终 SBOM/Grype、该 High 的外部风险接受或修复、全量迁移和升级/RPO-RTO 证据，风险登记以 `docs/minio-security-risk.md` 为准。
+- 正式运行时已改为固定 `chrislusf/seaweedfs:4.40@sha256:52194fba4fecd0083c842158b3a902ba6e04a63619b2b0efcd08007bdb6a4602`，因此旧 MinIO Server/Client `16/9` 个 Critical 不再位于正式运行时。Run `31031565671` 的远端 Syft `1.46.0`/Grype `0.115.0` artifact `8940899557` 为 `0 Critical / 1 High`，`GHSA-hrxh-6v49-42gf` 的报告修复版本为 gRPC `1.82.1`；Windows 备份恢复兼容已通过，正式发布仍需该 High 的外部风险接受或修复、全量迁移、最终完整工件和升级/RPO-RTO 证据，风险登记以 `docs/minio-security-risk.md` 为准。
 - 周期维护任务由独立 `beat` 容器运行 Celery beat，至少覆盖审计分区/归档、过期上传/分享/回收站、预览产物、大目录任务、权限重算、无引用 blob、孤儿最终对象、容量校准和导出清理；调度不得与 API 进程混跑。
 - Nginx gateway 必须处理 WebSocket、Range、上传大小限制、超时、真实客户端 IP、安全响应头，以及 API 与外部 S3 端点的分流；公网模板还必须保持证书只读挂载、TLS 1.2/1.3、HTTP 到 HTTPS 跳转、ACME challenge 路径、未知 Host 拒绝和 HSTS。正式发布前必须完成受信证书与双域名 HTTPS 实测。
 
