@@ -208,7 +208,7 @@
 
 ## 5. 当前下一步
 
-2026-08-07 Sprint 13 `upload_init` 代码侧收口（提交 `c156e4f`）：在
+2026-08-06 Sprint 13 `upload_init` 代码侧收口（提交 `ed574de`）：在
 `UploadService.init_upload()` 中将
 active blob 查询与 any-status 查询合并为一次读取，保留 active 秒传、非 active
 `BLOB_DELETING` 和无记录 multipart 三条语义；直接受影响上传行为 `2 passed`，受影响

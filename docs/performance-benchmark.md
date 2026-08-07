@@ -204,7 +204,7 @@ uv run python -X utf8 -m performance.fixture cleanup `
 - `backend/tmp/performance/20260803-sprint3-final/upload-complete-target-upsert-final/report.json`
 - `backend/tmp/performance/20260803-sprint3-final/upload-complete-target-upsert-final/complete_cleanup.json`
 
-## 2026-08-05—2026-08-07 Sprint 13 当前候选工件与最小修复
+## 2026-08-05—2026-08-06 Sprint 13 当前候选工件与最小修复
 
 本轮使用同一 target 规模和 fail-closed 门禁复核既有工件，不重复运行完整负载。目标状态
 为 `s13-5725ad7`，OpenSearch `1,000,000/1,000,000`、专属审计
@@ -242,7 +242,7 @@ uv run python -X utf8 -m performance.fixture cleanup `
 - `upload_init` 平均 `260.6548 ms`、P50 `240 ms`、P99 `650 ms`、最大
   `1020.2463 ms`，目标 P95 为 `300 ms`；因此当前 mixed `passed=false` 必须保留。
 
-### 2026-08-07 代码侧最小优化
+### 2026-08-06 代码侧最小优化
 
 `backend/app/modules/upload/service.py` 的新 hash 路径原先连续执行 active 查询和
 any-status 查询。由于 `file_blobs` 对租户、算法、哈希和大小有唯一约束，本轮改为一次

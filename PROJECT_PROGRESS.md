@@ -1,6 +1,6 @@
 # PROJECT_PROGRESS.md
 
-## 2026-08-07 Sprint 13 upload-init 性能收口
+## 2026-08-06 Sprint 13 upload-init 性能收口
 
 ### 当前状态
 
