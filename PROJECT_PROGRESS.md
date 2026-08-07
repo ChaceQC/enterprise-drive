@@ -4,7 +4,7 @@
 
 ### 当前状态
 
-- 分支：`dev`；本轮代码/文档提交为 `e0f50a5`，基于
+- 分支：`dev`；本轮代码/CI 修复提交为 `a5e44af`，基于
   `3b065491a73997f7d13810692f5bd692c14b05f0` 继续收口。
 - 当前 Sprint 13 性能证据分为两份：`upload_complete` 已通过；`mixed` 仍只有
   `upload_init` 一项未通过。本轮不重跑完整 mixed、upload-complete 或其他历史负载。
@@ -28,9 +28,11 @@
 - `uv run ruff check app/modules/upload/service.py`：通过。
 - `uv run ruff format --check app/modules/upload/service.py`：通过。
 - `git diff --check`：通过。
-- `e0f50a5` 已推送到 `origin/dev`；`backend-ci` run `31134176332` 已成功。
-  `changes` 通过，backend、frontend、Rust、Windows、对象存储和安装包等不受影响
-  job 按 scope 跳过。
+- `a5e44af` 已推送到 `origin/dev`；此前对应代码提交的 CI 因并发取消后，已定向重跑
+  backend CI run `31135045950` 并全绿。`changes` 与 backend 全部成功，backend 的
+  Ruff、format、Bandit、依赖审计、Mypy、迁移、pytest、四依赖矩阵、Compose/TLS/
+  gateway 校验、API/Worker/Preview 镜像构建和 observability smoke 均通过；其余
+  不受影响 job 按 scope 跳过。
 - 仅读取并复核既有工件，没有重复完整负载：
   - `backend/tmp/performance/20260805-sprint13-final-54d6135/upload-complete-target-workers8/report.json`：
     `passed=true`，1,934 样本、0 失败、API P95 `600 ms`、端到端 P95 `650 ms`、
@@ -56,6 +58,8 @@
 ### 涉及文件
 
 - `backend/app/modules/upload/service.py`
+- `backend/tests/locust_test_support.py`
+- `backend/tests/test_performance_benchmark.py`
 - `PROJECT_STAGE_STATUS.md`
 - `PROJECT_PLAN.md`
 - `PROJECT_PROGRESS.md`

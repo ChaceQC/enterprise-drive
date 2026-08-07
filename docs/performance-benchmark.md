@@ -250,9 +250,9 @@ any-status 查询后按 `status` 分支：active 走原有秒传，非 active �
 `BLOB_DELETING`，无记录走 multipart。直接行为验证为 `2 passed`，Ruff、format 和
 `git diff --check` 通过。
 
-提交 `e0f50a5` 已推送，`backend-ci` run `31134176332` 成功；本轮不把旧 mixed 报告改写
-为通过，也不重复执行完整 mixed/upload-complete。只有在最终候选发布窗口才按同一规模
-重新生成替代工件。
+提交 `a5e44af` 已推送；定向重跑的 backend CI `31135045950` 全绿。本轮不把旧 mixed
+报告改写为通过，也不重复执行完整 mixed/upload-complete。只有在最终候选发布窗口才
+按同一规模重新生成替代工件。
 
 ## 后续运行边界
 

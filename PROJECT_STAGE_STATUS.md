@@ -15,7 +15,7 @@
 | 项目 | 当前实际状态 |
 |---|---|
 | 分支 | `dev` |
-| 候选功能代码 | `e0f50a5`（本轮 `upload_init` 单次 blob 查询优化与 Sprint 13 文档收口；`backend-ci` run `31134176332` 全绿） |
+| 候选功能代码 | `a5e44af`（本轮 `upload_init` 单次 blob 查询优化、CI 导入兼容修复与 Sprint 13 文档收口；backend CI run `31135045950` 全绿） |
 | 当前对象存储变更 | 正式运行时已从 MinIO 替换为 SeaweedFS `4.40`；提交、push、远端 backend/Windows/image-policy/supply-chain 门禁均已完成 |
 | 工作区 | Sprint 13 对象存储替换已完成本地直接验证、Windows 备份恢复兼容、远端门禁及当前 Windows 候选工件复验；`upload_init` 代码侧已完成最小查询优化；生产环境验收仍待外部执行 |
 | 后端、前端、Rust、Tauri 版本 | `1.0.0` 候选 |
@@ -73,7 +73,7 @@
 | 发布清单工具 | `6 tests OK`；覆盖工件/校验和篡改、缺件、绝对路径、UNC 和大小写重复路径 |
 | 后端受影响 Ruff lint/format | 通过 |
 | Rust 定向门禁 | `drive-update` GNU check、3 tests、Clippy，`drive-desktop` GNU check/Clippy，workspace fmt 和 metadata 通过；9 个 package 均为 `1.0.0` |
-| CI 配置 | actionlint 通过；scope router `21 tests OK`；本轮 `backend-ci` run `31134176332` 成功，`changes` 与文档相关轻量路径通过，其余不受影响 job 按 scope 跳过 |
+| CI 配置 | actionlint 通过；scope router `21 tests OK`；backend CI run `31135045950` 的 `changes` 与 backend 全部成功，其余不受影响 job 按 scope 跳过 |
 | Git 差异检查 | `git diff --check` 通过 |
 | 未重复范围 | 本轮未重跑历史性能 target、完整 mixed/upload-complete、全量 Playwright、全量 pytest 和无关桌面集合；仅复核既有 JSON 工件并运行两条直接受影响上传测试 |
 | 远端对象存储门禁 | `backend-ci` run `31031565671` 对 `ba378cf2f18a` 成功；changes、backend、windows-deployment、object-storage-image-policy、object-storage-supply-chain 全绿，未受影响 frontend/Rust/installer 按 scope 跳过；backend `468 passed, 2 warnings` |

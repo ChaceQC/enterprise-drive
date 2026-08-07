@@ -94,6 +94,10 @@
 - 提交 `e0f50a5` 已推送；`backend-ci` run `31134176332` 成功，受影响的
   `changes` 路径通过，其余不受影响 job 按 scope 跳过。该 CI 结果不替代仍未通过的
   `upload_init` target 性能工件。
+- 随后发现原代码提交的 backend job 曾因并发取消，已在 `a5e44af` 中修复 pytest
+  收集阶段的 Locust/gevent late monkey-patch，并定向重跑 backend CI
+  `31135045950`；`changes` 与 backend 全部成功。该修复只作用于测试导入隔离，
+  不改变真实 `python -m locust` runner。
 - 只有在最终候选发布窗口才按同一 target 规模重新执行一次 mixed，并用新工件替换
   当前候选性能证据；不得通过缩小 fixture、用户数、时长、warm-up 或改变统计方式
   规避门禁。
