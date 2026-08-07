@@ -1,5 +1,64 @@
 # PROJECT_PROGRESS.md
 
+## 2026-08-07 Sprint 13 upload-init 性能收口
+
+### 当前状态
+
+- 分支：`dev`；本轮提交为 `c156e4f`，基于
+  `3b065491a73997f7d13810692f5bd692c14b05f0` 继续收口。
+- 当前 Sprint 13 性能证据分为两份：`upload_complete` 已通过；`mixed` 仍只有
+  `upload_init` 一项未通过。本轮不重跑完整 mixed、upload-complete 或其他历史负载。
+
+### 已完成
+
+- 在 `backend/app/modules/upload/service.py` 将新 hash 路径中连续的
+  `get_blob_by_hash(active)` 与 `get_blob_by_hash_any_status()` 合并为一次
+  any-status 查询，再按 `FileBlob.status` 分支：
+  active 继续秒传，非 active 继续返回 `BLOB_DELETING`，无记录继续创建 multipart。
+- 通过 `file_blobs` 的 `(tenant_id, hash_algo, content_hash, size_bytes)` 唯一约束和
+  repository 返回完整 ORM 字段完成静态等价性核对；`_instant_upload()` 内部的 active
+  原子引用校验仍保留。
+
+### 验证
+
+- 聚焦行为测试：
+  `tests/test_upload.py::test_init_upload_uses_instant_upload_when_blob_exists`；
+  `tests/test_blob_cleanup.py::test_init_upload_rejects_deleting_blob_to_avoid_reusing_gc_candidate`；
+  合计 `2 passed, 2 warnings`。
+- `uv run ruff check app/modules/upload/service.py`：通过。
+- `uv run ruff format --check app/modules/upload/service.py`：通过。
+- `git diff --check`：通过。
+- 仅读取并复核既有工件，没有重复完整负载：
+  - `backend/tmp/performance/20260805-sprint13-final-54d6135/upload-complete-target-workers8/report.json`：
+    `passed=true`，1,934 样本、0 失败、API P95 `600 ms`、端到端 P95 `650 ms`、
+    `58.0579 RPS`。
+  - `backend/tmp/performance/20260805-sprint13-final-5725ad7/mixed-target-workers8-full/report.json`：
+    45,535 请求、0 失败；`admin_audit` `210 ms`、`file_list_permission_batch`
+    `300 ms`、`search` `260 ms` 均通过；`upload_init` P95 `470 ms`（目标 `300 ms`），
+    因此 `passed=false` 必须保留。
+
+### 阻塞与风险
+
+- 本轮修复减少一次上传初始化数据库往返，但尚未用新的完整 target 负载证明 P95 已达到
+  `300 ms`；不得把旧 mixed 报告改写为通过。
+- 真实 DNS/TLS、OIDC/LDAPS、生产告警、SeaweedFS High 风险、全量迁移、UAT、soak、
+  升级/回滚和 RPO/RTO 仍属于外部发布门禁。
+
+### 下一步
+
+1. 提交并 push 本轮代码与五份 Sprint 13 状态/性能文档。
+2. 只核对本次 push 触发的 CI；若失败，按失败 job 定向修复。
+3. 在最终候选发布窗口按门禁重新执行一次 target/mixed，再更新对应工件和签字记录。
+
+### 涉及文件
+
+- `backend/app/modules/upload/service.py`
+- `PROJECT_STAGE_STATUS.md`
+- `PROJECT_PLAN.md`
+- `PROJECT_PROGRESS.md`
+- `docs/sprint13-release-readiness.md`
+- `docs/performance-benchmark.md`
+
 ## 2026-08-05 Sprint 13 对象存储运行时替换
 
 ### 当前状态

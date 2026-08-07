@@ -204,6 +204,55 @@ uv run python -X utf8 -m performance.fixture cleanup `
 - `backend/tmp/performance/20260803-sprint3-final/upload-complete-target-upsert-final/report.json`
 - `backend/tmp/performance/20260803-sprint3-final/upload-complete-target-upsert-final/complete_cleanup.json`
 
+## 2026-08-05—2026-08-07 Sprint 13 当前候选工件与最小修复
+
+本轮使用同一 target 规模和 fail-closed 门禁复核既有工件，不重复运行完整负载。目标状态
+为 `s13-5725ad7`，OpenSearch `1,000,000/1,000,000`、专属审计
+`10,000,000/10,000,000`，状态 `ready`；fixture 为 10,000 个目录、50 用户、
+300 秒、5 秒 warm-up。
+
+### `upload_complete`（已通过）
+
+- 工件：
+  `backend/tmp/performance/20260805-sprint13-final-54d6135/upload-complete-target-workers8/report.json`
+- commit：`54d6135b32e314a54f0ff27bffada333bcf18306`
+- 1,934 个样本、0 失败、吞吐 `58.0579 RPS`。
+- `upload_complete_api_without_storage_merge` P95 `600 ms`；
+  `upload_complete_end_to_end` P95 `650 ms`；`report.json` 为 `passed=true`。
+- 同目录 `complete_cleanup.json` 已准备并清理 `2000/2000`，无清理错误。
+
+### `mixed`（唯一未通过项）
+
+- 工件：
+  `backend/tmp/performance/20260805-sprint13-final-5725ad7/mixed-target-workers8-full/report.json`
+- commit：运行环境记录为 `3b065491a73997f7d13810692f5bd692c14b05f0`；
+  应用镜像为 `enterprise-drive-backend:s13-candidate-5725ad7-20260805`。
+- 共 45,535 个请求、0 失败，目标数据和 workload 快照完整。
+- 结果：
+
+  | 指标 | 样本 | P95 | 结论 |
+  |---|---:|---:|---|
+  | `admin_audit` | 6,564 | 210 ms | 通过 |
+  | `auth_me` | 6,640 | 140 ms | 观测 |
+  | `file_list_permission_batch` | 13,014 | 300 ms | 通过 |
+  | `search` | 6,535 | 260 ms | 通过 |
+  | `upload_abort_cleanup` | 6,391 | 360 ms | 观测 |
+  | `upload_init` | 6,391 | **470 ms** | **未通过** |
+
+- `upload_init` 平均 `260.6548 ms`、P50 `240 ms`、P99 `650 ms`、最大
+  `1020.2463 ms`，目标 P95 为 `300 ms`；因此当前 mixed `passed=false` 必须保留。
+
+### 2026-08-07 代码侧最小优化
+
+`backend/app/modules/upload/service.py` 的新 hash 路径原先连续执行 active 查询和
+any-status 查询。由于 `file_blobs` 对租户、算法、哈希和大小有唯一约束，本轮改为一次
+any-status 查询后按 `status` 分支：active 走原有秒传，非 active 保持
+`BLOB_DELETING`，无记录走 multipart。直接行为验证为 `2 passed`，Ruff、format 和
+`git diff --check` 通过。
+
+本轮不把旧 mixed 报告改写为通过，也不重复执行完整 mixed/upload-complete；只有在最终
+候选发布窗口才按同一规模重新生成替代工件。
+
 ## 后续运行边界
 
 - 登录和 `/auth/me` 仍只有观测值，没有技术计划书定义的阻断阈值。

@@ -79,7 +79,7 @@
 - `BE-034` 已在短期预签名直连之外补充内部受控代理下载、单段 HTTP Range、流式对象读取和范围审计。新增租户隔离的文件安全策略后，当前版本和历史版本可按扩展名/MIME 自动选择预签名、代理、水印或阻断，并执行关键字 DLP audit/block 与 fail-closed；内部图片/PDF 支持动态水印，公开外链支持预签名或水印派生对象，搜索正文已支持图片/扫描 PDF OCR。外链代理流、历史版本专用水印、legal hold 和高级内容分类继续 `GOV-001`。
 - 同 hash 首次上传竞争已使用数据库 savepoint 解析唯一约束竞争：并发事务只创建一个 blob，后续事务复用并原子增加引用；真实 PostgreSQL 双会话测试确认 `1` 个 blob、`ref_count=2`。complete 响应丢失时会通过对象 stat 恢复结果，hash、归档或数据库最终化失败会最佳努力 abort multipart 并删除 `uploads/...` 临时对象，最终对象孤儿继续由既有反向扫描兜底。
 - 真实对象存储集成测试已在 CI 和本机真实 Docker 中覆盖标准 HTTP multipart、预签名 PUT/GET、copy、delete、list、hash 校验和孤儿最终对象扫描；单元门禁覆盖 complete 成功但响应丢失后的 stat 恢复，以及不存在 upload 的幂等 abort。
-- `BE-029` 目标门禁已覆盖 10,000 节点、100 万 OpenSearch 文档和 1,000 万审计日志；最终 target `upload_complete` 计入 1,936 个样本、0 失败，吞吐 `58.364 RPS`，不含对象存储合并的 API P95 `790 ms`，端到端 P95 `840 ms`，storage merge P95 `71 ms`，并清理 2,000/2,000 个准备节点。
+- `BE-029` 目标门禁已覆盖 10,000 节点、100 万 OpenSearch 文档和 1,000 万审计日志；当前 SeaweedFS 候选的 `upload_complete` 工件计入 1,934 个样本、0 失败，吞吐 `58.0579 RPS`，不含对象存储合并的 API P95 `600 ms`，端到端 P95 `650 ms`，并清理 2,000/2,000 个准备节点。当前唯一完整 `mixed` 工件共 45,535 个请求、0 失败，`admin_audit`/`file_list_permission_batch`/`search` 通过，`upload_init` P95 `470 ms` 未达到 `300 ms` 目标；该报告必须保持 `passed=false`。
 
 ### Sprint 4：权限系统
 
@@ -207,6 +207,16 @@
 - `BILL-001`：多租户计费。
 
 ## 5. 当前下一步
+
+2026-08-07 Sprint 13 `upload_init` 代码侧收口（提交 `c156e4f`）：在
+`UploadService.init_upload()` 中将
+active blob 查询与 any-status 查询合并为一次读取，保留 active 秒传、非 active
+`BLOB_DELETING` 和无记录 multipart 三条语义；直接受影响上传行为 `2 passed`，受影响
+Ruff/format 和 `git diff --check` 通过。本轮只复核既有目标工件，不重复完整负载：
+`upload_complete` 工件 `passed=true`（1,934 样本、API P95 `600 ms`、端到端 P95
+`650 ms`、`58.0579 RPS`）；唯一完整 `mixed` 工件仍 `passed=false`，仅
+`upload_init` P95 `470 ms` 超过 `300 ms`，不得伪装成通过。下一步为提交、push、按实际
+CI 失败 job 定向处理，并在最终候选发布窗口再执行一次 target/mixed 复验。
 
 2026-08-05 Sprint 13 候选发布基线 `8c54c96e12f925fe7e0a07bf3a6444e63f600044`
 及 run `31019866714`、Windows artifact `8937081786` 保留为对象存储替换前的历史

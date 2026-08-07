@@ -146,34 +146,28 @@ class UploadService:
             mime_type=mime_type,
         )
 
-        existing_blob = await self.repository.get_blob_by_hash(
+        existing_blob = await self.repository.get_blob_by_hash_any_status(
             tenant_id=current_user.tenant_id,
             hash_algo=hash_algo,
             content_hash=content_hash,
             size_bytes=size_bytes,
         )
         if existing_blob is not None:
-            return await self._instant_upload(
-                current_user=current_user,
-                parent=parent,
-                file_name=normalized_name,
-                normalized_name=normalized_name,
-                blob_id=existing_blob.id,
-                size_bytes=size_bytes,
-                mime_type=mime_type or existing_blob.mime_type,
-                target_node_id=target_node_id,
-                expected_current_version_id=expected_current_version_id,
-                client_operation_id=client_operation_id,
-                operation=operation,
-                audit_context=audit_context,
-            )
-        existing_blob_any_status = await self.repository.get_blob_by_hash_any_status(
-            tenant_id=current_user.tenant_id,
-            hash_algo=hash_algo,
-            content_hash=content_hash,
-            size_bytes=size_bytes,
-        )
-        if existing_blob_any_status is not None:
+            if existing_blob.status == "active":
+                return await self._instant_upload(
+                    current_user=current_user,
+                    parent=parent,
+                    file_name=normalized_name,
+                    normalized_name=normalized_name,
+                    blob_id=existing_blob.id,
+                    size_bytes=size_bytes,
+                    mime_type=mime_type or existing_blob.mime_type,
+                    target_node_id=target_node_id,
+                    expected_current_version_id=expected_current_version_id,
+                    client_operation_id=client_operation_id,
+                    operation=operation,
+                    audit_context=audit_context,
+                )
             raise ApiError("BLOB_DELETING", "文件内容正在清理，请稍后重试", status_code=409)
 
         return await self._create_multipart_upload(

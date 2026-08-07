@@ -9,7 +9,7 @@
 | 任务 | 发布门禁 | 当前候选状态 | 正式完成证据 |
 |---|---|---|---|
 | `REL-001` | 全产品 UAT | 清单已冻结，待候选环境逐项签字 | UAT 记录、缺陷关闭表、业务/技术签字 |
-| `REL-002` | 性能与安全 | MinIO Critical 运行时替换与当前 SeaweedFS digest 扫描完成，候选 target、长稳和 High 风险签字待执行 | 性能报告、soak 报告、SeaweedFS SBOM/漏洞报告、非阻断风险接受 |
+| `REL-002` | 性能与安全 | SeaweedFS digest 扫描完成；`upload_complete` target 已通过；当前唯一完整 `mixed` 工件仅 `upload_init` 未通过，代码侧已完成一次查询优化，长稳和 High 风险签字待执行 | 性能报告、修复后最终 target/mixed 工件、soak 报告、SeaweedFS SBOM/漏洞报告、非阻断风险接受 |
 | `REL-003` | 安装、升级与回滚 | SeaweedFS 备份恢复兼容已通过，待 `0.9.0 -> 1.0.0` 升级/回滚演练 | 升级时间线、备份/恢复、桌面自动回退证据 |
 | `REL-004` | 运维责任与 RPO/RTO | 模板已冻结，待生产责任人和实测值签字 | 值班表、告警验证、RPO/RTO 测量和接受记录 |
 | `REL-005` | `v1.0.0` 发布 | 候选版本与工件规范已冻结 | `main` 合并提交、tag、Release、工件清单、交接记录 |
@@ -71,6 +71,29 @@
 - 长期 soak 必须单独记录持续时间、稳态负载、资源曲线、错误率、任务积压、
   数据库连接池、Redis、OpenSearch、SeaweedFS 与 Worker 恢复情况；既有 300 秒 target
   结果不替代 soak。
+
+### 3.1.1 当前 Sprint 13 target 工件（事实记录）
+
+本节只记录已经存在的工件，不以文档或代码修改替代负载证据，也不重复执行已经完成的
+完整负载：
+
+- `upload_complete`：
+  `backend/tmp/performance/20260805-sprint13-final-54d6135/upload-complete-target-workers8/report.json`
+  为 `passed=true`；1,934 个样本、0 失败、吞吐 `58.0579 RPS`，API（不含
+  storage merge）P95 `600 ms`，端到端 P95 `650 ms`。同目录
+  `complete_cleanup.json` 记录准备和清理 `2000/2000`。
+- `mixed`：
+  `backend/tmp/performance/20260805-sprint13-final-5725ad7/mixed-target-workers8-full/report.json`
+  共 45,535 个请求、0 失败，环境与 1,000,000 OpenSearch 文档/10,000,000 审计行
+  门禁均完整；`admin_audit` P95 `210 ms`、`file_list_permission_batch` P95
+  `300 ms`、`search` P95 `260 ms` 均通过，`upload_init` P95 `470 ms`（目标
+  `300 ms`），所以报告必须保持 `passed=false`。
+- 2026-08-07 已在 `backend/app/modules/upload/service.py` 合并新 hash 路径的两次
+  blob 查询。active 秒传与 deleting blob 拒绝的直接行为验证为 `2 passed`；
+  本轮没有重跑完整 mixed/upload-complete。
+- 只有在最终候选发布窗口才按同一 target 规模重新执行一次 mixed，并用新工件替换
+  当前候选性能证据；不得通过缩小 fixture、用户数、时长、warm-up 或改变统计方式
+  规避门禁。
 
 ### 3.2 安全与供应链
 
