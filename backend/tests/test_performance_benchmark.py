@@ -11,7 +11,10 @@ from typing import Any
 
 import httpx
 import pytest
-from locust.event import EventHook
+
+# isort: off
+from tests.locust_test_support import EventHook
+# isort: on
 
 from performance import locustfile, multipart
 from performance.complete_queue import (
