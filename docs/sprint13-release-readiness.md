@@ -88,9 +88,12 @@
   门禁均完整；`admin_audit` P95 `210 ms`、`file_list_permission_batch` P95
   `300 ms`、`search` P95 `260 ms` 均通过，`upload_init` P95 `470 ms`（目标
   `300 ms`），所以报告必须保持 `passed=false`。
-- 2026-08-06 已在 `backend/app/modules/upload/service.py` 合并新 hash 路径的两次
+- 2026-08-07 已在 `backend/app/modules/upload/service.py` 合并新 hash 路径的两次
   blob 查询。active 秒传与 deleting blob 拒绝的直接行为验证为 `2 passed`；
   本轮没有重跑完整 mixed/upload-complete。
+- 提交 `e0f50a5` 已推送；`backend-ci` run `31134176332` 成功，受影响的
+  `changes` 路径通过，其余不受影响 job 按 scope 跳过。该 CI 结果不替代仍未通过的
+  `upload_init` target 性能工件。
 - 只有在最终候选发布窗口才按同一 target 规模重新执行一次 mixed，并用新工件替换
   当前候选性能证据；不得通过缩小 fixture、用户数、时长、warm-up 或改变统计方式
   规避门禁。

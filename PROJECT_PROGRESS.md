@@ -1,10 +1,10 @@
 # PROJECT_PROGRESS.md
 
-## 2026-08-06 Sprint 13 upload-init 性能收口
+## 2026-08-07 Sprint 13 upload-init 性能收口
 
 ### 当前状态
 
-- 分支：`dev`；本轮提交为 `c156e4f`，基于
+- 分支：`dev`；本轮代码/文档提交为 `e0f50a5`，基于
   `3b065491a73997f7d13810692f5bd692c14b05f0` 继续收口。
 - 当前 Sprint 13 性能证据分为两份：`upload_complete` 已通过；`mixed` 仍只有
   `upload_init` 一项未通过。本轮不重跑完整 mixed、upload-complete 或其他历史负载。
@@ -28,6 +28,9 @@
 - `uv run ruff check app/modules/upload/service.py`：通过。
 - `uv run ruff format --check app/modules/upload/service.py`：通过。
 - `git diff --check`：通过。
+- `e0f50a5` 已推送到 `origin/dev`；`backend-ci` run `31134176332` 已成功。
+  `changes` 通过，backend、frontend、Rust、Windows、对象存储和安装包等不受影响
+  job 按 scope 跳过。
 - 仅读取并复核既有工件，没有重复完整负载：
   - `backend/tmp/performance/20260805-sprint13-final-54d6135/upload-complete-target-workers8/report.json`：
     `passed=true`，1,934 样本、0 失败、API P95 `600 ms`、端到端 P95 `650 ms`、
@@ -46,9 +49,9 @@
 
 ### 下一步
 
-1. 提交并 push 本轮代码与五份 Sprint 13 状态/性能文档。
-2. 只核对本次 push 触发的 CI；若失败，按失败 job 定向修复。
-3. 在最终候选发布窗口按门禁重新执行一次 target/mixed，再更新对应工件和签字记录。
+1. 在最终候选发布窗口按门禁重新执行一次 target/mixed，再更新对应工件和签字记录。
+2. 完成真实 UAT、soak、升级/回滚、RPO/RTO 与外部生产环境签字。
+3. 外部门禁关闭后生成正式 Release 工件并执行 `dev -> main -> v1.0.0`。
 
 ### 涉及文件
 

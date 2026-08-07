@@ -204,7 +204,7 @@ uv run python -X utf8 -m performance.fixture cleanup `
 - `backend/tmp/performance/20260803-sprint3-final/upload-complete-target-upsert-final/report.json`
 - `backend/tmp/performance/20260803-sprint3-final/upload-complete-target-upsert-final/complete_cleanup.json`
 
-## 2026-08-05—2026-08-06 Sprint 13 当前候选工件与最小修复
+## 2026-08-05—2026-08-07 Sprint 13 当前候选工件与最小修复
 
 本轮使用同一 target 规模和 fail-closed 门禁复核既有工件，不重复运行完整负载。目标状态
 为 `s13-5725ad7`，OpenSearch `1,000,000/1,000,000`、专属审计
@@ -242,7 +242,7 @@ uv run python -X utf8 -m performance.fixture cleanup `
 - `upload_init` 平均 `260.6548 ms`、P50 `240 ms`、P99 `650 ms`、最大
   `1020.2463 ms`，目标 P95 为 `300 ms`；因此当前 mixed `passed=false` 必须保留。
 
-### 2026-08-06 代码侧最小优化
+### 2026-08-07 代码侧最小优化
 
 `backend/app/modules/upload/service.py` 的新 hash 路径原先连续执行 active 查询和
 any-status 查询。由于 `file_blobs` 对租户、算法、哈希和大小有唯一约束，本轮改为一次
@@ -250,8 +250,9 @@ any-status 查询后按 `status` 分支：active 走原有秒传，非 active �
 `BLOB_DELETING`，无记录走 multipart。直接行为验证为 `2 passed`，Ruff、format 和
 `git diff --check` 通过。
 
-本轮不把旧 mixed 报告改写为通过，也不重复执行完整 mixed/upload-complete；只有在最终
-候选发布窗口才按同一规模重新生成替代工件。
+提交 `e0f50a5` 已推送，`backend-ci` run `31134176332` 成功；本轮不把旧 mixed 报告改写
+为通过，也不重复执行完整 mixed/upload-complete。只有在最终候选发布窗口才按同一规模
+重新生成替代工件。
 
 ## 后续运行边界
 

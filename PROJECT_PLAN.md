@@ -208,15 +208,16 @@
 
 ## 5. 当前下一步
 
-2026-08-06 Sprint 13 `upload_init` 代码侧收口（提交 `ed574de`）：在
+2026-08-07 Sprint 13 `upload_init` 代码侧收口（提交 `e0f50a5`）：在
 `UploadService.init_upload()` 中将
 active blob 查询与 any-status 查询合并为一次读取，保留 active 秒传、非 active
 `BLOB_DELETING` 和无记录 multipart 三条语义；直接受影响上传行为 `2 passed`，受影响
 Ruff/format 和 `git diff --check` 通过。本轮只复核既有目标工件，不重复完整负载：
 `upload_complete` 工件 `passed=true`（1,934 样本、API P95 `600 ms`、端到端 P95
 `650 ms`、`58.0579 RPS`）；唯一完整 `mixed` 工件仍 `passed=false`，仅
-`upload_init` P95 `470 ms` 超过 `300 ms`，不得伪装成通过。下一步为提交、push、按实际
-CI 失败 job 定向处理，并在最终候选发布窗口再执行一次 target/mixed 复验。
+`upload_init` P95 `470 ms` 超过 `300 ms`，不得伪装成通过。提交 `e0f50a5` 已推送，
+`backend-ci` run `31134176332` 成功；本轮未触发不受影响的 frontend、Rust、Windows、
+对象存储和安装包 job。下一步是在最终候选发布窗口再执行一次 target/mixed 复验。
 
 2026-08-05 Sprint 13 候选发布基线 `8c54c96e12f925fe7e0a07bf3a6444e63f600044`
 及 run `31019866714`、Windows artifact `8937081786` 保留为对象存储替换前的历史
