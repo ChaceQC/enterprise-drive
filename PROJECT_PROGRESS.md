@@ -4,10 +4,12 @@
 
 ### 当前状态
 
-- 分支：`dev`；本轮代码/CI 修复提交为 `a5e44af`，基于
-  `3b065491a73997f7d13810692f5bd692c14b05f0` 继续收口。
-- 当前 Sprint 13 性能证据分为两份：`upload_complete` 已通过；`mixed` 仍只有
-  `upload_init` 一项未通过。本轮不重跑完整 mixed、upload-complete 或其他历史负载。
+- 分支：`dev`；当前 HEAD 为 `ca83d94`，与 `origin/dev` 同步。
+- 最新有效 Sprint 13 mixed 工件为
+  `backend/tmp/performance/20260807-sprint13-a5e44af/mixed-target-workers8-final/report.json`：
+  43,403 个请求、0 失败、目标数据与 workload 校验完整，`upload_init` P95
+  `540 ms`（目标 `300 ms`），`passed=false`。旧的 45,535 请求/470 ms 工件只作历史对比。
+- `upload_complete` 已通过；本轮不重跑完整 mixed、upload-complete 或其他历史负载。
 
 ### 已完成
 
@@ -18,6 +20,9 @@
 - 通过 `file_blobs` 的 `(tenant_id, hash_algo, content_hash, size_bytes)` 唯一约束和
   repository 返回完整 ORM 字段完成静态等价性核对；`_instant_upload()` 内部的 active
   原子引用校验仍保留。
+- 在 `QuotaRepository` 新增三维 owner 账户批量读取，并让
+  `QuotaService.ensure_upload_capacity()` 复用空间、租户、用户账户快照；缺失账户继续
+  走原有并发安全的 `ensure_account()`，不改变默认维度和 policy 语义。
 
 ### 验证
 
@@ -28,6 +33,11 @@
 - `uv run ruff check app/modules/upload/service.py`：通过。
 - `uv run ruff format --check app/modules/upload/service.py`：通过。
 - `git diff --check`：通过。
+- quota 批量读取定向用例：
+  `tests/test_quota_multidimensional.py::test_quota_repository_batches_requested_owner_accounts`；
+  `tests/test_quota_multidimensional.py::test_upload_reserves_and_releases_space_user_and_tenant_quota`；
+  合计 `2 passed`。
+- quota 受影响文件 `ruff check`、`ruff format --check` 和 mypy：通过。
 - `a5e44af` 已推送到 `origin/dev`；此前对应代码提交的 CI 因并发取消后，已定向重跑
   backend CI run `31135045950` 并全绿。`changes` 与 backend 全部成功，backend 的
   Ruff、format、Bandit、依赖审计、Mypy、迁移、pytest、四依赖矩阵、Compose/TLS/
@@ -37,27 +47,32 @@
   - `backend/tmp/performance/20260805-sprint13-final-54d6135/upload-complete-target-workers8/report.json`：
     `passed=true`，1,934 样本、0 失败、API P95 `600 ms`、端到端 P95 `650 ms`、
     `58.0579 RPS`。
-  - `backend/tmp/performance/20260805-sprint13-final-5725ad7/mixed-target-workers8-full/report.json`：
-    45,535 请求、0 失败；`admin_audit` `210 ms`、`file_list_permission_batch`
-    `300 ms`、`search` `260 ms` 均通过；`upload_init` P95 `470 ms`（目标 `300 ms`），
-    因此 `passed=false` 必须保留。
+  - `backend/tmp/performance/20260807-sprint13-a5e44af/mixed-target-workers8-final/report.json`：
+    43,403 请求、0 失败；`admin_audit` P95 `240 ms`、`file_list_permission_batch`
+    P95 `340 ms`、`search` P95 `280 ms` 均通过；`upload_init` P95 `540 ms`（目标
+    `300 ms`），因此 `passed=false` 必须保留。旧工件仍在仓库外临时目录中保留作历史对比。
 
 ### 阻塞与风险
 
-- 本轮修复减少一次上传初始化数据库往返，但尚未用新的完整 target 负载证明 P95 已达到
-  `300 ms`；不得把旧 mixed 报告改写为通过。
+- 本轮已减少一次 blob 查询，并将上传容量检查的 space/tenant/user 账户读取合并为一次
+  查询；尚未用新的完整 target 负载证明 P95 已达到 `300 ms`，不得把任何 mixed 报告
+  改写为通过。
 - 真实 DNS/TLS、OIDC/LDAPS、生产告警、SeaweedFS High 风险、全量迁移、UAT、soak、
   升级/回滚和 RPO/RTO 仍属于外部发布门禁。
 
 ### 下一步
 
-1. 在最终候选发布窗口按门禁重新执行一次 target/mixed，再更新对应工件和签字记录。
+1. 为 `upload_init` 增加仅 benchmark 请求启用的分段计时，依据证据做最小修复；
+   修复后按门禁重新执行一次 target/mixed，再更新对应工件和签字记录。
 2. 完成真实 UAT、soak、升级/回滚、RPO/RTO 与外部生产环境签字。
 3. 外部门禁关闭后生成正式 Release 工件并执行 `dev -> main -> v1.0.0`。
 
 ### 涉及文件
 
 - `backend/app/modules/upload/service.py`
+- `backend/app/modules/quota/repository.py`
+- `backend/app/modules/quota/service.py`
+- `backend/tests/test_quota_multidimensional.py`
 - `backend/tests/locust_test_support.py`
 - `backend/tests/test_performance_benchmark.py`
 - `PROJECT_STAGE_STATUS.md`

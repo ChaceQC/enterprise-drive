@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
@@ -28,6 +29,39 @@ class SpaceQuotaUsageSnapshot:
 class QuotaRepository:
     def __init__(self, session: AsyncSession) -> None:
         self.session = session
+
+    async def get_accounts_by_owners(
+        self,
+        *,
+        tenant_id: UUID,
+        owners: Sequence[tuple[str, UUID]],
+    ) -> dict[tuple[str, UUID], QuotaAccount]:
+        """一次读取同一租户下多个配额维度账户。
+
+        上传初始化会同时检查空间、租户和用户维度。将这些 owner 条件合并
+        为一条查询，避免对每个维度分别执行 ``get_account``；缺失账户仍由
+        调用方通过 ``ensure_account`` 保持原有并发创建语义。
+        """
+
+        unique_owners = list(dict.fromkeys(owners))
+        if not unique_owners:
+            return {}
+        owner_conditions = [
+            and_(
+                QuotaAccount.owner_type == owner_type,
+                QuotaAccount.owner_id == owner_id,
+            )
+            for owner_type, owner_id in unique_owners
+        ]
+        result = await self.session.execute(
+            select(QuotaAccount).where(
+                QuotaAccount.tenant_id == tenant_id,
+                or_(*owner_conditions),
+            )
+        )
+        return {
+            (account.owner_type, account.owner_id): account for account in result.scalars().all()
+        }
 
     async def get_account(
         self,

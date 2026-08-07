@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Mapping
 from uuid import UUID
 
 from app.api.errors import ApiError
@@ -49,7 +50,22 @@ class QuotaService:
         file_name: str | None = None,
         mime_type: str | None = None,
     ) -> None:
-        account = await self.ensure_space_account(tenant_id=tenant_id, space_id=space_id)
+        account_map = await self.repository.get_accounts_by_owners(
+            tenant_id=tenant_id,
+            owners=[
+                ("space", space_id),
+                ("tenant", tenant_id),
+                *([("user", user_id)] if user_id is not None else []),
+            ],
+        )
+        account = account_map.get(("space", space_id))
+        if account is None:
+            account = await self.repository.ensure_account(
+                tenant_id=tenant_id,
+                owner_type="space",
+                owner_id=space_id,
+                limit_bytes=self.default_space_limit_bytes,
+            )
         if account.used_bytes + size_bytes > account.limit_bytes:
             raise quota_exceeded_error("space")
 
@@ -81,13 +97,16 @@ class QuotaService:
         for owner_type, owner_id, limit_bytes in await self._enabled_dimensions(
             tenant_id=tenant_id,
             user_id=user_id,
+            accounts=account_map,
         ):
-            dimension_account = await self.repository.ensure_account(
-                tenant_id=tenant_id,
-                owner_type=owner_type,
-                owner_id=owner_id,
-                limit_bytes=limit_bytes,
-            )
+            dimension_account = account_map.get((owner_type, owner_id))
+            if dimension_account is None:
+                dimension_account = await self.repository.ensure_account(
+                    tenant_id=tenant_id,
+                    owner_type=owner_type,
+                    owner_id=owner_id,
+                    limit_bytes=limit_bytes,
+                )
             if dimension_account.used_bytes + size_bytes > dimension_account.limit_bytes:
                 raise quota_exceeded_error(owner_type)
 
@@ -239,22 +258,31 @@ class QuotaService:
         *,
         tenant_id: UUID,
         user_id: UUID | None,
+        accounts: Mapping[tuple[str, UUID], QuotaAccount] | None = None,
     ) -> list[tuple[str, UUID, int]]:
         dimensions: list[tuple[str, UUID, int]] = []
-        tenant_account = await self.repository.get_account(
-            tenant_id=tenant_id,
-            owner_type="tenant",
-            owner_id=tenant_id,
+        tenant_account = (
+            accounts.get(("tenant", tenant_id))
+            if accounts is not None
+            else await self.repository.get_account(
+                tenant_id=tenant_id,
+                owner_type="tenant",
+                owner_id=tenant_id,
+            )
         )
         if tenant_account is not None:
             dimensions.append(("tenant", tenant_id, tenant_account.limit_bytes))
         elif self.default_tenant_limit_bytes > 0:
             dimensions.append(("tenant", tenant_id, self.default_tenant_limit_bytes))
         if user_id is not None:
-            user_account = await self.repository.get_account(
-                tenant_id=tenant_id,
-                owner_type="user",
-                owner_id=user_id,
+            user_account = (
+                accounts.get(("user", user_id))
+                if accounts is not None
+                else await self.repository.get_account(
+                    tenant_id=tenant_id,
+                    owner_type="user",
+                    owner_id=user_id,
+                )
             )
             if user_account is not None:
                 dimensions.append(("user", user_id, user_account.limit_bytes))

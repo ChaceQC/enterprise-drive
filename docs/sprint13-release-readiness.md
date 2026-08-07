@@ -9,7 +9,7 @@
 | 任务 | 发布门禁 | 当前候选状态 | 正式完成证据 |
 |---|---|---|---|
 | `REL-001` | 全产品 UAT | 清单已冻结，待候选环境逐项签字 | UAT 记录、缺陷关闭表、业务/技术签字 |
-| `REL-002` | 性能与安全 | SeaweedFS digest 扫描完成；`upload_complete` target 已通过；当前唯一完整 `mixed` 工件仅 `upload_init` 未通过，代码侧已完成一次查询优化，长稳和 High 风险签字待执行 | 性能报告、修复后最终 target/mixed 工件、soak 报告、SeaweedFS SBOM/漏洞报告、非阻断风险接受 |
+| `REL-002` | 性能与安全 | SeaweedFS digest 扫描完成；`upload_complete` target 已通过；最新 `mixed` 工件仍仅 `upload_init` 未通过，代码侧已完成 blob 单查并新增 quota 三维账户批量读取，长稳和 High 风险签字待执行 | 性能报告、修复后最终 target/mixed 工件、soak 报告、SeaweedFS SBOM/漏洞报告、非阻断风险接受 |
 | `REL-003` | 安装、升级与回滚 | SeaweedFS 备份恢复兼容已通过，待 `0.9.0 -> 1.0.0` 升级/回滚演练 | 升级时间线、备份/恢复、桌面自动回退证据 |
 | `REL-004` | 运维责任与 RPO/RTO | 模板已冻结，待生产责任人和实测值签字 | 值班表、告警验证、RPO/RTO 测量和接受记录 |
 | `REL-005` | `v1.0.0` 发布 | 候选版本与工件规范已冻结 | `main` 合并提交、tag、Release、工件清单、交接记录 |
@@ -83,17 +83,17 @@
   storage merge）P95 `600 ms`，端到端 P95 `650 ms`。同目录
   `complete_cleanup.json` 记录准备和清理 `2000/2000`。
 - `mixed`：
-  `backend/tmp/performance/20260805-sprint13-final-5725ad7/mixed-target-workers8-full/report.json`
-  共 45,535 个请求、0 失败，环境与 1,000,000 OpenSearch 文档/10,000,000 审计行
-  门禁均完整；`admin_audit` P95 `210 ms`、`file_list_permission_batch` P95
-  `300 ms`、`search` P95 `260 ms` 均通过，`upload_init` P95 `470 ms`（目标
-  `300 ms`），所以报告必须保持 `passed=false`。
+  `backend/tmp/performance/20260807-sprint13-a5e44af/mixed-target-workers8-final/report.json`
+  对应 `ca83d94`，共 43,403 个请求、0 失败，环境与 1,000,000 OpenSearch
+  文档/10,000,000 审计行门禁均完整；`admin_audit` P95 `240 ms`、
+  `file_list_permission_batch` P95 `340 ms`、`search` P95 `280 ms` 均通过，
+  `upload_init` P95 `540 ms`（目标 `300 ms`），所以报告必须保持
+  `passed=false`。旧 45,535 请求/470 ms 工件保留为历史对比。
 - 2026-08-07 已在 `backend/app/modules/upload/service.py` 合并新 hash 路径的两次
-  blob 查询。active 秒传与 deleting blob 拒绝的直接行为验证为 `2 passed`；
-  本轮没有重跑完整 mixed/upload-complete。
-- 提交 `e0f50a5` 已推送；`backend-ci` run `31134176332` 成功，受影响的
-  `changes` 路径通过，其余不受影响 job 按 scope 跳过。该 CI 结果不替代仍未通过的
-  `upload_init` target 性能工件。
+  blob 查询；active 秒传与 deleting blob 拒绝的直接行为验证为 `2 passed`。当前工作树
+  另有 quota 空间/租户/用户账户批量读取补丁，定向配额用例 `2 passed`，未运行性能负载。
+- 提交 `a5e44af` 已推送；`backend-ci` run `31135045950` 的 `changes` 与 backend
+  全部成功。该 CI 结果不替代仍未通过的 `upload_init` target 性能工件。
 - 随后发现原代码提交的 backend job 曾因并发取消，已在 `a5e44af` 中修复 pytest
   收集阶段的 Locust/gevent late monkey-patch，并定向重跑 backend CI
   `31135045950`；`changes` 与 backend 全部成功。该修复只作用于测试导入隔离，

@@ -8,8 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.core.config import Settings
+from app.modules.auth.models import User
 from app.modules.file.models import FileBlob, Node
 from app.modules.quota.models import QuotaAccount, QuotaLedger, QuotaPolicy
+from app.modules.quota.repository import QuotaRepository
 from tests.helpers import (
     client as client,
 )
@@ -49,6 +51,62 @@ async def _seed_blob(
             )
         )
         await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_quota_repository_batches_requested_owner_accounts(
+    session_factory: async_sessionmaker[AsyncSession],
+    settings: Settings,
+) -> None:
+    await seed_admin(session_factory, settings)
+    async with session_factory() as session:
+        user = (
+            await session.execute(select(User).where(User.username == settings.admin_username))
+        ).scalar_one()
+        space_id = UUID("00000000-0000-0000-0000-000000000001")
+        tenant_account = QuotaAccount(
+            tenant_id=user.tenant_id,
+            owner_type="tenant",
+            owner_id=user.tenant_id,
+            limit_bytes=2048,
+            used_bytes=256,
+        )
+        user_account = QuotaAccount(
+            tenant_id=user.tenant_id,
+            owner_type="user",
+            owner_id=user.id,
+            limit_bytes=1024,
+            used_bytes=128,
+        )
+        space_account = QuotaAccount(
+            tenant_id=user.tenant_id,
+            owner_type="space",
+            owner_id=space_id,
+            limit_bytes=4096,
+            used_bytes=512,
+        )
+        session.add_all([tenant_account, user_account, space_account])
+        await session.commit()
+
+        accounts = await QuotaRepository(session).get_accounts_by_owners(
+            tenant_id=user.tenant_id,
+            owners=[
+                ("space", space_id),
+                ("tenant", user.tenant_id),
+                ("user", user.id),
+                ("user", user.id),
+                ("user", UUID("00000000-0000-0000-0000-000000000099")),
+            ],
+        )
+
+    assert set(accounts) == {
+        ("space", space_id),
+        ("tenant", user.tenant_id),
+        ("user", user.id),
+    }
+    assert accounts[("space", space_id)].used_bytes == 512
+    assert accounts[("tenant", user.tenant_id)].used_bytes == 256
+    assert accounts[("user", user.id)].used_bytes == 128
 
 
 @pytest.mark.asyncio

@@ -223,11 +223,13 @@ uv run python -X utf8 -m performance.fixture cleanup `
 
 ### `mixed`（唯一未通过项）
 
-- 工件：
+- 最新有效工件：
+  `backend/tmp/performance/20260807-sprint13-a5e44af/mixed-target-workers8-final/report.json`
+- commit：`ca83d940290baca38f4eb1d55212a38a091233bd`；
+  应用镜像为 `enterprise-drive-backend:s13-candidate-a5e44af-20260807`。
+- 共 43,403 个请求、0 失败，目标数据和 workload 快照完整；旧的
   `backend/tmp/performance/20260805-sprint13-final-5725ad7/mixed-target-workers8-full/report.json`
-- commit：运行环境记录为 `3b065491a73997f7d13810692f5bd692c14b05f0`；
-  应用镜像为 `enterprise-drive-backend:s13-candidate-5725ad7-20260805`。
-- 共 45,535 个请求、0 失败，目标数据和 workload 快照完整。
+  （45,535 请求、470 ms）保留为历史对比，不再作为当前候选证据。
 - 结果：
 
   | 指标 | 样本 | P95 | 结论 |
@@ -237,10 +239,10 @@ uv run python -X utf8 -m performance.fixture cleanup `
   | `file_list_permission_batch` | 13,014 | 300 ms | 通过 |
   | `search` | 6,535 | 260 ms | 通过 |
   | `upload_abort_cleanup` | 6,391 | 360 ms | 观测 |
-  | `upload_init` | 6,391 | **470 ms** | **未通过** |
+  | `upload_init` | 6,269 | **540 ms** | **未通过** |
 
-- `upload_init` 平均 `260.6548 ms`、P50 `240 ms`、P99 `650 ms`、最大
-  `1020.2463 ms`，目标 P95 为 `300 ms`；因此当前 mixed `passed=false` 必须保留。
+- `upload_init` 平均 `284.0534 ms`、P50 `260 ms`、P99 `790 ms`、最大
+  `1421.9540 ms`，目标 P95 为 `300 ms`；因此当前 mixed `passed=false` 必须保留。
 
 ### 2026-08-07 代码侧最小优化
 
@@ -250,9 +252,10 @@ any-status 查询后按 `status` 分支：active 走原有秒传，非 active �
 `BLOB_DELETING`，无记录走 multipart。直接行为验证为 `2 passed`，Ruff、format 和
 `git diff --check` 通过。
 
-提交 `a5e44af` 已推送；定向重跑的 backend CI `31135045950` 全绿。本轮不把旧 mixed
-报告改写为通过，也不重复执行完整 mixed/upload-complete。只有在最终候选发布窗口才
-按同一规模重新生成替代工件。
+提交 `a5e44af` 已推送；定向重跑的 backend CI `31135045950` 全绿。随后在候选资源边界
+恢复后复核得到上面的 43,403 请求/540 ms 工件，本轮不把报告改写为通过，也不重复执行
+完整 mixed/upload-complete。当前工作树另有 quota 三维账户批量读取补丁；只有在形成实质
+修复后，才按同一规模重新生成替代工件。
 
 ## 后续运行边界
 
